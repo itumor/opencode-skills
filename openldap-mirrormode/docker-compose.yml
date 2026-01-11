@@ -13,7 +13,7 @@ services:
       LDAP_TLS_KEY_FILENAME: "ldap.key"
       LDAP_TLS_CA_CRT_FILENAME: "ca.crt"
     volumes:
-      - ./certs:/container/service/slapd/assets/certs:ro
+      - ./certs:/container/service/slapd/assets/certs
       - master_a_db:/var/lib/ldap
       - master_a_cfg:/etc/ldap/slapd.d
     networks: [ldapnet]
@@ -32,7 +32,7 @@ services:
       LDAP_TLS_KEY_FILENAME: "ldap.key"
       LDAP_TLS_CA_CRT_FILENAME: "ca.crt"
     volumes:
-      - ./certs:/container/service/slapd/assets/certs:ro
+      - ./certs:/container/service/slapd/assets/certs
       - master_b_db:/var/lib/ldap
       - master_b_cfg:/etc/ldap/slapd.d
     networks: [ldapnet]
@@ -51,7 +51,7 @@ services:
       LDAP_TLS_KEY_FILENAME: "ldap.key"
       LDAP_TLS_CA_CRT_FILENAME: "ca.crt"
     volumes:
-      - ./certs:/container/service/slapd/assets/certs:ro
+      - ./certs:/container/service/slapd/assets/certs
       - replica_a_db:/var/lib/ldap
       - replica_a_cfg:/etc/ldap/slapd.d
     networks: [ldapnet]
@@ -70,7 +70,7 @@ services:
       LDAP_TLS_KEY_FILENAME: "ldap.key"
       LDAP_TLS_CA_CRT_FILENAME: "ca.crt"
     volumes:
-      - ./certs:/container/service/slapd/assets/certs:ro
+      - ./certs:/container/service/slapd/assets/certs
       - replica_b_db:/var/lib/ldap
       - replica_b_cfg:/etc/ldap/slapd.d
     networks: [ldapnet]
@@ -80,7 +80,7 @@ services:
     container_name: ldap-write
     hostname: ldap-write
     volumes:
-      - ./haproxy/haproxy-write.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./haproxy/haproxy-write.cfg:/usr/local/etc/haproxy/haproxy.cfg
     ports:
       - "1389:1389"
       - "1636:1636"
@@ -94,7 +94,7 @@ services:
     container_name: ldap-read
     hostname: ldap-read
     volumes:
-      - ./haproxy/haproxy-read.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./haproxy/haproxy-read.cfg:/usr/local/etc/haproxy/haproxy.cfg
     ports:
       - "2389:2389"
       - "2636:2636"

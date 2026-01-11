@@ -50,3 +50,7 @@ openssl x509 -req -in ldap.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
 #   ca.crt, ldap.crt, ldap.key
 chmod 600 ldap.key
 echo "Certs generated in ./certs"
+
+chown -R 911:911 certs/
+chmod -R 600 certs/*.key
+chmod -R 644 certs/*.crt
