@@ -41,6 +41,9 @@ services:
     image: osixia/openldap:1.5.0
     container_name: ldap-replica-a
     hostname: ldap-replica-a
+    depends_on:
+      - ldap-master-a
+      - ldap-master-b
     environment:
       LDAP_ORGANISATION: "CAE Lab"
       LDAP_DOMAIN: "cae.local"
@@ -60,6 +63,9 @@ services:
     image: osixia/openldap:1.5.0
     container_name: ldap-replica-b
     hostname: ldap-replica-b
+    depends_on:
+      - ldap-master-a
+      - ldap-master-b
     environment:
       LDAP_ORGANISATION: "CAE Lab"
       LDAP_DOMAIN: "cae.local"
