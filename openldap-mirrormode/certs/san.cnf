@@ -1,0 +1,25 @@
+[ req ]
+default_bits       = 4096
+prompt             = no
+default_md         = sha256
+distinguished_name = dn
+req_extensions     = req_ext
+
+[ dn ]
+C=EG
+O=Lab-Org
+OU=LDAP
+CN=ldap-write
+
+[ req_ext ]
+subjectAltName = @alt_names
+
+[ alt_names ]
+DNS.1 = ldap-write
+DNS.2 = ldap-read
+DNS.3 = ldap-master-a
+DNS.4 = ldap-master-b
+DNS.5 = ldap-replica-a
+DNS.6 = ldap-replica-b
+DNS.7 = localhost
+IP.1  = 127.0.0.1

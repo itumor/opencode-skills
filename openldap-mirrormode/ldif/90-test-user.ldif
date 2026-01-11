@@ -1,0 +1,6 @@
+dn: uid=testuser,dc=cae,dc=local
+objectClass: inetOrgPerson
+cn: testuser
+sn: user
+uid: testuser
+userPassword: Test1234!

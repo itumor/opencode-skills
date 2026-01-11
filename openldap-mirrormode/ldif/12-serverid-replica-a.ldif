@@ -1,0 +1,4 @@
+dn: cn=config
+changetype: modify
+replace: olcServerID
+olcServerID: 3 ldap://ldap-replica-a

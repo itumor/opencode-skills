@@ -1,0 +1,117 @@
+services:
+  ldap-master-a:
+    image: osixia/openldap:1.5.0
+    container_name: ldap-master-a
+    hostname: ldap-master-a
+    environment:
+      LDAP_ORGANISATION: "CAE Lab"
+      LDAP_DOMAIN: "cae.local"
+      LDAP_ADMIN_PASSWORD: "admin"
+      LDAP_CONFIG_PASSWORD: "config"
+      LDAP_TLS: "true"
+      LDAP_TLS_CRT_FILENAME: "ldap.crt"
+      LDAP_TLS_KEY_FILENAME: "ldap.key"
+      LDAP_TLS_CA_CRT_FILENAME: "ca.crt"
+    volumes:
+      - ./certs:/container/service/slapd/assets/certs:ro
+      - master_a_db:/var/lib/ldap
+      - master_a_cfg:/etc/ldap/slapd.d
+    networks: [ldapnet]
+
+  ldap-master-b:
+    image: osixia/openldap:1.5.0
+    container_name: ldap-master-b
+    hostname: ldap-master-b
+    environment:
+      LDAP_ORGANISATION: "CAE Lab"
+      LDAP_DOMAIN: "cae.local"
+      LDAP_ADMIN_PASSWORD: "admin"
+      LDAP_CONFIG_PASSWORD: "config"
+      LDAP_TLS: "true"
+      LDAP_TLS_CRT_FILENAME: "ldap.crt"
+      LDAP_TLS_KEY_FILENAME: "ldap.key"
+      LDAP_TLS_CA_CRT_FILENAME: "ca.crt"
+    volumes:
+      - ./certs:/container/service/slapd/assets/certs:ro
+      - master_b_db:/var/lib/ldap
+      - master_b_cfg:/etc/ldap/slapd.d
+    networks: [ldapnet]
+
+  ldap-replica-a:
+    image: osixia/openldap:1.5.0
+    container_name: ldap-replica-a
+    hostname: ldap-replica-a
+    environment:
+      LDAP_ORGANISATION: "CAE Lab"
+      LDAP_DOMAIN: "cae.local"
+      LDAP_ADMIN_PASSWORD: "admin"
+      LDAP_CONFIG_PASSWORD: "config"
+      LDAP_TLS: "true"
+      LDAP_TLS_CRT_FILENAME: "ldap.crt"
+      LDAP_TLS_KEY_FILENAME: "ldap.key"
+      LDAP_TLS_CA_CRT_FILENAME: "ca.crt"
+    volumes:
+      - ./certs:/container/service/slapd/assets/certs:ro
+      - replica_a_db:/var/lib/ldap
+      - replica_a_cfg:/etc/ldap/slapd.d
+    networks: [ldapnet]
+
+  ldap-replica-b:
+    image: osixia/openldap:1.5.0
+    container_name: ldap-replica-b
+    hostname: ldap-replica-b
+    environment:
+      LDAP_ORGANISATION: "CAE Lab"
+      LDAP_DOMAIN: "cae.local"
+      LDAP_ADMIN_PASSWORD: "admin"
+      LDAP_CONFIG_PASSWORD: "config"
+      LDAP_TLS: "true"
+      LDAP_TLS_CRT_FILENAME: "ldap.crt"
+      LDAP_TLS_KEY_FILENAME: "ldap.key"
+      LDAP_TLS_CA_CRT_FILENAME: "ca.crt"
+    volumes:
+      - ./certs:/container/service/slapd/assets/certs:ro
+      - replica_b_db:/var/lib/ldap
+      - replica_b_cfg:/etc/ldap/slapd.d
+    networks: [ldapnet]
+
+  ldap-write:
+    image: haproxy:2.8
+    container_name: ldap-write
+    hostname: ldap-write
+    volumes:
+      - ./haproxy/haproxy-write.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "1389:1389"
+      - "1636:1636"
+    networks: [ldapnet]
+    depends_on:
+      - ldap-master-a
+      - ldap-master-b
+
+  ldap-read:
+    image: haproxy:2.8
+    container_name: ldap-read
+    hostname: ldap-read
+    volumes:
+      - ./haproxy/haproxy-read.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "2389:2389"
+      - "2636:2636"
+    networks: [ldapnet]
+    depends_on:
+      - ldap-replica-a
+      - ldap-replica-b
+
+networks:
+  ldapnet:
+
+volumes:
+  master_a_db:
+  master_a_cfg:
+  master_b_db:
+  master_b_cfg:
+  replica_a_db:
+  replica_a_cfg:
+  replica_b_db:
+  replica_b_cfg:

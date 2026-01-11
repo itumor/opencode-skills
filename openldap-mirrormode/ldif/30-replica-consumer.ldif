@@ -1,0 +1,8 @@
+dn: olcDatabase={1}mdb,cn=config
+changetype: modify
+add: olcSyncRepl
+olcSyncRepl: rid=101 provider=ldap://ldap-master-a:389 bindmethod=simple binddn="cn=replicator,dc=cae,dc=local" credentials=replpass searchbase="dc=cae,dc=local" type=refreshAndPersist retry="5 5 300 5" timeout=1
+olcSyncRepl: rid=102 provider=ldap://ldap-master-b:389 bindmethod=simple binddn="cn=replicator,dc=cae,dc=local" credentials=replpass searchbase="dc=cae,dc=local" type=refreshAndPersist retry="5 5 300 5" timeout=1
+-
+add: olcUpdateRef
+olcUpdateRef: ldap://ldap-write:1389

@@ -1,0 +1,6 @@
+dn: cn=replicator,dc=cae,dc=local
+objectClass: simpleSecurityObject
+objectClass: organizationalRole
+cn: replicator
+description: Replication bind DN
+userPassword: replpass
