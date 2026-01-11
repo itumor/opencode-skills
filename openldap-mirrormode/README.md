@@ -138,6 +138,19 @@ EOF
 docker start ldap-master-a
 ```
 
+
+## How to run
+```bash
+chmod +x scripts/test-ldap-cluster.sh
+./scripts/test-ldap-cluster.sh
+```
+
+## Optional failover test (stops master-a temporarily):
+```bash
+./scripts/test-ldap-cluster.sh --failover
+```
+
+
 ## Notes
 
 - Base DN is `dc=cae,dc=local`. Admin DN is `cn=admin,dc=cae,dc=local`.
