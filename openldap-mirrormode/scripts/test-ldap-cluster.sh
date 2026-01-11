@@ -63,7 +63,8 @@ Examples:
 EOF
 }
 
-for arg in "${@:-}"; do
+for arg in "$@"; do
+  [[ -z "$arg" ]] && continue
   case "$arg" in
     --failover) RUN_FAILOVER=1 ;;
     --no-cleanup) RUN_CLEANUP=0 ;;
@@ -119,7 +120,8 @@ ldap_whoami() {
 ldap_get_contextcsn() {
   local uri="$1"
   docker_exec_ldap ldapsearch -LLL -x -H "$uri" -D "$ADMIN_DN" -w "$ADMIN_PW" \
-    -s base -b "$BASE_DN" contextCSN 2>/dev/null | awk -F': ' '/^contextCSN:/ {print $2}'
+    -s base -b "$BASE_DN" "(objectClass=*)" + 2>/dev/null \
+    | awk -F': ' '/^contextCSN:/ {print $2; exit}'
 }
 
 ldap_entry_exists() {
@@ -238,14 +240,14 @@ printf "  Replica B : %s\n" "$(ldap_get_contextcsn "$REPLICA_B_LDAP_URI" | head 
 echo
 
 # 5) Write test through WRITE VIP + replication presence tests
-UID="cluster-test-$(date +%Y%m%d%H%M%S)-$RANDOM"
-CN="$UID"
+TEST_UID="cluster-test-$(date +%Y%m%d%H%M%S)-$RANDOM"
+CN="$TEST_UID"
 SN="v1"
 
 # Ensure clean
-ldap_delete_user "$WRITE_LDAP_URI" "$UID"
+ldap_delete_user "$WRITE_LDAP_URI" "$TEST_UID"
 
-if ldap_add_user "$WRITE_LDAP_URI" "$UID" "$SN" "$CN"; then
+if ldap_add_user "$WRITE_LDAP_URI" "$TEST_UID" "$SN" "$CN"; then
   record_pass "Write (add user) via WRITE VIP"
 else
   record_fail "Write (add user) via WRITE VIP"
@@ -254,25 +256,25 @@ fi
 sleep "$REPL_WAIT_SECONDS"
 
 # Existence checks across nodes (replication signal)
-if ldap_entry_exists "$MASTER_A_LDAP_URI" "$UID"; then
+if ldap_entry_exists "$MASTER_A_LDAP_URI" "$TEST_UID"; then
   record_pass "Entry exists on Master A"
 else
   record_fail "Entry exists on Master A"
 fi
 
-if ldap_entry_exists "$MASTER_B_LDAP_URI" "$UID"; then
+if ldap_entry_exists "$MASTER_B_LDAP_URI" "$TEST_UID"; then
   record_pass "Entry exists on Master B (master-master replication)"
 else
   record_fail "Entry exists on Master B (master-master replication)"
 fi
 
-if ldap_entry_exists "$REPLICA_A_LDAP_URI" "$UID"; then
+if ldap_entry_exists "$REPLICA_A_LDAP_URI" "$TEST_UID"; then
   record_pass "Entry exists on Replica A (replication)"
 else
   record_fail "Entry exists on Replica A (replication)"
 fi
 
-if ldap_entry_exists "$REPLICA_B_LDAP_URI" "$UID"; then
+if ldap_entry_exists "$REPLICA_B_LDAP_URI" "$TEST_UID"; then
   record_pass "Entry exists on Replica B (replication)"
 else
   record_fail "Entry exists on Replica B (replication)"
@@ -281,7 +283,7 @@ fi
 # 6) Read-only enforcement via READ VIP (expected failure)
 # If replicas are configured olcReadOnly=TRUE, a modify through READ VIP should fail ("unwilling to perform").
 # We treat FAILURE of ldapmodify here as PASS (read-only enforced).
-if ldap_modify_sn "$READ_LDAP_URI" "$UID" "should-not-work" 2>/dev/null; then
+if ldap_modify_sn "$READ_LDAP_URI" "$TEST_UID" "should-not-work" 2>/dev/null; then
   record_fail "READ VIP rejects writes (read-only) [unexpectedly allowed]"
 else
   record_pass "READ VIP rejects writes (read-only enforced)"
@@ -298,7 +300,7 @@ if [[ "$RUN_FAILOVER" -eq 1 ]]; then
   fi
 
   # Modify through WRITE VIP
-  if ldap_modify_sn "$WRITE_LDAP_URI" "$UID" "v2-after-failover"; then
+  if ldap_modify_sn "$WRITE_LDAP_URI" "$TEST_UID" "v2-after-failover"; then
     record_pass "Write via WRITE VIP succeeds during Master A down (failover ok)"
   else
     record_fail "Write via WRITE VIP succeeds during Master A down (failover ok)"
@@ -314,7 +316,7 @@ if [[ "$RUN_FAILOVER" -eq 1 ]]; then
 
   # Ensure Master A eventually sees the changed sn
   if docker_exec_ldap ldapsearch -LLL -x -H "$MASTER_A_LDAP_URI" -D "$ADMIN_DN" -w "$ADMIN_PW" \
-      -b "$BASE_DN" "(uid=${UID})" sn 2>/dev/null | grep -q "^sn: v2-after-failover$"; then
+      -b "$BASE_DN" "(uid=${TEST_UID})" sn 2>/dev/null | grep -q "^sn: v2-after-failover$"; then
     record_pass "Master A caught up after failover (replication back)"
   else
     record_fail "Master A caught up after failover (replication back)"
@@ -323,10 +325,10 @@ fi
 
 # 8) Cleanup
 if [[ "$RUN_CLEANUP" -eq 1 ]]; then
-  ldap_delete_user "$WRITE_LDAP_URI" "$UID"
+  ldap_delete_user "$WRITE_LDAP_URI" "$TEST_UID"
   record_pass "Cleanup: deleted test entry"
 else
-  yellow "Skipping cleanup; test user remains: uid=${UID},${BASE_DN}"
+  yellow "Skipping cleanup; test user remains: uid=${TEST_UID},${BASE_DN}"
 fi
 
 echo

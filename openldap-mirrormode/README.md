@@ -143,6 +143,8 @@ docker start ldap-master-a
 ```bash
 chmod +x scripts/test-ldap-cluster.sh
 ./scripts/test-ldap-cluster.sh
+BASE_DN="dc=example,dc=org" ADMIN_PW="admin" ./scripts/test-ldap-cluster.sh
+
 ```
 
 ## Optional failover test (stops master-a temporarily):
