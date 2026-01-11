@@ -1,6 +1,6 @@
-dn: uid=testuser6,dc=cae,dc=local
+dn: uid=testuser7,dc=cae,dc=local
 objectClass: inetOrgPerson
-cn: testuser6
+cn: testuser7
 sn: user
-uid: testuser6
+uid: testuser7
 userPassword: Test1234!
