@@ -152,7 +152,7 @@ ldapadd -x -H ldap://localhost:1389 \
 
 ldapsearch -x -H ldap://localhost:2389 \
   -D "cn=admin,dc=cae,dc=local" -w admin \
-  -b "dc=cae,dc=local" "(uid=testuser)"
+  -b "dc=cae,dc=local" "(uid=testuser5)"
 ```
 
 ### 3) Failover test (write VIP)

@@ -1,0 +1,80 @@
+version: "3.8"
+
+services:
+  ldap1:
+    image: osixia/openldap:1.5.0
+    container_name: ldap1
+    hostname: ldap1.example.org
+    environment:
+      LDAP_ORGANISATION: "Example Inc."
+      LDAP_DOMAIN: "example.org"
+      LDAP_ADMIN_PASSWORD: "admin"
+      LDAP_CONFIG_PASSWORD: "config"
+
+      # Enable replication (multi-provider)
+      LDAP_REPLICATION: "true"
+      # IMPORTANT: must include BOTH hostnames (and match container hostnames)
+      LDAP_REPLICATION_HOSTS: "#PYTHON2BASH:['ldap://ldap1.example.org','ldap://ldap2.example.org']"
+
+      # Optional but recommended for containerized labs:
+      LDAP_REMOVE_CONFIG_AFTER_SETUP: "false"
+      LDAP_TLS: "false"
+      LDAP_REPLICATION_TLS: "false"
+
+    volumes:
+      - ldap1_db:/var/lib/ldap
+      - ldap1_config:/etc/ldap/slapd.d
+      # Custom bootstrap LDIFs (seed data)
+      - ./ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/myldif
+    networks:
+      ldapnet:
+        aliases:
+          - ldap1.example.org
+
+  ldap2:
+    image: osixia/openldap:1.5.0
+    container_name: ldap2
+    hostname: ldap2.example.org
+    environment:
+      LDAP_ORGANISATION: "Example Inc."
+      LDAP_DOMAIN: "example.org"
+      LDAP_ADMIN_PASSWORD: "admin"
+      LDAP_CONFIG_PASSWORD: "config"
+
+      LDAP_REPLICATION: "true"
+      LDAP_REPLICATION_HOSTS: "#PYTHON2BASH:['ldap://ldap1.example.org','ldap://ldap2.example.org']"
+
+      LDAP_REMOVE_CONFIG_AFTER_SETUP: "false"
+      LDAP_TLS: "false"
+      LDAP_REPLICATION_TLS: "false"
+    volumes:
+      - ldap2_db:/var/lib/ldap
+      - ldap2_config:/etc/ldap/slapd.d
+      - ./ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/myldif
+    networks:
+      ldapnet:
+        aliases:
+          - ldap2.example.org
+
+  # Frontend to provide "HA master" behavior (single-writer routing)
+  haproxy:
+    image: haproxy:2.9
+    container_name: ldap-haproxy
+    depends_on:
+      - ldap1
+      - ldap2
+    ports:
+      - "389:389"
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg
+    networks:
+      - ldapnet
+
+networks:
+  ldapnet:
+
+volumes:
+  ldap1_db:
+  ldap1_config:
+  ldap2_db:
+  ldap2_config:
