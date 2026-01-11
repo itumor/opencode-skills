@@ -48,6 +48,20 @@ $(cat ldif/01-replicator.ldif)
 EOF
 ```
 
+### 1b) Allow replicator DN to read (required for syncrepl)
+
+Without this ACL, the replicator bind succeeds but searches return `No such object (32)`, so replicas never receive updates.
+
+```bash
+docker exec -i ldap-master-a ldapmodify -Y EXTERNAL -H ldapi:/// <<EOF
+$(cat ldif/02-replicator-acl.ldif)
+EOF
+
+docker exec -i ldap-master-b ldapmodify -Y EXTERNAL -H ldapi:/// <<EOF
+$(cat ldif/02-replicator-acl.ldif)
+EOF
+```
+
 ### 2) Set server IDs
 
 ```bash
@@ -71,6 +85,14 @@ EOF
 ### 3) Enable syncprov on masters
 
 ```bash
+docker exec -i ldap-master-a ldapmodify -Y EXTERNAL -H ldapi:/// <<EOF
+$(cat ldif/19-load-syncprov.ldif)
+EOF
+
+docker exec -i ldap-master-b ldapmodify -Y EXTERNAL -H ldapi:/// <<EOF
+$(cat ldif/19-load-syncprov.ldif)
+EOF
+
 docker exec -i ldap-master-a ldapadd -Y EXTERNAL -H ldapi:/// <<EOF
 $(cat ldif/20-syncprov-master.ldif)
 EOF

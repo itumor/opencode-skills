@@ -33,12 +33,34 @@ apply_ldif() {
   docker exec -i "$container" "$@" < "$path"
 }
 
+apply_ldif_idempotent() {
+  local container="$1"
+  local path="$2"
+  shift 2
+  require_file "$path"
+  echo "Applying $(basename "$path") to ${container} (idempotent)"
+  local out
+  if ! out="$(docker exec -i "$container" "$@" < "$path" 2>&1)"; then
+    if grep -qiE 'already exists|value #[0-9]+ already exists' <<<"$out"; then
+      echo "  Skipping (already applied)"
+      return 0
+    fi
+    echo "$out" >&2
+    return 1
+  fi
+}
+
 echo "Applying replication LDIFs from ${LDIF_DIR}"
 
-apply_ldif ldap-master-a "$LDIF_DIR/01-replicator.ldif" \
+apply_ldif_idempotent ldap-master-a "$LDIF_DIR/01-replicator.ldif" \
   ldapadd -x -H ldap://localhost:389 -D "$ADMIN_DN" -w "$ADMIN_PW"
-apply_ldif ldap-master-b "$LDIF_DIR/01-replicator.ldif" \
+apply_ldif_idempotent ldap-master-b "$LDIF_DIR/01-replicator.ldif" \
   ldapadd -x -H ldap://localhost:389 -D "$ADMIN_DN" -w "$ADMIN_PW"
+
+apply_ldif ldap-master-a "$LDIF_DIR/02-replicator-acl.ldif" \
+  ldapmodify -Y EXTERNAL -H ldapi:///
+apply_ldif ldap-master-b "$LDIF_DIR/02-replicator-acl.ldif" \
+  ldapmodify -Y EXTERNAL -H ldapi:///
 
 apply_ldif ldap-master-a "$LDIF_DIR/10-serverid-master-a.ldif" \
   ldapmodify -Y EXTERNAL -H ldapi:///
@@ -49,9 +71,14 @@ apply_ldif ldap-replica-a "$LDIF_DIR/12-serverid-replica-a.ldif" \
 apply_ldif ldap-replica-b "$LDIF_DIR/13-serverid-replica-b.ldif" \
   ldapmodify -Y EXTERNAL -H ldapi:///
 
-apply_ldif ldap-master-a "$LDIF_DIR/20-syncprov-master.ldif" \
+apply_ldif_idempotent ldap-master-a "$LDIF_DIR/19-load-syncprov.ldif" \
+  ldapmodify -Y EXTERNAL -H ldapi:///
+apply_ldif_idempotent ldap-master-b "$LDIF_DIR/19-load-syncprov.ldif" \
+  ldapmodify -Y EXTERNAL -H ldapi:///
+
+apply_ldif_idempotent ldap-master-a "$LDIF_DIR/20-syncprov-master.ldif" \
   ldapadd -Y EXTERNAL -H ldapi:///
-apply_ldif ldap-master-b "$LDIF_DIR/20-syncprov-master.ldif" \
+apply_ldif_idempotent ldap-master-b "$LDIF_DIR/20-syncprov-master.ldif" \
   ldapadd -Y EXTERNAL -H ldapi:///
 
 apply_ldif ldap-master-a "$LDIF_DIR/21-mirrormode-master-a.ldif" \
