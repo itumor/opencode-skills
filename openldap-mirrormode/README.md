@@ -19,6 +19,17 @@ docker compose up -d
 
 ## Configure replication
 
+### Automated setup
+
+If you prefer not to type every `docker exec … ldapadd/ldapmodify` command, run:
+
+```bash
+chmod +x scripts/apply-replication-ldifs.sh
+./scripts/apply-replication-ldifs.sh
+```
+
+It executes the same LDIF files described below (replicator user, server IDs, syncprov, MirrorMode, read-only consumers).
+
 ### 1) Create replicator user on both masters
 
 ```bash

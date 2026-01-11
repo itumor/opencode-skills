@@ -120,7 +120,7 @@ ldap_whoami() {
 ldap_get_contextcsn() {
   local uri="$1"
   docker_exec_ldap ldapsearch -LLL -x -H "$uri" -D "$ADMIN_DN" -w "$ADMIN_PW" \
-    -s base -b "$BASE_DN" "(objectClass=*)" + 2>/dev/null \
+    -s base -b "$BASE_DN" "(objectClass=*)" contextCSN + 2>/dev/null \
     | awk -F': ' '/^contextCSN:/ {print $2; exit}'
 }
 
@@ -129,6 +129,33 @@ ldap_entry_exists() {
   local uid="$2"
   docker_exec_ldap ldapsearch -LLL -x -H "$uri" -D "$ADMIN_DN" -w "$ADMIN_PW" \
     -b "$BASE_DN" "(uid=${uid})" dn 2>/dev/null | grep -q "^dn:"
+}
+
+wait_for_entry() {
+  local uri="$1"
+  local uid="$2"
+  local start=$SECONDS
+  local deadline=$((start + REPL_WAIT_SECONDS))
+  while true; do
+    if ldap_entry_exists "$uri" "$uid"; then
+      return 0
+    fi
+    if (( SECONDS >= deadline )); then
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+check_entry_on() {
+  local message="$1"
+  local uri="$2"
+  local uid="$3"
+  if wait_for_entry "$uri" "$uid"; then
+    record_pass "$message"
+  else
+    record_fail "$message"
+  fi
 }
 
 ldap_add_user() {
@@ -256,29 +283,10 @@ fi
 sleep "$REPL_WAIT_SECONDS"
 
 # Existence checks across nodes (replication signal)
-if ldap_entry_exists "$MASTER_A_LDAP_URI" "$TEST_UID"; then
-  record_pass "Entry exists on Master A"
-else
-  record_fail "Entry exists on Master A"
-fi
-
-if ldap_entry_exists "$MASTER_B_LDAP_URI" "$TEST_UID"; then
-  record_pass "Entry exists on Master B (master-master replication)"
-else
-  record_fail "Entry exists on Master B (master-master replication)"
-fi
-
-if ldap_entry_exists "$REPLICA_A_LDAP_URI" "$TEST_UID"; then
-  record_pass "Entry exists on Replica A (replication)"
-else
-  record_fail "Entry exists on Replica A (replication)"
-fi
-
-if ldap_entry_exists "$REPLICA_B_LDAP_URI" "$TEST_UID"; then
-  record_pass "Entry exists on Replica B (replication)"
-else
-  record_fail "Entry exists on Replica B (replication)"
-fi
+check_entry_on "Entry exists on Master A" "$MASTER_A_LDAP_URI" "$TEST_UID"
+check_entry_on "Entry exists on Master B (master-master replication)" "$MASTER_B_LDAP_URI" "$TEST_UID"
+check_entry_on "Entry exists on Replica A (replication)" "$REPLICA_A_LDAP_URI" "$TEST_UID"
+check_entry_on "Entry exists on Replica B (replication)" "$REPLICA_B_LDAP_URI" "$TEST_UID"
 
 # 6) Read-only enforcement via READ VIP (expected failure)
 # If replicas are configured olcReadOnly=TRUE, a modify through READ VIP should fail ("unwilling to perform").
