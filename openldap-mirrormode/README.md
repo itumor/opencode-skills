@@ -146,6 +146,7 @@ ldapwhoami -x -H ldap://localhost:2389 -D "cn=admin,dc=cae,dc=local" -w admin
 ### 2) Add and read a test user
 
 ```bash
+
 ldapadd -x -H ldap://localhost:1389 \
   -D "cn=admin,dc=cae,dc=local" -w admin \
   -f ldif/90-test-user.ldif

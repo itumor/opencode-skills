@@ -1,0 +1,13 @@
+dn: uid=testuser11,ou=people,dc=cae,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: top
+cn: Test User
+sn: User
+uid: testuser11
+uidNumber: 10005
+gidNumber: 10000
+homeDirectory: /home/testuser11
+loginShell: /bin/bash
+mail: testuser11@cae.local
+userPassword: testpassword
