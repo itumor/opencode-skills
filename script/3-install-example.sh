@@ -1,3 +1,4 @@
+#replace EXAMPLE databse first with the one under Exampledb
 cd /opt/symas/share/symas
 
 # Select option 1: cn=config
