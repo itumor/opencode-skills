@@ -84,7 +84,7 @@ CONFIGDIR=/opt/symas/etc/openldap/slapd.d
 
 SLAPD_GROUP=root
 
-TESTSEARCH="$BIN/ldapsearch -x -H ldap://localhost:389/ -b dc=eab,dc=bank,dc=local -D dc=eab,dc=bank,dc=local -w secret"
+TESTSEARCH="$BIN/ldapsearch -x -H ldap://localhost:389/ -b cn=admin,dc=eab,dc=bank,dc=local -D dc=eab,dc=bank,dc=local -w secret"
 
 cat <<EOF
 
@@ -227,11 +227,11 @@ access to *
 #######################################################################
 database    mdb
 suffix      "dc=eab,dc=bank,dc=local"
-rootdn      "dc=eab,dc=bank,dc=local"
+rootdn      "cn=admin,dc=eab,dc=bank,dc=local"
 # Cleartext passwords, especially for the rootdn, should
 # be avoided. See slappasswd(8) and slapd.conf(5) for details describing
 # the creation of encrypted passwords.
-rootpw      secret
+rootpw      {SSHA}MWDk53K4wiut5A9U361jzCp4Rr//iBmv
 
 # Indices to maintain
 
@@ -299,7 +299,7 @@ olcAccess: {1}to *  by self write  by sockurl.exact="ldapi:///" write  by users 
 dn: olcDatabase={0}config,cn=config
 objectClass: olcDatabaseConfig
 olcDatabase: {0}config
-olcRootPW: secret
+olcRootPW: {SSHA}MWDk53K4wiut5A9U361jzCp4Rr//iBmv
 olcAccess: {0}to *  by * none
 
 dn: olcDatabase={1}mdb,cn=config
@@ -307,8 +307,8 @@ objectClass: olcDatabaseConfig
 objectClass: olcMdbConfig
 olcDatabase: {1}mdb
 olcSuffix: dc=eab,dc=bank,dc=local
-olcRootDN: cn=admin,dc=eab,dc=bank,dc=local
-olcRootPw: secret
+olcRootDN: dc=eab,dc=bank,dc=local
+olcRootPw: {SSHA}MWDk53K4wiut5A9U361jzCp4Rr//iBmv
 olcDbDirectory: /var/symas/openldap-data/example
 olcDbIndex: default eq
 olcDbIndex: objectClass
@@ -323,6 +323,17 @@ olcMonitoring: FALSE
 EOF
 
 fi
+
+echo "Creating the example database..."
+$SBIN/slapadd -q <<EOF
+dn: dc=eab,dc=bank,dc=local
+objectClass: top
+objectClass: organization
+objectClass: dcObject
+o: eab
+dc: eab
+
+EOF
 
 
 echo $STARTSERVER
