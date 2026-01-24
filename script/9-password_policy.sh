@@ -8,4 +8,5 @@ olcModuleLoad: ppolicy
 
 EOF
 
-ldapadd -Y EXTERNAL -H ldapi:/// -f /tmp/pw_load_module.ldif
+#ldapadd -Y EXTERNAL -H ldapi:/// -f /tmp/pw_load_module.ldif
+ldapadd -x -D "cn=config" -W -H ldap:/// -f /tmp/pw_load_module.ldif
