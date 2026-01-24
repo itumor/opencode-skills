@@ -184,16 +184,7 @@ reset_admin_password() {
     echo "Bind failed and password reset requires root. Re-run with sudo." >&2
     exit 1
   fi
-require_cmd ldapmodify
-
-ensure_selinux_labels() {
-  if command -v semanage >/dev/null 2>&1; then
-    semanage fcontext -a -t slapd_config_t "/opt/symas/etc/openldap(/.*)?" 2>/dev/null || true
-  fi
-  if command -v restorecon >/dev/null 2>&1; then
-    restorecon -Rv /opt/symas/etc/openldap >/dev/null 2>&1 || true
-  fi
-}
+  require_cmd ldapmodify
 
   local db_dn=""
   local out rc
@@ -206,7 +197,6 @@ ensure_selinux_labels() {
   fi
 
   if [[ -n "$db_dn" ]]; then
-    ensure_selinux_labels
     if ldapmodify -Y EXTERNAL -H ldapi:/// <<EOF
 dn: ${db_dn}
 changetype: modify
