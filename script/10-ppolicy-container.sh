@@ -30,5 +30,5 @@ pwdSafeModify: FALSE
 
 EOF
 
-#ldapadd -Y EXTERNAL -H ldapi:/// -f /tmp/pw_load_module.ldif
-ldapadd -x   -D "cn=admin,dc=eab,dc=bank,dc=local"   -W   -H ldap://localhost   -f /tmp/ppolicy-container.ldif
+#/opt/symas/bin/ldapadd -Y EXTERNAL -H ldapi:/// -f /tmp/pw_load_module.ldif
+/opt/symas/bin/ldapadd -x   -D "cn=admin,dc=eab,dc=bank,dc=local"   -W   -H ldap://localhost   -f /tmp/ppolicy-container.ldif
