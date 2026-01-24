@@ -231,7 +231,7 @@ rootdn      "cn=admin,dc=eab,dc=bank,dc=local"
 # Cleartext passwords, especially for the rootdn, should
 # be avoided. See slappasswd(8) and slapd.conf(5) for details describing
 # the creation of encrypted passwords.
-rootpw      {SSHA}MWDk53K4wiut5A9U361jzCp4Rr//iBmv
+rootpw      TheN1le1
 
 # Indices to maintain
 
@@ -299,7 +299,7 @@ olcAccess: {1}to *  by self write  by sockurl.exact="ldapi:///" write  by users 
 dn: olcDatabase={0}config,cn=config
 objectClass: olcDatabaseConfig
 olcDatabase: {0}config
-olcRootPW: {SSHA}MWDk53K4wiut5A9U361jzCp4Rr//iBmv
+olcRootPW: TheN1le1
 olcAccess: {0}to *  by * none
 
 dn: olcDatabase={1}mdb,cn=config
@@ -307,8 +307,8 @@ objectClass: olcDatabaseConfig
 objectClass: olcMdbConfig
 olcDatabase: {1}mdb
 olcSuffix: dc=eab,dc=bank,dc=local
-olcRootDN: dc=eab,dc=bank,dc=local
-olcRootPw: {SSHA}MWDk53K4wiut5A9U361jzCp4Rr//iBmv
+olcRootDN: cn=admin,dc=eab,dc=bank,dc=local
+olcRootPw: TheN1le1
 olcDbDirectory: /var/symas/openldap-data/example
 olcDbIndex: default eq
 olcDbIndex: objectClass
