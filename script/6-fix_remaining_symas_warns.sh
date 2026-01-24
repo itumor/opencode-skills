@@ -51,8 +51,16 @@ if [[ ! -f "$CERT" || ! -f "$KEY" ]]; then
   chmod 600 "$KEY"
 fi
 
-### 4. Enable TLS + LDAPS in cn=config
-cat <<EOF | ldapmodify -Y EXTERNAL -H ldapi:///
+### 4. Ensure slapd listens on ldaps:// + ldapi://
+DEFAULTS="/etc/default/symas-openldap"
+if [[ -f "$DEFAULTS" ]]; then
+  sed -i 's|^SLAPD_URLS=.*|SLAPD_URLS="ldap:/// ldaps:/// ldapi:///"|' "$DEFAULTS"
+fi
+
+### 5. Enable TLS + LDAPS in cn=config (online first, fallback to offline edit)
+set +e
+ldapmodify_out="$(
+  cat <<EOF | ldapmodify -Y EXTERNAL -H ldapi:/// 2>&1
 dn: cn=config
 changetype: modify
 replace: olcTLSCertificateFile
@@ -61,10 +69,35 @@ olcTLSCertificateFile: $CERT
 replace: olcTLSCertificateKeyFile
 olcTLSCertificateKeyFile: $KEY
 EOF
+)"
+ldapmodify_rc=$?
+set -e
 
-### 5. Ensure slapd listens on ldaps://
-DEFAULTS="/etc/default/symas-openldap"
-sed -i 's|^SLAPD_URLS=.*|SLAPD_URLS="ldap:/// ldaps:/// ldapi:///"|' "$DEFAULTS"
+if [[ $ldapmodify_rc -ne 0 ]]; then
+  echo "[WARN] ldapmodify failed (rc=$ldapmodify_rc). Output:"
+  echo "$ldapmodify_out"
+  echo "[INFO] Falling back to offline cn=config edit"
+
+  CONFIG_LDIF="/opt/symas/etc/openldap/slapd.d/cn=config.ldif"
+  if [[ ! -f "$CONFIG_LDIF" ]]; then
+    echo "[FATAL] cn=config LDIF not found at $CONFIG_LDIF"
+    exit 1
+  fi
+
+  systemctl stop symas-openldap-servers || true
+
+  if grep -q '^olcTLSCertificateFile:' "$CONFIG_LDIF"; then
+    sed -i "s|^olcTLSCertificateFile:.*|olcTLSCertificateFile: $CERT|" "$CONFIG_LDIF"
+  else
+    sed -i "/^dn: cn=config$/a olcTLSCertificateFile: $CERT" "$CONFIG_LDIF"
+  fi
+
+  if grep -q '^olcTLSCertificateKeyFile:' "$CONFIG_LDIF"; then
+    sed -i "s|^olcTLSCertificateKeyFile:.*|olcTLSCertificateKeyFile: $KEY|" "$CONFIG_LDIF"
+  else
+    sed -i "/^dn: cn=config$/a olcTLSCertificateKeyFile: $KEY" "$CONFIG_LDIF"
+  fi
+fi
 
 ### 6. Restart cleanly
 systemctl daemon-reload

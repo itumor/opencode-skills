@@ -5,10 +5,14 @@ ssh root@ip
 
 node 1 192.168.64.5/24
 
+ssh root@192.168.64.5 "rm -rf /root/script"
 scp -r ./script root@192.168.64.5:/root/
+ssh root@192.168.64.5 "chmod +x -R /root/script"
+
 ssh root@192.168.64.5
 mkdir script
-chmod +x -R script/
+
+cd ..
 cd script
 chmod +x install-symas-openldap-all-in-one.sh
 sudo ./install-symas-openldap-all-in-one.sh

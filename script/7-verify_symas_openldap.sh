@@ -28,6 +28,25 @@ require_root() {
   fi
 }
 
+ensure_symas_env() {
+  local prof="/etc/profile.d/symas_env.sh"
+  if [[ -f "$prof" ]]; then
+    # shellcheck source=/etc/profile.d/symas_env.sh
+    source "$prof"
+  fi
+
+  if [[ ":${PATH}:" != *":/opt/symas/bin:"* ]]; then
+    export PATH="/opt/symas/bin:${PATH}"
+  fi
+  if [[ ":${PATH}:" != *":/opt/symas/sbin:"* ]]; then
+    export PATH="/opt/symas/sbin:${PATH}"
+  fi
+
+  if [[ -z "${LDAPCONF:-}" ]]; then
+    export LDAPCONF="/opt/symas/etc/openldap/ldap.conf"
+  fi
+}
+
 detect_unit() {
   # Return best-guess unit name via stdout.
   # Prefers enabled/known units: slapd, symas-openldap-servers
@@ -52,7 +71,10 @@ check_cmd_version() {
   local label="$2"
   if [[ -x "$bin" ]]; then
     local vv=""
-    vv="$("$bin" -VV 2>/dev/null | head -n 1 || true)"
+    vv="$("$bin" -VV 2>&1 | head -n 1 || true)"
+    if [[ -z "$vv" ]]; then
+      vv="$("$bin" -V 2>&1 | head -n 1 || true)"
+    fi
     if [[ -n "$vv" ]]; then
       ok "$label: $vv"
     else
@@ -243,7 +265,10 @@ check_binaries() {
 
   if [[ -x /opt/symas/bin/ldapsearch ]]; then
     local vv=""
-    vv="$(/opt/symas/bin/ldapsearch -VV 2>/dev/null | head -n 1 || true)"
+    vv="$(/opt/symas/bin/ldapsearch -VV 2>&1 | head -n 1 || true)"
+    if [[ -z "$vv" ]]; then
+      vv="$(/opt/symas/bin/ldapsearch -V 2>&1 | head -n 1 || true)"
+    fi
     [[ -n "$vv" ]] && ok "ldapsearch (Symas): $vv" || warn "ldapsearch present but couldn't read version"
   else
     warn "ldapsearch not found at /opt/symas/bin/ldapsearch"
@@ -277,9 +302,10 @@ check_service() {
 }
 
 main() {
-  require_root
+require_root
+ensure_symas_env
 
-  section "Host basics"
+section "Host basics"
   if [[ -f /etc/redhat-release ]]; then
     ok "OS: $(cat /etc/redhat-release)"
   else

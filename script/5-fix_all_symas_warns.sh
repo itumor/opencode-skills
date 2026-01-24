@@ -18,12 +18,17 @@ if [[ ! -f "$ENV_FILE" ]]; then
 if [ -d "/opt/symas" ]; then
   export LDAPCONF=/opt/symas/etc/openldap/ldap.conf
   export PATH=/opt/symas/bin:/opt/symas/sbin:$PATH
-  export MANPATH=$MANPATH:/opt/symas/share/man
+  export MANPATH="${MANPATH:+$MANPATH:}/opt/symas/share/man"
 fi
 EOF
   chmod +x "$ENV_FILE"
 else
   echo "[OK] $ENV_FILE already exists"
+  if grep -q 'export MANPATH=\$MANPATH:/opt/symas/share/man' "$ENV_FILE"; then
+    sed -i 's|export MANPATH=\$MANPATH:/opt/symas/share/man|export MANPATH="${MANPATH:+$MANPATH:}/opt/symas/share/man"|' "$ENV_FILE"
+  elif ! grep -q 'export MANPATH=' "$ENV_FILE"; then
+    sed -i '/^[[:space:]]*fi[[:space:]]*$/i\  export MANPATH="${MANPATH:+$MANPATH:}/opt/symas/share/man"' "$ENV_FILE"
+  fi
 fi
 
 # Load it for current shell
