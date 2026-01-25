@@ -34,6 +34,8 @@ run "8.0-fix_ldapi_acl.sh"
 run "8-create_top_ous.sh"
 run "9-password_policy.sh"
 run "10-ppolicy-container.sh"
+run "12-Create_custom_schema.sh"
+run "13-Create_custom_schema_attr"
 run "7-verify_symas_openldap.sh"
 
 echo
