@@ -172,6 +172,33 @@ EOF
 docker start ldap-master-a
 ```
 
+## Keepalived VIP failover (single IP)
+
+If you prefer a single VIP that moves between two MirrorMode masters (master/backup),
+see the example Keepalived configs in `keepalived/`:
+
+- `keepalived/keepalived-master.conf`
+- `keepalived/keepalived-backup.conf`
+- `keepalived/check_slapd.sh`
+
+These are intended for real hosts (not the Docker lab). The Docker Compose lab
+still uses HAProxy VIPs for read/write separation.
+
+### Keepalived failover test (VIP)
+
+From `openldap-mirrormode/` on a machine with LDAP client tools installed:
+
+```bash
+chmod +x scripts/test-keepalived-failover.sh
+
+VIP_HOST=192.168.10.50 \
+MASTER_A_URI=ldap://ldap1:389 \
+MASTER_B_URI=ldap://ldap2:389 \
+FAILOVER_CMD="ssh root@ldap1 'systemctl stop keepalived'" \
+FAILBACK_CMD="ssh root@ldap1 'systemctl start keepalived'" \
+./scripts/test-keepalived-failover.sh --failover
+```
+
 
 ## How to run
 ```bash

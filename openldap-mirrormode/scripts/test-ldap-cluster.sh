@@ -36,10 +36,14 @@ REPLICA_B_LDAP_URI="${REPLICA_B_LDAP_URI:-ldap://${REPLICA_B}:389}"
 LDAPTLS_CACERT_PATH="${LDAPTLS_CACERT_PATH:-/container/service/slapd/assets/certs/ca.crt}"
 
 # Which container to run ldap* client commands from (must have ldapsearch/ldapadd/ldapmodify)
-EXEC_IN="${EXEC_IN:-$MASTER_A}"
+# Use a replica by default so failover tests can stop a master safely.
+EXEC_IN="${EXEC_IN:-$REPLICA_A}"
 
 # How long to wait for replication after writes
-REPL_WAIT_SECONDS="${REPL_WAIT_SECONDS:-2}"
+REPL_WAIT_SECONDS="${REPL_WAIT_SECONDS:-15}"
+
+# How long to wait after stopping a master before testing write failover
+FAILOVER_WAIT_SECONDS="${FAILOVER_WAIT_SECONDS:-8}"
 
 # Optional destructive tests
 RUN_FAILOVER=0
@@ -54,7 +58,7 @@ Environment overrides:
   MASTER_A, MASTER_B, REPLICA_A, REPLICA_B, LB_WRITE, LB_READ,
   WRITE_LDAP_URI, READ_LDAP_URI, WRITE_LDAPS_URI, READ_LDAPS_URI,
   MASTER_A_LDAP_URI, MASTER_B_LDAP_URI, REPLICA_A_LDAP_URI, REPLICA_B_LDAP_URI,
-  LDAPTLS_CACERT_PATH, REPL_WAIT_SECONDS
+  LDAPTLS_CACERT_PATH, REPL_WAIT_SECONDS, FAILOVER_WAIT_SECONDS
 
 Examples:
   ./scripts/test-ldap-cluster.sh
@@ -306,6 +310,8 @@ if [[ "$RUN_FAILOVER" -eq 1 ]]; then
   else
     record_fail "Stopped Master A for failover test"
   fi
+
+  sleep "$FAILOVER_WAIT_SECONDS"
 
   # Modify through WRITE VIP
   if ldap_modify_sn "$WRITE_LDAP_URI" "$TEST_UID" "v2-after-failover"; then

@@ -182,3 +182,9 @@ docker compose up -d
 - Base DN: `dc=cae,dc=local`
 - Admin DN: `cn=admin,dc=cae,dc=local`
 - Default passwords: `admin` (admin) and `config` (cn=config)
+
+## Alternative VIP (Keepalived)
+
+For environments that prefer a single floating VIP instead of HAProxy, see
+`openldap-mirrormode/keepalived/` for example Keepalived configs and
+`scripts/test-keepalived-failover.sh` for a VIP failover test.
