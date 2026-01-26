@@ -1,0 +1,10 @@
+1-add password checker 
+2-add strogn password quailty checker PPM
+3-Create the mw user under service account 
+4-Create the serviec account password policy with never expire
+5-Creat user using the mw user 
+6-Creat migration script
+7-Hardening  
+8-Tunning 
+9-ensure installation not under root .
+10-Configure SSL
