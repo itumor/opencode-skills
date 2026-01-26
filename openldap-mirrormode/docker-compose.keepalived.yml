@@ -1,0 +1,26 @@
+services:
+  # Keepalived manages a floating VIP on the *Docker host* (not inside the Docker network).
+  #
+  # IMPORTANT:
+  # - Run this compose file on TWO separate hosts (one per LDAP node) for real failover.
+  # - This requires host networking + NET_ADMIN to add/remove the VIP on the host interface.
+  #
+  # Usage (on each host):
+  #   KEEPALIVED_ROLE=master docker compose -f docker-compose.keepalived.yml up -d
+  #   KEEPALIVED_ROLE=backup docker compose -f docker-compose.keepalived.yml up -d
+  keepalived:
+    build:
+      context: ./keepalived
+      args:
+        ROLE: ${KEEPALIVED_ROLE:-master}
+    container_name: keepalived
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_BROADCAST
+      - NET_RAW
+    # NOTE: Docker may reject sysctls in the host network namespace.
+    # If you need ip_nonlocal_bind, set it on the host instead of here.
+    # No bind-mounts: the image updates keepalived.conf at startup and file bind-mounts
+    # break atomic replacement. We bake config into the image via build args instead.
+    restart: unless-stopped

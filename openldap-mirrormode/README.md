@@ -184,6 +184,22 @@ see the example Keepalived configs in `keepalived/`:
 These are intended for real hosts (not the Docker lab). The Docker Compose lab
 still uses HAProxy VIPs for read/write separation.
 
+### Running Keepalived via Docker Compose (two hosts)
+
+You can run Keepalived itself from Docker, but it still operates on the *host* network.
+This means you must run it on **two separate hosts** (one per LDAP server) and use
+`network_mode: host` + `NET_ADMIN`.
+
+On each host (from `openldap-mirrormode/`):
+
+```bash
+# Host 1 (primary)
+KEEPALIVED_ROLE=master docker compose -f docker-compose.keepalived.yml up -d --build
+
+# Host 2 (secondary)
+KEEPALIVED_ROLE=backup docker compose -f docker-compose.keepalived.yml up -d --build
+```
+
 ### Keepalived failover test (VIP)
 
 From `openldap-mirrormode/` on a machine with LDAP client tools installed:
