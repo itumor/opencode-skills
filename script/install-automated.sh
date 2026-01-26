@@ -22,9 +22,25 @@ run() {
   bash "$path"
 }
 
+run_interactive() {
+  local script_name="$1"
+  local input="$2"
+  local path="$SCRIPT_DIR/$script_name"
+
+  if [[ ! -f "$path" ]]; then
+    echo "[FATAL] Missing script: $path"
+    exit 1
+  fi
+
+  echo
+  echo "=== Running $script_name ==="
+  echo "$input" | bash "$path"
+}
+
 run "1-install-symas-openldap.sh"
 run "2-Override-System-Limits.sh"
-run "3-install-example.sh"
+run_interactive "3-install-example.sh" "2
+YES"
 run "4-Start-the-daemon.sh"
 run "5-fix_all_symas_warns.sh"
 run "6-fix_remaining_symas_warns.sh"

@@ -1,10 +1,10 @@
-1-add password checker 
-2-add strogn password quailty checker PPM
-3-Create the mw user under service account 
-4-Create the serviec account password policy with never expire
-5-Creat user using the mw user 
-6-Creat migration script
-7-Hardening  
-8-Tunning 
-9-ensure installation not under root .
-10-Configure SSL
+1-add password checker (done and need to test )
+2-add strogn password quailty checker PPM (done and need to test )
+3-Create the mw user under service account  (done and need to test )
+4-Create the serviec account password policy with never expire (done and need to test )
+5-Creat user using the mw user  (done and need to test )
+6-Creat migration script # TODO: implement migration steps.
+7-Hardening   (done and need to test )
+8-Tunning  (done and need to test )
+9-ensure installation not under root . (done and need to test )
+10-Configure SSL (done and need to test ) 

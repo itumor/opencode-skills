@@ -1,17 +1,22 @@
 #!/bin/bash
 set -euo pipefail
 
+# Ensure Symas tools are on PATH so ldappasswd is found.
+if [[ ":${PATH}:" != *":/opt/symas/bin:"* ]]; then
+  PATH="/opt/symas/bin:${PATH}"
+fi
+
 # =========================
 # VARIABLES
 # =========================
-USER_DN="uid=test4,ou=Users,dc=eab,dc=bank,dc=local"
+USER_DN="${USER_DN:-uid=test4,ou=Users,dc=eab,dc=bank,dc=local}"
+BIND_DN="${BIND_DN:-$USER_DN}"
+BIND_PW="${BIND_PW:-}"
 
-BIND_DN="$USER_DN"
+WEAK_PASSWORD="${WEAK_PASSWORD:-test2}"
+STRONG_PASSWORD="${STRONG_PASSWORD:-Test@1234225!}"
 
-WEAK_PASSWORD="test2"
-STRONG_PASSWORD="Test@1234225!"
-
-LDAP_URI="ldap:///"
+LDAP_URI="${LDAP_URI:-ldap:///}"
 
 echo "======================================"
 echo "PPM Password Complexity Verification"
@@ -20,11 +25,20 @@ echo "======================================"
 echo
 
 # =========================
+# AUTH
+# =========================
+auth_args=(-x -H "$LDAP_URI" -D "$BIND_DN")
+if [[ -n "$BIND_PW" ]]; then
+    auth_args+=(-w "$BIND_PW")
+else
+    auth_args+=(-W)
+fi
+
+# =========================
 # TEST 1: WEAK PASSWORD
 # =========================
 echo "[TEST 1] Trying WEAK password: '$WEAK_PASSWORD'"
-if ldappasswd -x -H "$LDAP_URI" \
-    -D "$BIND_DN" -W \
+if ldappasswd "${auth_args[@]}" \
     -s "$WEAK_PASSWORD" \
     "$USER_DN" 2>/tmp/weak_test.err; then
     echo "❌ ERROR: Weak password was ACCEPTED (this is BAD)"
@@ -41,8 +55,7 @@ echo
 # TEST 2: STRONG PASSWORD
 # =========================
 echo "[TEST 2] Trying STRONG password: '$STRONG_PASSWORD'"
-if ldappasswd -x -H "$LDAP_URI" \
-    -D "$BIND_DN" -W \
+if ldappasswd "${auth_args[@]}" \
     -s "$STRONG_PASSWORD" \
     "$USER_DN" 2>/tmp/strong_test.err; then
     echo "✅ PASS: Strong password was ACCEPTED (expected)"

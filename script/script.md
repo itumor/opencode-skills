@@ -1,15 +1,15 @@
 # script 
 ip a
-ssh root@ip
+sshpass -p 'root' ssh root@ip
 password is root
 
 node 1 192.168.64.5/24
 
-ssh root@192.168.64.5 "rm -rf /root/script"
-scp -r ./script root@192.168.64.5:/root/
-ssh root@192.168.64.5 "chmod +x -R /root/script"
+sshpass -p 'root' sshpass -p 'root' ssh root@192.168.64.5 "rm -rf /root/script"
+sshpass -p 'root' scp -r ./script root@192.168.64.5:/root/
+sshpass -p 'root' ssh root@192.168.64.5 "chmod +x -R /root/script"
 
-ssh root@192.168.64.5
+sshpass -p 'root' ssh root@192.168.64.5
 mkdir script
 
 cd ..
