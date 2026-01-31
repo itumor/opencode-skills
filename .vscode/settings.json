@@ -1,0 +1,5 @@
+{
+  "audioCues.enabled": "on",
+  "audioCues.volume": 70,
+  "terminal.integrated.enableBell": true
+}

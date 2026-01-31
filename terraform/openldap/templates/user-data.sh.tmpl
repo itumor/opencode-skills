@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROLE="${role}"
+VPC_NAME="${vpc_name}"
+BASE_DN="${base_dn}"
+ADMIN_DN="${admin_dn}"
+ADMIN_PW="${admin_password}"
+REPL_DN="${repl_dn}"
+REPL_PW="${repl_password}"
+SERVER_ID="${server_id}"
+PRIVATE_IP="${private_ip}"
+LDAP_PORT="${ldap_port}"
+WRITE_LB_DNS="${write_lb_dns}"
+ORG_NAME="${org_name}"
+MASTER_IPS="${join(" ", master_ips)}"
+
+ENABLE_ARTIFACTS="${enable_artifacts}"
+ARTIFACTS_BUCKET="${artifacts_bucket_name}"
+BOOTSTRAP_HASH="${bootstrap_hash}"
+
+KEEPALIVED_ENABLED="${keepalived_enabled}"
+KEEPALIVED_ROLE="${keepalived_role}"
+KEEPALIVED_PEER_IP="${keepalived_peer_ip}"
+KEEPALIVED_PRIORITY="${keepalived_priority}"
+KEEPALIVED_AUTH_PASS="${keepalived_auth_pass}"
+KEEPALIVED_EIP_ALLOC_ID="${keepalived_eip_allocation_id}"
+
+log() {
+  echo "[user-data] $*"
+}
+
+setup_swap() {
+  # Avoid OOM kills during dnf on small instances (e.g., t3.micro).
+  if swapon --show | grep -q "^/swapfile"; then
+    return 0
+  fi
+  if [[ ! -f /swapfile ]]; then
+    log "Creating swapfile to avoid OOM during bootstrap"
+    if command -v fallocate >/dev/null 2>&1; then
+      fallocate -l 2G /swapfile || true
+    fi
+    if [[ ! -s /swapfile ]]; then
+      dd if=/dev/zero of=/swapfile bs=1M count=2048
+    fi
+    chmod 600 /swapfile
+    mkswap /swapfile >/dev/null 2>&1 || true
+  fi
+  swapon /swapfile >/dev/null 2>&1 || true
+}
+
+install_ssm_agent() {
+  if systemctl list-unit-files | grep -q '^amazon-ssm-agent\.service'; then
+    systemctl enable --now amazon-ssm-agent >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  log "Installing amazon-ssm-agent"
+  dnf -y install amazon-ssm-agent >/dev/null 2>&1 || true
+
+  if ! systemctl list-unit-files | grep -q '^amazon-ssm-agent\.service'; then
+    local token md_header region url
+    token=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60" || true)
+    md_header=""
+    if [[ -n "$token" ]]; then
+      md_header="-H X-aws-ec2-metadata-token:$token"
+    fi
+    region=$(curl -s $md_header http://169.254.169.254/latest/dynamic/instance-identity/document | awk -F'\"' '/\"region\"/ {print $4; exit}')
+    [[ -n "$region" ]] || region="us-east-1"
+    url="https://s3.$region.amazonaws.com/amazon-ssm-$region/latest/linux_amd64/amazon-ssm-agent.rpm"
+    log "Fetching SSM agent RPM from $url"
+    curl -fsSL "$url" -o /tmp/amazon-ssm-agent.rpm
+    dnf -y install /tmp/amazon-ssm-agent.rpm >/dev/null 2>&1 || rpm -Uvh /tmp/amazon-ssm-agent.rpm
+  fi
+
+  systemctl enable --now amazon-ssm-agent >/dev/null 2>&1 || true
+}
+
+log "Bootstrap hash: $BOOTSTRAP_HASH"
+
+mkdir -p /opt/openldap
+
+if [[ "$ENABLE_ARTIFACTS" == "true" && -n "$ARTIFACTS_BUCKET" ]]; then
+  log "Fetching bootstrap artifacts from s3://$ARTIFACTS_BUCKET"
+  setup_swap
+  dnf -y install awscli curl >/dev/null 2>&1 || true
+  install_ssm_agent
+  aws s3 sync "s3://$ARTIFACTS_BUCKET/bootstrap" /opt/openldap/bootstrap
+  chmod +x /opt/openldap/bootstrap/bootstrap-ldap.sh
+
+  export ROLE VPC_NAME BASE_DN ADMIN_DN ADMIN_PW REPL_DN REPL_PW SERVER_ID PRIVATE_IP LDAP_PORT WRITE_LB_DNS ORG_NAME MASTER_IPS
+  export KEEPALIVED_ENABLED KEEPALIVED_ROLE KEEPALIVED_PEER_IP KEEPALIVED_PRIORITY KEEPALIVED_AUTH_PASS KEEPALIVED_EIP_ALLOC_ID
+  export ARTIFACTS_BUCKET
+
+  /opt/openldap/bootstrap/bootstrap-ldap.sh
+else
+  log "Artifacts bucket not configured; skipping bootstrap" >&2
+  exit 1
+fi
