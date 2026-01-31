@@ -9,36 +9,7 @@ This Terraform project provisions a low-cost OpenLDAP MirrorMode lab in AWS usin
 - OpenLDAP configured via cloud-init using the same replication flow as `openldap-mirrormode/scripts/apply-replication-ldifs.sh`
 - Optional keepalived on the primary masters (live/dr) to move a single Elastic IP for write failover
 
-> Cost note: this creates **6 EC2 instances** (1 master + 2 replicas in each VPC) + **4 NLBs** + public IPv4 addresses. AWS Free Tier will **not** fully cover this. For lower cost, keep `masters_per_vpc=1` and `replicas_per_vpc=2`, set `lb_internal=true`, and set `assign_public_ip=false`.
-
-### Free Tier quick math (current defaults)
-
-Assumptions:
-- 6 × `t3.micro` running 24/7
-- 4 public NLBs (2 per VPC) across 2 subnets each
-- Public IPv4 enabled on EC2 + keepalived EIP enabled
-
-Free Tier coverage (two cases):
-- **Legacy Free Tier (accounts created before July 15, 2025, first 12 months):** 750 EC2 micro instance-hours per month, and 750 hours/month of **public IPv4 usage on EC2**. With 6 instances, you pay for ~5 instances worth of compute hours and for EC2 public IPv4 hours beyond the 750-hour allowance.
-- **New Free Tier (accounts created on/after July 15, 2025):** 6‑month free plan with up to **$200 credits** (credits expire within 12 months). Those credits can apply to EC2 + NLB + IPv4 charges until depleted.
-
-Other pricing facts:
-- ELB Free Tier covers **ALB/CLB only**; **NLB is not covered**, so NLB hours + NLCU usage are billed.
-- Public IPv4 addresses are billed at **$0.005 per hour each** (in-use or idle).
-
-Estimated public IPv4 charges (if public IPs + public NLBs are enabled):
-- EC2 public IPv4s: 6
-- NLB public IPv4s: 4 NLBs × 2 subnets = 8
-- Keepalived EIP: 1
-- **Total**: 15 addresses × $0.005/hr ≈ **$0.075/hr** (~$55/month at 730 hrs)
-
-Legacy Free Tier adjustment for EC2 public IPv4:
-- 6 EC2 IPv4s × 730 hrs = 4,380 hrs
-- 750 hrs free → **3,630 billable hrs** × $0.005 = **~$18.15**
-- NLB + EIP IPv4s (9 addresses) remain billable → 9 × 730 × $0.005 = **~$32.85**
-- **Total IPv4 estimate with Legacy Free Tier** ≈ **$51/month**
-
-You can reduce this by setting `lb_internal=true`, `assign_public_ip=false`, and disabling keepalived/EIP if you don't need a single public write endpoint.
+6> Cost note: this creates 12 EC2 instances + 4 NLBs + public IPv4 addresses. AWS Free Tier (750 hrs/month) will **not** cover this. For lower cost, reduce `masters_per_vpc`, `replicas_per_vpc`, use smaller instance types, or deploy only one VPC.
 
 ## 1) Bootstrap remote state
 
