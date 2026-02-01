@@ -1,3 +1,4 @@
+Ibrahim1-add
 1-add password checker (done and need to test )
 2-add strogn password quailty checker PPM (done and need to test )
 3-Create the mw user under service account  (done and need to test )
@@ -8,3 +9,11 @@
 8-Tunning  (done and need to test )
 9-ensure installation not under root . (done and need to test )
 10-Configure SSL (done and need to test ) 
+11-Test the scripts 
+12-migrat the project to git lab and send th eproject link 
+13-add the design documentation
+14-creat migration project
+
+Mostafa
+15-for the design document send to ibrahim what we need to achieve and the expectation 
+16-send to ibrahim the data mapping and sample schemas to creat the migration project 

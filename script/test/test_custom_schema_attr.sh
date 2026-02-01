@@ -1,12 +1,12 @@
 cat > /tmp/test-bank-schema-attr.ldif << 'EOF'
-dn: uid=test1,ou=Users,dc=eab,dc=bank,dc=local
+dn: uid=test5,ou=Users,dc=eab,dc=bank,dc=local
 objectClass: inetOrgPerson
 objectClass: bankUserExtension
-uid: test1
+uid: test5
 cn: Test User
 sn: User
 employeeNumber: 12345
-userPassword: Test@123
+userPassword: Password1!
 memorableAnswer: answer1
 memorableQuestion: What is your favorite color?
 userisactive: TRUE
