@@ -1,5 +1,8 @@
 {
   "audioCues.enabled": "on",
-  "audioCues.volume": 70,
-  "terminal.integrated.enableBell": true
+  "accessibility.signalOptions.volume": 70,
+  "accessibility.signals.terminalBell": {
+    "sound": "on"
+  },
+  "terminal.integrated.enableVisualBell": true
 }

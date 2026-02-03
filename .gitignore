@@ -3,3 +3,7 @@
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md
 terraform/AWS-access-keys.text
+
+
+#Ignore cursor AI rules
+.cursor/rules/codacy.mdc
