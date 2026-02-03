@@ -7,3 +7,24 @@ terraform/AWS-access-keys.text
 
 #Ignore cursor AI rules
 .cursor/rules/codacy.mdc
+
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+*.tfplan
+*.tfplan.json
+.terraform/
+.terraform.lock.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+.terraform.d/
+*.tfstate.backup
+.terraform.tfstate.lock.info
