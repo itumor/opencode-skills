@@ -45,7 +45,7 @@ flowchart TB
   DM -- "syncrepl" --> DR
 ```
 
-## 1) What Terraform does per instance
+## 1) What Terraform does
 
 Terraform provisions:
 
@@ -53,53 +53,44 @@ Terraform provisions:
 - N masters + replicas per VPC (see `masters_per_vpc`, `replicas_per_vpc`).
 - Network Load Balancers for read and write.
 - Optional keepalived EIP to simulate a single VIP failover.
-- An S3 artifacts bucket containing your scripts and LDIFs.
+- (Optional) Global Accelerator endpoints.
 
-At boot, each EC2 instance runs `terraform/openldap/templates/user-data.sh.tmpl`:
+After EC2 instances are created and reachable, Terraform runs Ansible (from your controller machine)
+to converge the instances:
 
-1. Downloads artifacts from S3 into `/opt/openldap/`.
-2. Executes `/opt/openldap/bootstrap/bootstrap-ldap.sh`.
+- Playbook: `ansible/openldap/playbooks/terraform_apply.yml`
+- Roles:
+  - `openldap_bootstrap` (installs Symas OpenLDAP, creates `cn=config`, sets base DN)
+  - `openldap_ldif_public_ips` (applies `terraform/openldap/ldif-public-ips`)
+  - `openldap_verify` + `smoke` (post-apply validation)
 
-The bootstrap script is the single source of truth for the exact steps applied
-to each instance. If you can run that script on-prem, the behavior will match
-AWS.
+This means a single `terraform apply` converges both infrastructure and LDAP configuration.
 
-## 2) Artifacts layout (same in AWS + on-prem)
+## 1.1) Secure LDAP defaults
 
-The following local folders are uploaded to S3 (see `terraform/openldap/artifacts.tf`)
-and synced to the host:
+The Terraform + Ansible flow now configures secure transport by default:
 
-- `script/` -> `/opt/openldap/script/` (your Symas / tuning scripts)
-- `openldap-mirrormode/ldif/` -> `/opt/openldap/ldif-src/` (replication LDIFs)
-- `openldap-mirrormode/scripts/` -> `/opt/openldap/mirrormode-scripts/` (tests/utilities)
-- `terraform/openldap/artifacts/bootstrap-ldap.sh` -> `/opt/openldap/bootstrap/`
+- Listener mode: `starttls_and_ldaps` (StartTLS on `389`, LDAPS on `636`)
+- TLS simple-bind enforcement: enabled (plain simple bind on `389` fails)
+- Cert strategy: `external_or_self_signed` by default
+  - External PEM values can be provided (`tls_ca_cert_pem`, `tls_cert_pem`, `tls_key_pem`)
+  - If external PEMs are not provided, self-signed certs are generated
 
-Important: `bootstrap-ldap.sh` installs and configures OpenLDAP but **does not
-auto-run** the scripts in `/opt/openldap/script/`. You can run those manually
-after bootstrap (see section 5).
+Related Terraform variables:
 
-## 3) LDIF order and role behavior
+- `ldap_tls_mode`
+- `require_tls_simple_binds`
+- `tls_cert_mode`
+- `tls_ca_cert_pem`
+- `tls_cert_pem`
+- `tls_key_pem`
+- `tls_dns_names`
+- `tls_ips`
 
-`bootstrap-ldap.sh` generates and applies the replication LDIFs in this order:
+## 2) Notes On Artifacts / Scripts (Deprecated Path)
 
-All nodes:
-1. `01-replicator.ldif` (adds the replication bind user)
-2. `02-replicator-acl.ldif` (allows replicator read access)
-3. `10-serverid.ldif` (sets the server ID)
-
-Masters only:
-4. `19-load-syncprov.ldif` (loads syncprov module)
-5. `20-syncprov-master.ldif` (adds syncprov overlay)
-6. `21-mirrormode-master.ldif` (MirrorMode + peer provider)
-
-Replicas only:
-4. `30-replica-consumer.ldif` (syncrepl consumer config)
-5. `31-replica-readonly.ldif` (read-only overlay)
-
-It also sets:
-
-- `BASE_DN` and `ADMIN_DN` in `cn=config`
-- A minimal base DIT: base DN, `ou=people`, `ou=groups`
+Older runs used instance `user_data` plus script artifacts in S3. That path is no longer
+used by default for installation/configuration. Keep the scripts only as reference.
 
 ## 4) AWS Terraform flow (simulation)
 
@@ -111,8 +102,8 @@ project_name = "openldap-mm"
 ssh_key_name = "your-keypair"
 admin_password = "admin"
 replication_password = "replpass"
-create_artifacts_bucket = true
-upload_local_artifacts = true
+create_artifacts_bucket = false
+upload_local_artifacts = false
 ```
 
 2) Initialize and apply:
@@ -123,147 +114,49 @@ terraform init -backend-config=backend.hcl
 terraform apply
 ```
 
-3) Watch bootstrap logs on an instance:
-
-```bash
-sudo tail -f /var/log/cloud-init-output.log
-```
-
-4) Useful outputs (IPs, load balancers, artifacts bucket):
+3) Useful outputs (IPs, load balancers):
 
 ```bash
 terraform output instance_public_ips
 terraform output instance_private_ips
 terraform output write_lb_dns
 terraform output read_lb_dns
-terraform output artifacts_bucket_name
 ```
 
-If you change scripts or LDIFs, re-run `terraform apply` to upload them, then
-SSH to a node and re-run `/opt/openldap/bootstrap/bootstrap-ldap.sh`.
+If you change Ansible roles or LDIF bundles, re-run `terraform apply` to re-converge.
 
-## 5) On-prem / SSH flow (real DC)
+## 4.1) Pause / Resume (Stop Instead Of Destroy)
 
-Goal: run the **same** bootstrap process that AWS uses.
-
-### 5.1 Copy artifacts to each host
-
-From your workstation, copy the artifacts to the host (example paths):
+Pause the lab:
 
 ```bash
-# On the target host (run once)
-sudo mkdir -p /opt/openldap/{bootstrap,script,ldif-src,mirrormode-scripts}
-
-# From your workstation (repeat for each host)
-scp terraform/openldap/artifacts/bootstrap-ldap.sh root@HOST:/opt/openldap/bootstrap/
-scp -r script/* root@HOST:/opt/openldap/script/
-scp -r openldap-mirrormode/ldif/* root@HOST:/opt/openldap/ldif-src/
-scp -r openldap-mirrormode/scripts/* root@HOST:/opt/openldap/mirrormode-scripts/
-
-# On the host
-sudo chmod +x /opt/openldap/bootstrap/bootstrap-ldap.sh
+terraform -chdir=terraform/openldap apply -var='pause_mode=true'
 ```
 
-### 5.2 Create a per-node env file
-
-Create `/opt/openldap/bootstrap/node.env` on each host with node-specific values:
-
-Example (master):
+Resume the lab:
 
 ```bash
-ROLE=master
-VPC_NAME=live
-BASE_DN=dc=cae,dc=local
-ADMIN_DN=cn=admin,dc=cae,dc=local
-ADMIN_PW=admin
-REPL_DN=cn=replicator,dc=cae,dc=local
-REPL_PW=replpass
-SERVER_ID=1
-PRIVATE_IP=10.10.0.10
-LDAP_PORT=389
-WRITE_LB_DNS=ldap-write.example.local
-ORG_NAME=CAE
-MASTER_IPS="10.10.0.10 10.10.0.11"
-KEEPALIVED_ENABLED=true
-KEEPALIVED_ROLE=MASTER
-KEEPALIVED_PEER_IP=10.10.0.11
-KEEPALIVED_PRIORITY=200
-KEEPALIVED_AUTH_PASS=openldap
-KEEPALIVED_EIP_ALLOC_ID=
+terraform -chdir=terraform/openldap apply -var='pause_mode=false'
 ```
 
-Example (replica):
+When `pause_mode=true`, Terraform:
 
-```bash
-ROLE=replica
-VPC_NAME=live
-BASE_DN=dc=cae,dc=local
-ADMIN_DN=cn=admin,dc=cae,dc=local
-ADMIN_PW=admin
-REPL_DN=cn=replicator,dc=cae,dc=local
-REPL_PW=replpass
-SERVER_ID=101
-PRIVATE_IP=10.10.0.30
-LDAP_PORT=389
-WRITE_LB_DNS=ldap-write.example.local
-ORG_NAME=CAE
-MASTER_IPS="10.10.0.10 10.10.0.11"
-KEEPALIVED_ENABLED=false
-```
+- Stops LDAP EC2 instances.
+- Disables Global Accelerator by default (`pause_disable_global_accelerator=true`).
+- Disables keepalived EIP resources by default (`pause_disable_keepalived=true`).
+- Skips Terraform-triggered Ansible runs.
 
-### 5.3 Run bootstrap on each host
+This does not destroy the environment. NLB, EBS, S3/state, and similar resources
+can still generate AWS charges while paused.
 
-```bash
-cd /opt/openldap/bootstrap
-set -a
-source ./node.env
-set +a
-sudo -E ./bootstrap-ldap.sh
-```
+## 5) Re-Runs / E2E
 
-This will:
+For the supported one-command apply, destroy, and Go-based E2E flow, see:
 
-- Install OpenLDAP (RHEL packages).
-- Configure base DN and admin.
-- Apply role-specific replication LDIFs.
-- Optionally configure keepalived.
+- `terraform/openldap/E2E.md`
 
-### 5.4 Run your custom scripts (optional)
+## 6) SSH / Console Access
 
-Your Symas / tuning scripts are under `/opt/openldap/script/`. Run them when you
-want to apply additional configuration beyond the bootstrap:
+For how to connect to every EC2 instance created by this stack, see:
 
-```bash
-sudo bash /opt/openldap/script/install-symas-openldap-all-in-one.sh
-# or
-sudo bash /opt/openldap/script/install-automated.sh
-```
-
-Note: these scripts are independent of `bootstrap-ldap.sh`. If you want AWS and
-on-prem to behave the same, keep the same script versions in `script/` and run
-them in the same order on every host.
-
-### 5.5 Run bootstrap on all hosts over SSH (optional)
-
-If each host already has its own `/opt/openldap/bootstrap/node.env`, you can
-trigger bootstrap across all nodes:
-
-```bash
-HOSTS="ldap1.example.local ldap2.example.local ldap3.example.local"
-for h in $HOSTS; do
-  ssh root@"$h" 'set -a; source /opt/openldap/bootstrap/node.env; set +a; sudo -E /opt/openldap/bootstrap/bootstrap-ldap.sh' &
-done
-wait
-```
-
-## 6) Mapping Terraform outputs to on-prem values
-
-Terraform already computes per-node values. Use these as your on-prem template:
-
-- `instance_private_ips` -> `PRIVATE_IP` and `MASTER_IPS`
-- `write_lb_dns` -> `WRITE_LB_DNS` (or your on-prem write VIP)
-- `keepalived_eip_public_ip` -> on-prem VIP
-- `base_dn`, `admin_password`, `replication_password` -> the same values in `node.env`
-
-If you want help generating a full on-prem inventory file, share your desired
-node list and IPs and I can produce a ready-to-run set of `node.env` files.
+- `terraform/openldap/SSH_ACCESS.md`

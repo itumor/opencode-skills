@@ -1,0 +1,87 @@
+---
+- name: Smoke test OpenLDAP on every node (service + bind + base DN)
+  hosts: all
+  gather_facts: false
+  become: true
+  ignore_unreachable: true
+
+  tasks:
+    - name: Check directory service is active (slapd or Symas unit)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        systemctl is-active --quiet slapd && exit 0
+        systemctl is-active --quiet symas-openldap-servers && exit 0
+        echo "Neither slapd nor symas-openldap-servers is active" >&2
+        exit 1
+      args:
+        executable: /bin/bash
+      register: _svc
+      changed_when: false
+
+    - name: LDAP whoami over StartTLS against localhost
+      ansible.builtin.shell: |
+        set -euo pipefail
+        BIN_PREFIX="/opt/symas/bin/"
+        if command -v timeout >/dev/null 2>&1; then TOUT="timeout 12s"; else TOUT=""; fi
+        export LDAPTLS_REQCERT=allow
+        OUT="$(${TOUT} ${BIN_PREFIX}ldapwhoami -x -ZZ -o nettimeout=5 \
+          -H "ldap://localhost:{{ openldap_ldap_port }}" \
+          -D "{{ openldap_admin_dn }}" -w "{{ openldap_admin_pw }}" 2>&1)" || {
+          echo "$OUT"
+          exit 1
+        }
+        echo "$OUT"
+        echo "$OUT" | grep -q '^dn:'
+      args:
+        executable: /bin/bash
+      register: _whoami_starttls
+      retries: 30
+      delay: 2
+      until: _whoami_starttls.rc == 0
+      changed_when: false
+
+    - name: LDAP base DN query over StartTLS against localhost
+      ansible.builtin.shell: |
+        set -euo pipefail
+        BIN_PREFIX="/opt/symas/bin/"
+        if command -v timeout >/dev/null 2>&1; then TOUT="timeout 12s"; else TOUT=""; fi
+        export LDAPTLS_REQCERT=allow
+        OUT="$(${TOUT} ${BIN_PREFIX}ldapsearch -LLL -x -ZZ -o nettimeout=5 -o timelimit=10 \
+          -H "ldap://localhost:{{ openldap_ldap_port }}" \
+          -D "{{ openldap_admin_dn }}" -w "{{ openldap_admin_pw }}" \
+          -b "{{ openldap_base_dn }}" -s base dn 2>&1)" || {
+          echo "$OUT"
+          exit 1
+        }
+        echo "$OUT"
+        echo "$OUT" | grep -q '^dn:'
+      args:
+        executable: /bin/bash
+      register: _base_starttls
+      retries: 30
+      delay: 2
+      until: _base_starttls.rc == 0
+      changed_when: false
+
+    - name: LDAP bind without StartTLS should fail when TLS is required
+      when: openldap_tls_simple_bind_enforced | default(false) | bool
+      ansible.builtin.shell: |
+        set -euo pipefail
+        BIN_PREFIX="/opt/symas/bin/"
+        set +e
+        ${BIN_PREFIX}ldapwhoami -x -o nettimeout=5 \
+          -H "ldap://localhost:{{ openldap_ldap_port }}" \
+          -D "{{ openldap_admin_dn }}" -w "{{ openldap_admin_pw }}" >/tmp/smoke-plain-bind.out 2>/tmp/smoke-plain-bind.err
+        rc=$?
+        set -e
+        test "$rc" -ne 0
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "service_ok={{ (_svc.rc | default(1)) == 0 }}"
+          - "whoami_starttls={{ _whoami_starttls.stdout | default('') }}"
+          - "base_dn_starttls={{ _base_starttls.stdout | default('') }}"

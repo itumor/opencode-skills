@@ -1,0 +1,23 @@
+# Copy this file to:
+#   terraform/openldap/ca_signed_tls.tfvars
+# and paste real PEM values. The .tfvars copy is ignored by git.
+
+tls_cert_mode = "external_required"
+
+tls_ca_cert_pem = <<EOT
+-----BEGIN CERTIFICATE-----
+PASTE_CA_CERT_PEM_HERE
+-----END CERTIFICATE-----
+EOT
+
+tls_cert_pem = <<EOT
+-----BEGIN CERTIFICATE-----
+PASTE_SERVER_CERT_CHAIN_PEM_HERE
+-----END CERTIFICATE-----
+EOT
+
+tls_key_pem = <<EOT
+-----BEGIN PRIVATE KEY-----
+PASTE_SERVER_PRIVATE_KEY_PEM_HERE
+-----END PRIVATE KEY-----
+EOT

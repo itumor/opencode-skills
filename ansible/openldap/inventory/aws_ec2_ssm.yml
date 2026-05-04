@@ -1,0 +1,28 @@
+plugin: amazon.aws.aws_ec2
+
+# Adjust for your deployment region(s).
+regions:
+  - us-east-1
+
+# Default Terraform project_name is "openldap-mm", which prefixes the Name tag.
+filters:
+  tag:Name: openldap-mm-*
+
+# Use the Name tag as the inventory hostname for readability.
+hostnames:
+  - tag:Name
+
+# For SSM connection, ansible_host must be the instance id.
+compose:
+  ansible_host: instance_id
+  ec2_instance_id: instance_id
+  ec2_private_ip_address: private_ip_address
+  ec2_public_ip_address: public_ip_address
+  ec2_tags: tags
+
+keyed_groups:
+  - key: tags.VPC
+    prefix: vpc
+  - key: tags.Role
+    prefix: role
+

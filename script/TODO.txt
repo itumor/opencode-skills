@@ -9,9 +9,9 @@ Ibrahim1-add
 8-Tunning  (done and need to test )
 9-ensure installation not under root . (done and need to test )
 10-Configure SSL (done and need to test ) 
-11-Test the scripts 
-12-migrat the project to git lab and send th eproject link 
-13-add the design documentation
+11-Test the scripts (smoke test added: script/test/run_all.sh; LDAP integration tests can be enabled later with RUN_LDAP_INTEGRATION_TESTS=1)
+12-migrat the project to git lab and send th eproject link (the gitlab is missing)
+13-add the design documentation  (Done and waiting for review)
 14-creat migration project
 15-add access overlay
 

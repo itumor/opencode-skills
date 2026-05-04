@@ -1,0 +1,6 @@
+dn: olcDatabase={1}mdb,cn=config
+changetype: modify
+replace: olcAccess
+# Allow simple binds to work by granting "auth" access to userPassword.
+olcAccess: {0}to attrs=userPassword by self write by anonymous auth by * none
+olcAccess: {1}to * by dn.exact="cn=replicator,dc=cae,dc=local" read by * read

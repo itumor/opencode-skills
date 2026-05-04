@@ -1,0 +1,50 @@
+---
+# End-to-end convergence entrypoint for Terraform local-exec:
+# - install/configure OpenLDAP on instances
+# - apply terraform/openldap/ldif-public-ips bundles
+# - smoke + replication verification
+
+- name: Bootstrap OpenLDAP masters (install + base DN)
+  hosts: role_master
+  gather_facts: false
+  become: true
+
+  pre_tasks:
+    - name: Wait for connectivity
+      ansible.builtin.wait_for_connection:
+        timeout: 900
+
+  roles:
+    - role: openldap_bootstrap
+
+- name: Bootstrap OpenLDAP replicas (install + base DN)
+  hosts: role_replica
+  gather_facts: false
+  become: true
+
+  pre_tasks:
+    - name: Wait for connectivity
+      ansible.builtin.wait_for_connection:
+        timeout: 900
+
+  roles:
+    - role: openldap_bootstrap
+
+- name: Apply terraform/openldap/ldif-public-ips bundles
+  hosts: all
+  gather_facts: false
+  become: true
+
+  pre_tasks:
+    - name: Wait for connectivity
+      ansible.builtin.wait_for_connection:
+        timeout: 900
+
+  vars:
+    openldap_repo_root: "{{ playbook_dir }}/../../.."
+
+  roles:
+    - role: openldap_ldif_public_ips
+
+- import_playbook: smoke.yml
+- import_playbook: verify_replication.yml

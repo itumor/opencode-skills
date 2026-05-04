@@ -1,0 +1,56 @@
+ograph TB
+  Client[Clients]
+
+  GARead[Global Accelerator read]
+  GAWrite[Global Accelerator write]
+
+  VPCLive[VPC live]
+  VPCDr[VPC dr]
+  VpcPeer[VPC peering]
+
+  NlbReadLive[NLB read live]
+  NlbWriteLive[NLB write live]
+  NlbReadDr[NLB read dr]
+  NlbWriteDr[NLB write dr]
+
+  TgReadLive[Target group read live]
+  TgWriteLive[Target group write live]
+  TgReadDr[Target group read dr]
+  TgWriteDr[Target group write dr]
+
+  Ec2MasterLive[EC2 masters live]
+  Ec2ReplicaLive[EC2 replicas live]
+  Ec2MasterDr[EC2 masters dr]
+  Ec2ReplicaDr[EC2 replicas dr]
+
+  S3Artifacts[S3 artifacts]
+  IamProfile[IAM instance profile]
+  KeepalivedEip[Keepalived EIP]
+
+  Client --> GARead
+  Client --> GAWrite
+
+  GARead --> NlbReadLive
+  GARead --> NlbReadDr
+  GAWrite --> NlbWriteLive
+  GAWrite --> NlbWriteDr
+
+  VPCLive --- VpcPeer --- VPCDr
+
+  NlbReadLive --> TgReadLive --> Ec2ReplicaLive
+  NlbWriteLive --> TgWriteLive --> Ec2MasterLive
+  NlbReadDr --> TgReadDr --> Ec2ReplicaDr
+  NlbWriteDr --> TgWriteDr --> Ec2MasterDr
+
+  S3Artifacts --> Ec2MasterLive
+  S3Artifacts --> Ec2ReplicaLive
+  S3Artifacts --> Ec2MasterDr
+  S3Artifacts --> Ec2ReplicaDr
+
+  IamProfile --> Ec2MasterLive
+  IamProfile --> Ec2ReplicaLive
+  IamProfile --> Ec2MasterDr
+  IamProfile --> Ec2ReplicaDr
+
+  KeepalivedEip --> Ec2MasterLive
+

@@ -24,5 +24,9 @@ olcModuleLoad: ppolicy
 
 EOF
 
-#ldapadd -Y EXTERNAL -H ldapi:/// -f /tmp/pw_load_module.ldif
-"$LDAPADD" -x -D "cn=config" -W -H ldap:/// -f /tmp/pw_load_module.ldif
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+	echo "[FATAL] Must be run as root (SASL EXTERNAL over ldapi:///)" >&2
+	exit 1
+fi
+
+"$LDAPADD" -Y EXTERNAL -H ldapi:/// -f /tmp/pw_load_module.ldif

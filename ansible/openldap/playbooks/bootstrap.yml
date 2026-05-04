@@ -1,0 +1,54 @@
+---
+- name: Bootstrap OpenLDAP nodes (MirrorMode)
+  hosts: all
+  gather_facts: false
+  become: true
+
+  vars:
+    # Repo root from this playbook location: ansible/openldap/playbooks -> repo root
+    openldap_repo_root: "{{ playbook_dir }}/../../.."
+    openldap_tf_dir: "{{ openldap_repo_root }}/terraform/openldap"
+
+  pre_tasks:
+    - name: Gather minimal facts (for distro + network)
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "!min"
+          - network
+          - platform
+
+    - name: Best-effort read Terraform outputs (write_lb_dns, artifacts bucket, keepalived EIP)
+      delegate_to: localhost
+      become: false
+      run_once: true
+      changed_when: false
+      ansible.builtin.command: terraform -chdir={{ openldap_tf_dir }} output -json
+      register: _tf_out
+      failed_when: false
+      when: openldap_use_terraform_outputs | bool
+
+    - name: Parse Terraform outputs JSON
+      delegate_to: localhost
+      become: false
+      run_once: true
+      delegate_facts: true
+      changed_when: false
+      ansible.builtin.set_fact:
+        _tf_outputs: "{{ (_tf_out.stdout | default('{}')) | from_json }}"
+      when: openldap_use_terraform_outputs | bool and (_tf_out.rc | default(1)) == 0
+
+    - name: Publish Terraform-derived vars
+      delegate_to: localhost
+      become: false
+      run_once: true
+      delegate_facts: true
+      changed_when: false
+      ansible.builtin.set_fact:
+        openldap_write_lb_dns_by_vpc: "{{ (_tf_outputs.write_lb_dns.value | default({})) | combine(openldap_write_lb_dns_by_vpc | default({})) }}"
+        openldap_artifacts_bucket_name: "{{ (openldap_artifacts_bucket_name | default('')) | length > 0 | ternary(openldap_artifacts_bucket_name, (_tf_outputs.artifacts_bucket_name.value | default(''))) }}"
+        openldap_keepalived_eip_allocation_id: "{{ (openldap_keepalived_eip_allocation_id | default('')) | length > 0 | ternary(openldap_keepalived_eip_allocation_id, (_tf_outputs.keepalived_eip_allocation_id.value | default(''))) }}"
+      when: openldap_use_terraform_outputs | bool and (_tf_out.rc | default(1)) == 0
+
+  roles:
+    - role: openldap_bootstrap

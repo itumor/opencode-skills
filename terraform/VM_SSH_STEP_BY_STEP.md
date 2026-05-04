@@ -122,7 +122,7 @@ want extra configuration beyond bootstrap:
 ```bash
 sudo bash /opt/openldap/script/install-symas-openldap-all-in-one.sh
 # or
-sudo bash /opt/openldap/script/install-automated.sh
+sudo bash /opt/openldap/script/install-symas-openldap-all-in-one.sh
 ```
 
 ---

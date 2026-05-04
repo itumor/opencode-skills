@@ -31,6 +31,11 @@ variable "masters_per_vpc" {
   type        = number
   description = "Number of MirrorMode masters per VPC."
   default     = 1
+
+  validation {
+    condition     = var.masters_per_vpc >= 1
+    error_message = "masters_per_vpc must be >= 1."
+  }
 }
 
 variable "replicas_per_vpc" {
@@ -63,6 +68,12 @@ variable "ssh_key_name" {
   default     = ""
 }
 
+variable "ssh_public_key_path" {
+  type        = string
+  description = "Path to an SSH public key to register as an EC2 key pair when ssh_key_name is empty."
+  default     = ""
+}
+
 variable "assign_public_ip" {
   type        = bool
   description = "Assign public IPs to LDAP instances (no NAT required)."
@@ -75,10 +86,45 @@ variable "lb_internal" {
   default     = false
 }
 
+variable "write_lb_single_az" {
+  type        = string
+  description = "If set, pin the *write* NLBs (live/dr) to a single Availability Zone by selecting only subnets in that AZ. Empty means use all VPC public subnets."
+  default     = ""
+}
+
+variable "pause_mode" {
+  type        = bool
+  description = "Pause control for this stack. true stops LDAP EC2 instances and can disable selected optional services."
+  default     = false
+}
+
+variable "pause_disable_global_accelerator" {
+  type        = bool
+  description = "When pause_mode=true, disable Global Accelerator to reduce idle cost."
+  default     = true
+}
+
+variable "pause_disable_keepalived" {
+  type        = bool
+  description = "When pause_mode=true, disable keepalived EIP resources to reduce idle cost."
+  default     = true
+}
+
 variable "enable_global_accelerator" {
   type        = bool
-  description = "Expose two global endpoints (read/write) via AWS Global Accelerator."
+  description = "Expose global endpoints via AWS Global Accelerator (see global_accelerator_mode)."
   default     = true
+}
+
+variable "global_accelerator_mode" {
+  type        = string
+  description = "Global Accelerator topology. shared=exactly 2 accelerators total (1 read + 1 write) routing to both Live+DR LBs."
+  default     = "shared"
+
+  validation {
+    condition     = var.global_accelerator_mode == "shared"
+    error_message = "global_accelerator_mode is restricted to \"shared\" (2 accelerators total: read + write)."
+  }
 }
 
 variable "global_accelerator_region" {
@@ -91,6 +137,73 @@ variable "ldap_port" {
   type        = number
   description = "LDAP TCP port."
   default     = 389
+}
+
+variable "ldaps_port" {
+  type        = number
+  description = "LDAPS TCP port."
+  default     = 636
+}
+
+variable "ldap_tls_mode" {
+  type        = string
+  description = "LDAP listener TLS mode. starttls_and_ldaps keeps 389+636; ldaps_only exposes only 636."
+  default     = "starttls_and_ldaps"
+
+  validation {
+    condition     = contains(["starttls_and_ldaps", "ldaps_only"], var.ldap_tls_mode)
+    error_message = "ldap_tls_mode must be one of: starttls_and_ldaps, ldaps_only."
+  }
+}
+
+variable "require_tls_simple_binds" {
+  type        = bool
+  description = "Require TLS for simple binds (plain LDAP binds on 389 without StartTLS fail)."
+  default     = true
+}
+
+variable "tls_cert_mode" {
+  type        = string
+  description = "TLS certificate strategy: external_or_self_signed, self_signed, external_required."
+  default     = "external_or_self_signed"
+
+  validation {
+    condition     = contains(["external_or_self_signed", "self_signed", "external_required"], var.tls_cert_mode)
+    error_message = "tls_cert_mode must be one of: external_or_self_signed, self_signed, external_required."
+  }
+}
+
+variable "tls_ca_cert_pem" {
+  type        = string
+  description = "Optional external CA certificate PEM content."
+  sensitive   = true
+  default     = ""
+}
+
+variable "tls_cert_pem" {
+  type        = string
+  description = "Optional external server certificate PEM content."
+  sensitive   = true
+  default     = ""
+}
+
+variable "tls_key_pem" {
+  type        = string
+  description = "Optional external server key PEM content."
+  sensitive   = true
+  default     = ""
+}
+
+variable "tls_dns_names" {
+  type        = list(string)
+  description = "Extra DNS SAN entries for generated TLS server certificates."
+  default     = []
+}
+
+variable "tls_ips" {
+  type        = list(string)
+  description = "Extra IP SAN entries for generated TLS server certificates."
+  default     = []
 }
 
 variable "base_dn" {
@@ -131,6 +244,12 @@ variable "ldap_cidr_blocks" {
   default     = ["0.0.0.0/0"]
 }
 
+variable "ldaps_cidr_blocks" {
+  type        = list(string)
+  description = "CIDR blocks allowed to connect to LDAPS (in addition to VPC + peer). If empty, ldap_cidr_blocks is used."
+  default     = []
+}
+
 variable "create_artifacts_bucket" {
   type        = bool
   description = "Create an S3 bucket for scripts and LDIF artifacts."
@@ -155,6 +274,12 @@ variable "enable_keepalived" {
   default     = true
 }
 
+variable "keepalived_allow_failover" {
+  type        = bool
+  description = "If true, allow keepalived to move the EIP between instances (Terraform will not pin the association)."
+  default     = false
+}
+
 variable "keepalived_eip_allocation_id" {
   type        = string
   description = "Existing EIP allocation ID for keepalived. Leave empty to allocate a new one."
@@ -172,4 +297,39 @@ variable "tags" {
   type        = map(string)
   description = "Tags applied to all resources."
   default     = {}
+}
+
+variable "run_ansible" {
+  type        = bool
+  description = "If true, Terraform will run the Ansible OpenLDAP bootstrap + LDIF apply + verification after EC2 provisioning completes."
+  default     = true
+}
+
+variable "ansible_connection" {
+  type        = string
+  description = "Ansible connection type used by Terraform-run Ansible (ssh|ssm)."
+  default     = "ssh"
+
+  validation {
+    condition     = contains(["ssh", "ssm"], var.ansible_connection)
+    error_message = "ansible_connection must be \"ssh\" or \"ssm\"."
+  }
+}
+
+variable "ansible_enable_keepalived" {
+  type        = bool
+  description = "If true, Ansible will install/configure keepalived on the master nodes. Recommended to keep false for stable convergence."
+  default     = false
+}
+
+variable "ansible_ssh_user" {
+  type        = string
+  description = "SSH username for Ansible when ansible_connection=ssh."
+  default     = "ec2-user"
+}
+
+variable "ansible_ssh_private_key_path" {
+  type        = string
+  description = "Path to SSH private key for Ansible when ansible_connection=ssh. If empty, defaults to terraform/openldap/.local-ssh/openldap_mm."
+  default     = ""
 }

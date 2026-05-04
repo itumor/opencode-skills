@@ -1,0 +1,30 @@
+---
+- name: Verify OpenLDAP replication (SSM/SSH)
+  hosts: all
+  gather_facts: false
+  become: true
+
+  vars:
+    openldap_repo_root: "{{ playbook_dir }}/../../.."
+
+  pre_tasks:
+    - name: Gather minimal facts
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "!min"
+          - network
+
+    - name: Ensure we have at least one master in each VPC group
+      ansible.builtin.assert:
+        that:
+          - groups['role_master'] | default([]) | length >= 2
+          - groups['vpc_live'] | default([]) | length >= 1
+          - groups['vpc_dr'] | default([]) | length >= 1
+        fail_msg: "Expected dynamic inventory groups role_master, vpc_live, vpc_dr (check tags and inventory filters)."
+      run_once: true
+      become: false
+
+  roles:
+    - role: openldap_verify
+

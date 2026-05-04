@@ -1,0 +1,34 @@
+---
+# Resource safety (small instances).
+openldap_enable_swap: true
+openldap_swap_mb: 2048
+
+# Symas OpenLDAP 2.6 repo (RHEL9).
+openldap_symas_repo_url: https://repo.symas.com/configs/SOLDAP/rhel9/release26.repo
+openldap_symas_schema_files:
+  - /opt/symas/etc/openldap/schema/core.ldif
+  - /opt/symas/etc/openldap/schema/cosine.ldif
+  - /opt/symas/etc/openldap/schema/inetorgperson.ldif
+  - /opt/symas/etc/openldap/schema/nis.ldif
+
+# Symas defaults used by this repo's LDIF bundles.
+openldap_ldapi_uri: "ldapi://%2Fvar%2Fsymas%2Frun%2Fldapi"
+openldap_db_dn: "olcDatabase={1}mdb,cn=config"
+openldap_ldap_port: 389
+openldap_ldaps_port: 636
+openldap_tls_mode: "starttls_and_ldaps"
+openldap_require_tls_simple_binds: true
+openldap_tls_cert_mode: "external_or_self_signed"
+openldap_tls_ca_cert_pem: ""
+openldap_tls_cert_pem: ""
+openldap_tls_key_pem: ""
+openldap_tls_dns_names: []
+openldap_tls_ips: []
+openldap_tls_simple_bind_enforced: false
+openldap_tls_dir: "/opt/symas/etc/openldap/tls"
+openldap_tls_ca_cert_path: "/opt/symas/etc/openldap/tls/ca.crt"
+openldap_tls_cert_path: "/opt/symas/etc/openldap/tls/ldap.crt"
+openldap_tls_key_path: "/opt/symas/etc/openldap/tls/ldap.key"
+
+# Used by keepalived notify command (Terraform passes a correct value via extra-vars).
+openldap_aws_region: us-east-1

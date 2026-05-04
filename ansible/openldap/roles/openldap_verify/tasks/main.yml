@@ -1,0 +1,200 @@
+---
+- name: Identify live/dr master-1 hosts
+  vars:
+    _masters: "{{ groups['role_master'] | default([]) }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  delegate_facts: true
+  ansible.builtin.set_fact:
+    openldap_live_master_1: "{{ _masters | select('match', '.*-live-master-1$') | list | first | default('') }}"
+    openldap_dr_master_1: "{{ _masters | select('match', '.*-dr-master-1$') | list | first | default('') }}"
+
+- name: Validate master-1 hosts were found
+  delegate_to: localhost
+  become: false
+  ansible.builtin.assert:
+    that:
+      - hostvars['localhost'].openldap_live_master_1 | length > 0
+      - hostvars['localhost'].openldap_dr_master_1 | length > 0
+    fail_msg: "Could not find live-master-1 and dr-master-1 in inventory. Check Name tags and inventory filter."
+  run_once: true
+
+- name: Create a test timestamp (controller)
+  delegate_to: localhost
+  become: false
+  run_once: true
+  delegate_facts: true
+  changed_when: false
+  ansible.builtin.set_fact:
+    openldap_test_ts: "{{ lookup('pipe', 'date -u +%Y%m%d%H%M%S') }}"
+
+- name: Publish test ids
+  delegate_to: localhost
+  run_once: true
+  become: false
+  delegate_facts: true
+  ansible.builtin.set_fact:
+    openldap_test_dn_1: "cn=ansible-repl-test-{{ hostvars['localhost'].openldap_test_ts }},{{ openldap_base_dn }}"
+    openldap_test_dn_2: "cn=ansible-repl-test2-{{ hostvars['localhost'].openldap_test_ts }},{{ openldap_base_dn }}"
+    openldap_test_filter_1: "(cn=ansible-repl-test-{{ hostvars['localhost'].openldap_test_ts }})"
+    openldap_test_filter_2: "(cn=ansible-repl-test2-{{ hostvars['localhost'].openldap_test_ts }})"
+
+- name: Plain LDAP bind should fail when TLS simple binds are required
+  when: openldap_tls_simple_bind_enforced | default(false) | bool
+  ansible.builtin.shell: |
+    set -euo pipefail
+    BIN_PREFIX=""
+    if [[ -x /opt/symas/bin/ldapwhoami ]]; then BIN_PREFIX="/opt/symas/bin/"; fi
+    set +e
+    ${BIN_PREFIX}ldapwhoami -x -o nettimeout=5 -H ldap://localhost:{{ openldap_ldap_port }} \
+      -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' >/tmp/verify-plain-bind.out 2>/tmp/verify-plain-bind.err
+    rc=$?
+    set -e
+    test "$rc" -ne 0
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Write via live master-1
+  delegate_to: "{{ hostvars['localhost'].openldap_live_master_1 }}"
+  run_once: true
+  ansible.builtin.shell: |
+    set -euo pipefail
+    BIN_PREFIX=""
+    if [[ -x /opt/symas/bin/ldapadd ]]; then BIN_PREFIX="/opt/symas/bin/"; fi
+    STARTTLS_OPT=""
+    if ! ${BIN_PREFIX}ldapwhoami -x -o nettimeout=5 -H ldap://localhost:{{ openldap_ldap_port }} -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' >/dev/null 2>&1; then
+      STARTTLS_OPT="-ZZ"
+    fi
+    if command -v timeout >/dev/null 2>&1; then TOUT="timeout 20s"; else TOUT=""; fi
+    cat >/tmp/ansible_repl_test.ldif <<LDIF
+    dn: {{ hostvars['localhost'].openldap_test_dn_1 }}
+    objectClass: organizationalRole
+    cn: ansible-repl-test-{{ hostvars['localhost'].openldap_test_ts }}
+    description: ansible-repl-test-{{ hostvars['localhost'].openldap_test_ts }}
+    LDIF
+    ${TOUT} ${BIN_PREFIX}ldapadd -x ${STARTTLS_OPT} -o nettimeout=5 -H ldap://localhost:{{ openldap_ldap_port }} -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' -f /tmp/ansible_repl_test.ldif
+  args:
+    executable: /bin/bash
+
+- name: Wait for Test 1 to appear everywhere
+  ansible.builtin.shell: |
+    set -euo pipefail
+    BIN_PREFIX=""
+    if [[ -x /opt/symas/bin/ldapsearch ]]; then BIN_PREFIX="/opt/symas/bin/"; fi
+    STARTTLS_OPT=""
+    if ! ${BIN_PREFIX}ldapwhoami -x -o nettimeout=5 -H ldap://localhost:{{ openldap_ldap_port }} -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' >/dev/null 2>&1; then
+      STARTTLS_OPT="-ZZ"
+    fi
+    if command -v timeout >/dev/null 2>&1; then TOUT="timeout 12s"; else TOUT=""; fi
+    ${TOUT} ${BIN_PREFIX}ldapsearch -LLL -x ${STARTTLS_OPT} -o nettimeout=5 -o timelimit=10 -H ldap://localhost:{{ openldap_ldap_port }} \
+      -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' \
+      -b '{{ openldap_base_dn }}' '{{ hostvars['localhost'].openldap_test_filter_1 }}' dn 2>/dev/null | grep -q '^dn: '
+  args:
+    executable: /bin/bash
+  register: _t1
+  retries: "{{ (openldap_verify_timeout_s | int // 2) | int }}"
+  delay: 2
+  until: _t1.rc == 0
+  changed_when: false
+
+- name: Write via DR master-1
+  delegate_to: "{{ hostvars['localhost'].openldap_dr_master_1 }}"
+  run_once: true
+  ansible.builtin.shell: |
+    set -euo pipefail
+    BIN_PREFIX=""
+    if [[ -x /opt/symas/bin/ldapadd ]]; then BIN_PREFIX="/opt/symas/bin/"; fi
+    STARTTLS_OPT=""
+    if ! ${BIN_PREFIX}ldapwhoami -x -o nettimeout=5 -H ldap://localhost:{{ openldap_ldap_port }} -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' >/dev/null 2>&1; then
+      STARTTLS_OPT="-ZZ"
+    fi
+    if command -v timeout >/dev/null 2>&1; then TOUT="timeout 20s"; else TOUT=""; fi
+    cat >/tmp/ansible_repl_test.ldif <<LDIF
+    dn: {{ hostvars['localhost'].openldap_test_dn_2 }}
+    objectClass: organizationalRole
+    cn: ansible-repl-test2-{{ hostvars['localhost'].openldap_test_ts }}
+    description: ansible-repl-test2-{{ hostvars['localhost'].openldap_test_ts }}
+    LDIF
+    ${TOUT} ${BIN_PREFIX}ldapadd -x ${STARTTLS_OPT} -o nettimeout=5 -H ldap://localhost:{{ openldap_ldap_port }} -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' -f /tmp/ansible_repl_test.ldif
+  args:
+    executable: /bin/bash
+
+- name: Wait for Test 2 to appear everywhere
+  ansible.builtin.shell: |
+    set -euo pipefail
+    BIN_PREFIX=""
+    if [[ -x /opt/symas/bin/ldapsearch ]]; then BIN_PREFIX="/opt/symas/bin/"; fi
+    STARTTLS_OPT=""
+    if ! ${BIN_PREFIX}ldapwhoami -x -o nettimeout=5 -H ldap://localhost:{{ openldap_ldap_port }} -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' >/dev/null 2>&1; then
+      STARTTLS_OPT="-ZZ"
+    fi
+    if command -v timeout >/dev/null 2>&1; then TOUT="timeout 12s"; else TOUT=""; fi
+    ${TOUT} ${BIN_PREFIX}ldapsearch -LLL -x ${STARTTLS_OPT} -o nettimeout=5 -o timelimit=10 -H ldap://localhost:{{ openldap_ldap_port }} \
+      -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' \
+      -b '{{ openldap_base_dn }}' '{{ hostvars['localhost'].openldap_test_filter_2 }}' dn 2>/dev/null | grep -q '^dn: '
+  args:
+    executable: /bin/bash
+  register: _t2
+  retries: "{{ (openldap_verify_timeout_s | int // 2) | int }}"
+  delay: 2
+  until: _t2.rc == 0
+  changed_when: false
+
+- name: Cleanup (delete via both masters)
+  block:
+    - name: Delete via live master-1
+      delegate_to: "{{ hostvars['localhost'].openldap_live_master_1 }}"
+      run_once: true
+      ansible.builtin.shell: |
+        set -euo pipefail
+        BIN_PREFIX=""
+        if [[ -x /opt/symas/bin/ldapdelete ]]; then BIN_PREFIX="/opt/symas/bin/"; fi
+        STARTTLS_OPT=""
+        if ! ${BIN_PREFIX}ldapwhoami -x -o nettimeout=5 -H ldap://localhost:{{ openldap_ldap_port }} -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' >/dev/null 2>&1; then
+          STARTTLS_OPT="-ZZ"
+        fi
+        if command -v timeout >/dev/null 2>&1; then TOUT="timeout 20s"; else TOUT=""; fi
+        ${TOUT} ${BIN_PREFIX}ldapdelete -x ${STARTTLS_OPT} -o nettimeout=5 -H ldap://localhost:{{ openldap_ldap_port }} -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' '{{ hostvars['localhost'].openldap_test_dn_1 }}' >/dev/null 2>&1 || true
+        ${TOUT} ${BIN_PREFIX}ldapdelete -x ${STARTTLS_OPT} -o nettimeout=5 -H ldap://localhost:{{ openldap_ldap_port }} -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' '{{ hostvars['localhost'].openldap_test_dn_2 }}' >/dev/null 2>&1 || true
+      args:
+        executable: /bin/bash
+
+    - name: Delete via DR master-1
+      delegate_to: "{{ hostvars['localhost'].openldap_dr_master_1 }}"
+      run_once: true
+      ansible.builtin.shell: |
+        set -euo pipefail
+        BIN_PREFIX=""
+        if [[ -x /opt/symas/bin/ldapdelete ]]; then BIN_PREFIX="/opt/symas/bin/"; fi
+        STARTTLS_OPT=""
+        if ! ${BIN_PREFIX}ldapwhoami -x -o nettimeout=5 -H ldap://localhost:{{ openldap_ldap_port }} -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' >/dev/null 2>&1; then
+          STARTTLS_OPT="-ZZ"
+        fi
+        if command -v timeout >/dev/null 2>&1; then TOUT="timeout 20s"; else TOUT=""; fi
+        ${TOUT} ${BIN_PREFIX}ldapdelete -x ${STARTTLS_OPT} -o nettimeout=5 -H ldap://localhost:{{ openldap_ldap_port }} -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' '{{ hostvars['localhost'].openldap_test_dn_1 }}' >/dev/null 2>&1 || true
+        ${TOUT} ${BIN_PREFIX}ldapdelete -x ${STARTTLS_OPT} -o nettimeout=5 -H ldap://localhost:{{ openldap_ldap_port }} -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' '{{ hostvars['localhost'].openldap_test_dn_2 }}' >/dev/null 2>&1 || true
+      args:
+        executable: /bin/bash
+
+- name: Wait for cleanup to replicate everywhere
+  ansible.builtin.shell: |
+    set -euo pipefail
+    BIN_PREFIX=""
+    if [[ -x /opt/symas/bin/ldapsearch ]]; then BIN_PREFIX="/opt/symas/bin/"; fi
+    STARTTLS_OPT=""
+    if ! ${BIN_PREFIX}ldapwhoami -x -o nettimeout=5 -H ldap://localhost:{{ openldap_ldap_port }} -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' >/dev/null 2>&1; then
+      STARTTLS_OPT="-ZZ"
+    fi
+    if command -v timeout >/dev/null 2>&1; then TOUT="timeout 12s"; else TOUT=""; fi
+    ! ${TOUT} ${BIN_PREFIX}ldapsearch -LLL -x ${STARTTLS_OPT} -o nettimeout=5 -o timelimit=10 -H ldap://localhost:{{ openldap_ldap_port }} \
+      -D '{{ openldap_admin_dn }}' -w '{{ openldap_admin_pw }}' \
+      -b '{{ openldap_base_dn }}' '(|{{ hostvars['localhost'].openldap_test_filter_1 }}{{ hostvars['localhost'].openldap_test_filter_2 }})' dn 2>/dev/null | grep -q '^dn: '
+  args:
+    executable: /bin/bash
+  register: _t3
+  retries: "{{ (openldap_verify_timeout_s | int // 2) | int }}"
+  delay: 2
+  until: _t3.rc == 0
+  changed_when: false

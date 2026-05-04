@@ -1,0 +1,7 @@
+phase=phase2_dr_r2
+write_total=6
+write_ok=6
+write_success_rate_pct=100.00
+lag_p95_ms=1179
+lag_p99_ms=1179
+lag_max_ms=1179

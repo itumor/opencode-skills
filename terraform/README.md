@@ -45,6 +45,31 @@ terraform apply \
   -var="ssh_key_name=YOUR_KEYPAIR"
 ```
 
+## Pause / Resume (Without Destroy)
+
+Use Terraform pause mode to stop EC2 instances when the lab is idle:
+
+```bash
+terraform -chdir=terraform/openldap apply -var='pause_mode=true'
+```
+
+Resume the stack:
+
+```bash
+terraform -chdir=terraform/openldap apply -var='pause_mode=false'
+```
+
+Default pause behavior:
+
+- Stops EC2 instances (`aws_ec2_instance_state`).
+- Disables Global Accelerator while paused (`pause_disable_global_accelerator=true`).
+- Disables keepalived EIP resources while paused (`pause_disable_keepalived=true`).
+- Skips Terraform-triggered Ansible while paused.
+
+Cost caveat: pause mode does not destroy the stack. Costs can still accrue for
+resources such as NLBs, EBS volumes, S3/state storage, and any other enabled
+infrastructure left running.
+
 ## Artifacts (scripts + LDIFs)
 
 This module syncs local content to an S3 artifacts bucket and pulls it onto each EC2 instance:
@@ -76,6 +101,9 @@ ldapsearch -x -H ldap://<READ_LB_DNS>:389 -D "cn=admin,dc=cae,dc=local" -w admin
 - `rhel_ami_id` (override the AMI if the lookup fails)
 - `create_artifacts_bucket` / `artifacts_bucket_name`
 - `enable_keepalived` / `keepalived_eip_allocation_id`
+- `pause_mode` (default `false`)
+- `pause_disable_global_accelerator` (default `true`)
+- `pause_disable_keepalived` (default `true`)
 
 ## Mapping to openldap-mirrormode
 

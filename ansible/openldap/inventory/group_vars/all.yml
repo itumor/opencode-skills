@@ -1,0 +1,38 @@
+# Connection defaults.
+# - For SSM inventory, this is correct as-is.
+# - For SSH inventory, override via -e ansible_connection=ssh (or set it here).
+ansible_connection: amazon.aws.aws_ssm
+
+# OpenLDAP defaults (match terraform/openldap defaults).
+openldap_project_name: openldap-mm
+openldap_base_dn: dc=cae,dc=local
+openldap_org_name: CAE
+openldap_admin_dn: "cn=admin,{{ openldap_base_dn }}"
+openldap_admin_pw: admin
+openldap_repl_dn: "cn=replicator,{{ openldap_base_dn }}"
+openldap_repl_pw: replpass
+openldap_ldap_port: 389
+openldap_ldaps_port: 636
+openldap_tls_mode: starttls_and_ldaps
+openldap_require_tls_simple_binds: true
+openldap_tls_cert_mode: external_or_self_signed
+openldap_tls_ca_cert_pem: ""
+openldap_tls_cert_pem: ""
+openldap_tls_key_pem: ""
+openldap_tls_dns_names: []
+openldap_tls_ips: []
+
+# Bootstrap behavior.
+openldap_force_bootstrap: false
+openldap_bootstrap_skip_install: ""
+openldap_bootstrap_source: repo   # repo|s3
+
+# Artifacts (optional). If openldap_use_terraform_outputs=true, these are auto-populated.
+openldap_use_terraform_outputs: true
+openldap_artifacts_bucket_name: ""
+openldap_write_lb_dns_by_vpc: {}
+
+# Keepalived (optional). If enabled, only master-1 in each VPC will be configured.
+openldap_enable_keepalived: true
+openldap_keepalived_auth_pass: openldap
+openldap_keepalived_eip_allocation_id: ""

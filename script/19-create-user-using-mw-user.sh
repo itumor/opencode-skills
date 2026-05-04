@@ -27,9 +27,11 @@ if [[ "$DRY_RUN" != "1" ]]; then
   fi
 fi
 
-LDAP_URI="${LDAP_URI:-ldap:///}"
+LDAP_URI="${LDAP_URI:-ldap://localhost}"
+USE_STARTTLS="${USE_STARTTLS:-0}"
+LDAPTLS_REQCERT="${LDAPTLS_REQCERT:-never}"
 MW_BIND_DN="${MW_BIND_DN:-uid=mw,ou=ServiceAccounts,ou=Systems,dc=eab,dc=bank,dc=local}"
-MW_BIND_PW="${MW_BIND_PW:-}"
+MW_BIND_PW="${MW_BIND_PW:-ChangeMe123!}"
 
 USER_BASE_DN="${USER_BASE_DN:-ou=Users,dc=eab,dc=bank,dc=local}"
 USER_UID="${USER_UID:-mwuser1}"
@@ -52,11 +54,15 @@ if [[ -z "$USER_MAIL" ]]; then
 fi
 
 auth_args=(-x -H "$LDAP_URI" -D "$MW_BIND_DN")
-if [[ -n "$MW_BIND_PW" ]]; then
-  auth_args+=(-w "$MW_BIND_PW")
-else
-  auth_args+=(-W)
+if [[ -z "$MW_BIND_PW" ]]; then
+  echo "[FATAL] MW_BIND_PW is empty. Set MW_BIND_PW (default expected: ChangeMe123!)." >&2
+  exit 1
 fi
+if [[ "$USE_STARTTLS" == "1" ]]; then
+  auth_args+=(-ZZ)
+  export LDAPTLS_REQCERT
+fi
+auth_args+=(-w "$MW_BIND_PW")
 
 if [[ "$DRY_RUN" != "1" ]]; then
   if ! "$LDAPWHOAMI" "${auth_args[@]}" >/dev/null 2>&1; then

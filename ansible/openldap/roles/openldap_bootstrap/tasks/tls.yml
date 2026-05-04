@@ -1,0 +1,320 @@
+---
+- name: Validate TLS mode
+  ansible.builtin.assert:
+    that:
+      - openldap_tls_mode in ['starttls_and_ldaps', 'ldaps_only']
+    fail_msg: "openldap_tls_mode must be starttls_and_ldaps or ldaps_only."
+
+- name: Validate TLS cert mode
+  ansible.builtin.assert:
+    that:
+      - openldap_tls_cert_mode in ['external_or_self_signed', 'self_signed', 'external_required']
+    fail_msg: "openldap_tls_cert_mode must be external_or_self_signed, self_signed, or external_required."
+
+- name: Determine whether external TLS PEM content was provided
+  ansible.builtin.set_fact:
+    _openldap_tls_has_external_bundle: >-
+      {{
+        (openldap_tls_ca_cert_pem | default('') | trim | length > 0)
+        and (openldap_tls_cert_pem | default('') | trim | length > 0)
+        and (openldap_tls_key_pem | default('') | trim | length > 0)
+      }}
+    _openldap_tls_partial_external_bundle: >-
+      {{
+        (
+          (openldap_tls_ca_cert_pem | default('') | trim | length > 0)
+          or (openldap_tls_cert_pem | default('') | trim | length > 0)
+          or (openldap_tls_key_pem | default('') | trim | length > 0)
+        )
+        and not (
+          (openldap_tls_ca_cert_pem | default('') | trim | length > 0)
+          and (openldap_tls_cert_pem | default('') | trim | length > 0)
+          and (openldap_tls_key_pem | default('') | trim | length > 0)
+        )
+      }}
+
+- name: Fail when TLS external PEM content is partial
+  ansible.builtin.assert:
+    that:
+      - not _openldap_tls_partial_external_bundle
+    fail_msg: "Provide all of openldap_tls_ca_cert_pem, openldap_tls_cert_pem, and openldap_tls_key_pem together."
+
+- name: Fail when external cert mode requires PEMs but none were provided
+  ansible.builtin.assert:
+    that:
+      - openldap_tls_cert_mode != 'external_required' or _openldap_tls_has_external_bundle
+    fail_msg: "openldap_tls_cert_mode=external_required requires openldap_tls_ca_cert_pem/openldap_tls_cert_pem/openldap_tls_key_pem."
+
+- name: Ensure TLS directory exists
+  ansible.builtin.file:
+    path: "{{ openldap_tls_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Write external TLS CA certificate
+  when: _openldap_tls_has_external_bundle
+  ansible.builtin.copy:
+    dest: "{{ openldap_tls_ca_cert_path }}"
+    content: "{{ openldap_tls_ca_cert_pem | trim }}\n"
+    mode: "0644"
+
+- name: Write external TLS server certificate
+  when: _openldap_tls_has_external_bundle
+  ansible.builtin.copy:
+    dest: "{{ openldap_tls_cert_path }}"
+    content: "{{ openldap_tls_cert_pem | trim }}\n"
+    mode: "0644"
+
+- name: Write external TLS server key
+  when: _openldap_tls_has_external_bundle
+  ansible.builtin.copy:
+    dest: "{{ openldap_tls_key_path }}"
+    content: "{{ openldap_tls_key_pem | trim }}\n"
+    mode: "0600"
+
+- name: Generate self-signed TLS artifacts when required
+  when:
+    - openldap_tls_cert_mode == 'self_signed' or (openldap_tls_cert_mode == 'external_or_self_signed' and not _openldap_tls_has_external_bundle)
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    tls_dir="{{ openldap_tls_dir }}"
+    ca_key="${tls_dir}/ca.key"
+    ca_crt="{{ openldap_tls_ca_cert_path }}"
+    srv_key="{{ openldap_tls_key_path }}"
+    srv_csr="${tls_dir}/ldap.csr"
+    srv_crt="{{ openldap_tls_cert_path }}"
+    san_cnf="${tls_dir}/san.cnf"
+    extra_dns="{{ (openldap_tls_dns_names | default([])) | join(',') }}"
+    extra_ips="{{ (openldap_tls_ips | default([])) | join(',') }}"
+    host_fqdn="$(hostname -f 2>/dev/null || hostname)"
+    host_short="$(hostname -s 2>/dev/null || hostname)"
+
+    mkdir -p "${tls_dir}"
+
+    if [[ ! -f "$ca_key" || ! -f "$ca_crt" ]]; then
+      openssl genrsa -out "$ca_key" 4096
+      openssl req -x509 -new -nodes -key "$ca_key" -sha256 -days 3650 \
+        -subj "/C=US/O=Lab-CA/OU=LDAP/CN=Lab LDAP CA" \
+        -out "$ca_crt"
+    fi
+
+    openssl genrsa -out "$srv_key" 4096
+
+    {
+      echo "[ req ]"
+      echo "default_bits       = 4096"
+      echo "prompt             = no"
+      echo "default_md         = sha256"
+      echo "distinguished_name = dn"
+      echo "req_extensions     = req_ext"
+      echo
+      echo "[ dn ]"
+      echo "C=US"
+      echo "O=Lab-Org"
+      echo "OU=LDAP"
+      echo "CN=${host_fqdn}"
+      echo
+      echo "[ req_ext ]"
+      echo "subjectAltName = @alt_names"
+      echo
+      echo "[ alt_names ]"
+      echo "DNS.1 = ${host_fqdn}"
+      echo "DNS.2 = ${host_short}"
+      echo "DNS.3 = localhost"
+      echo "IP.1 = 127.0.0.1"
+
+      dns_idx=4
+      if [[ -n "${extra_dns}" ]]; then
+        IFS=',' read -r -a dns_arr <<<"${extra_dns}"
+        for dns in "${dns_arr[@]}"; do
+          [[ -n "${dns}" ]] || continue
+          echo "DNS.${dns_idx} = ${dns}"
+          dns_idx=$((dns_idx + 1))
+        done
+      fi
+
+      ip_idx=2
+      if [[ -n "${extra_ips}" ]]; then
+        IFS=',' read -r -a ip_arr <<<"${extra_ips}"
+        for ip in "${ip_arr[@]}"; do
+          [[ -n "${ip}" ]] || continue
+          echo "IP.${ip_idx} = ${ip}"
+          ip_idx=$((ip_idx + 1))
+        done
+      fi
+    } >"${san_cnf}"
+
+    openssl req -new -key "$srv_key" -out "$srv_csr" -config "$san_cnf"
+    openssl x509 -req -in "$srv_csr" -CA "$ca_crt" -CAkey "$ca_key" -CAcreateserial \
+      -out "$srv_crt" -days 825 -sha256 -extensions req_ext -extfile "$san_cnf"
+  args:
+    executable: /bin/bash
+
+- name: Detect symas-openldap user (for ownership fallback)
+  ansible.builtin.getent:
+    database: passwd
+    key: symas-openldap
+  register: _symas_openldap_user_cached
+  failed_when: false
+  changed_when: false
+
+- name: Determine OpenLDAP owner
+  ansible.builtin.set_fact:
+    _openldap_tls_owner: >-
+      {{
+        'ldap'
+        if (_ldap_user is defined and (_ldap_user.ansible_facts.getent_passwd is defined))
+        else (
+          'symas-openldap'
+          if ((_symas_openldap_user_cached.ansible_facts | default({})).getent_passwd is defined)
+          else 'root'
+        )
+      }}
+
+- name: Set TLS ownership and permissions
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ _openldap_tls_owner }}"
+    group: "{{ _openldap_tls_owner }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ openldap_tls_ca_cert_path }}", mode: "0644" }
+    - { path: "{{ openldap_tls_cert_path }}", mode: "0644" }
+    - { path: "{{ openldap_tls_key_path }}", mode: "0600" }
+
+- name: Configure ldap client CA trust
+  ansible.builtin.lineinfile:
+    path: /opt/symas/etc/openldap/ldap.conf
+    regexp: '^TLS_CACERT\s+'
+    line: "TLS_CACERT {{ openldap_tls_ca_cert_path }}"
+    create: true
+    mode: "0644"
+
+- name: Apply TLS attributes in cn=config
+  ansible.builtin.command:
+    argv:
+      - /opt/symas/bin/ldapmodify
+      - -Y
+      - EXTERNAL
+      - -H
+      - "{{ openldap_ldapi_uri }}"
+    stdin: |
+      dn: cn=config
+      changetype: modify
+      replace: olcTLSCACertificateFile
+      olcTLSCACertificateFile: {{ openldap_tls_ca_cert_path }}
+      -
+      replace: olcTLSCertificateFile
+      olcTLSCertificateFile: {{ openldap_tls_cert_path }}
+      -
+      replace: olcTLSCertificateKeyFile
+      olcTLSCertificateKeyFile: {{ openldap_tls_key_path }}
+      -
+      replace: olcTLSProtocolMin
+      olcTLSProtocolMin: 3.3
+  changed_when: false
+
+- name: Detect non-TLS syncrepl providers
+  ansible.builtin.shell: |
+    set -euo pipefail
+    /opt/symas/bin/ldapsearch -o ldif-wrap=no -Y EXTERNAL -H "{{ openldap_ldapi_uri }}" \
+      -b cn=config -LLL olcSyncRepl 2>/dev/null | grep -qi 'provider=ldap://'
+  args:
+    executable: /bin/bash
+  register: _openldap_non_tls_syncrepl
+  failed_when: false
+  changed_when: false
+
+- name: Set effective TLS simple-bind enforcement flag
+  ansible.builtin.set_fact:
+    openldap_tls_simple_bind_enforced: "{{ (openldap_require_tls_simple_binds | bool) and (_openldap_non_tls_syncrepl.rc != 0) }}"
+
+- name: Enforce TLS for simple binds
+  when: openldap_tls_simple_bind_enforced | bool
+  ansible.builtin.shell: |
+    set -euo pipefail
+    current="$(
+      /opt/symas/bin/ldapsearch -o ldif-wrap=no -Y EXTERNAL -H "{{ openldap_ldapi_uri }}" \
+        -b cn=config -s base -LLL olcSecurity 2>/dev/null \
+        | awk -F': ' '/^olcSecurity:/ {print $2}' \
+        | awk '/simple_bind=/{print; exit}'
+    )"
+
+    if [[ -z "${current}" ]]; then
+      printf '%s\n' \
+        'dn: cn=config' \
+        'changetype: modify' \
+        'add: olcSecurity' \
+        'olcSecurity: simple_bind=128' \
+        | /opt/symas/bin/ldapmodify -Y EXTERNAL -H "{{ openldap_ldapi_uri }}"
+      exit 0
+    fi
+
+    if [[ "${current}" == "simple_bind=128" ]]; then
+      exit 0
+    fi
+
+    printf '%s\n' \
+      'dn: cn=config' \
+      'changetype: modify' \
+      'delete: olcSecurity' \
+      "olcSecurity: ${current}" \
+      '-' \
+      'add: olcSecurity' \
+      'olcSecurity: simple_bind=128' \
+      | /opt/symas/bin/ldapmodify -Y EXTERNAL -H "{{ openldap_ldapi_uri }}"
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Build SLAPD_URLS with TLS listener mode
+  ansible.builtin.set_fact:
+    _openldap_slapd_urls: >-
+      {{
+        (
+          'ldap://127.0.0.1:' ~ (openldap_ldap_port | string) ~
+          ' ldap://' ~ openldap_private_ip ~ ':' ~ (openldap_ldap_port | string) ~
+          ' ldaps://' ~ openldap_private_ip ~ ':' ~ (openldap_ldaps_port | string) ~
+          ' ldapi:///'
+        )
+        if openldap_tls_mode == 'starttls_and_ldaps'
+        else
+        (
+          'ldaps://' ~ openldap_private_ip ~ ':' ~ (openldap_ldaps_port | string) ~
+          ' ldapi:///'
+        )
+      }}
+
+- name: Set SLAPD_URLS for secure listeners
+  ansible.builtin.lineinfile:
+    path: /etc/default/symas-openldap
+    regexp: '^SLAPD_URLS='
+    line: "SLAPD_URLS=\"{{ _openldap_slapd_urls }}\""
+    create: true
+    mode: "0644"
+
+- name: Restart OpenLDAP service after TLS configuration
+  ansible.builtin.service:
+    name: symas-openldap-servers
+    state: restarted
+    enabled: true
+
+- name: Verify StartTLS and LDAPS listeners are available
+  when: openldap_tls_mode == 'starttls_and_ldaps'
+  ansible.builtin.shell: |
+    set -euo pipefail
+    ss -lntp | grep -E '[:.]{{ openldap_ldap_port }}\b'
+    ss -lntp | grep -E '[:.]{{ openldap_ldaps_port }}\b'
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Verify LDAPS listener is available (ldaps_only mode)
+  when: openldap_tls_mode == 'ldaps_only'
+  ansible.builtin.shell: |
+    set -euo pipefail
+    ss -lntp | grep -E '[:.]{{ openldap_ldaps_port }}\b'
+  args:
+    executable: /bin/bash
+  changed_when: false

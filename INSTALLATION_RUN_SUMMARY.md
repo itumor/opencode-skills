@@ -16,7 +16,7 @@
 ✅ Removed old script directory from remote machine
 ✅ Copied updated scripts to `/root/script/`
 ✅ Made all scripts executable (`chmod +x -R`)
-✅ Created automated installation wrapper (`install-automated.sh`)
+✅ Created installation wrapper (`install-symas-openldap-all-in-one.sh`)
 
 ### 2. Installation Execution
 
@@ -24,7 +24,7 @@ Ran the updated `install-symas-openldap-all-in-one.sh` script which included:
 
 #### Phase 1: Base Installation & Configuration
 - ✅ `1-install-symas-openldap.sh` - Installed Symas OpenLDAP 2.6.10-5.el9.aarch64
-- ✅ `2-Override-System-Limits.sh` - Configured system limits
+- ✅ `22-tuning.sh` - Configured system limits (systemd drop-in + defaults)
 - ✅ `3-install-example.sh` - Set up example database (cn=config)
   - Configured with cn=config database option
   - Created example DC: `dc=eab,dc=bank,dc=local`
@@ -42,9 +42,7 @@ Ran the updated `install-symas-openldap-all-in-one.sh` script which included:
 - ✅ `9.2-load_lst_bind.sh` - Loaded bind module
 - ✅ `10-ppolicy-container.sh` - Created password policy container
 - ✅ `10.0-password_policy_make_default.sh` - Set default password policy
-- ✅ `10.1-load_lst_bind.sh` - Additional bind configuration
-- ✅ `10.2-load_configure_PPM.sh` - Loaded and configured PPM
-- ✅ `10.3-confiure_decode_PPM_conf.sh` - Configured PPM decoding
+- ✅ `16-add-strong-password-quality-checker-PPM.sh` - Loaded and configured PPM + enforced strong password checks
 
 #### Phase 3: Schema & User Management
 - ✅ `12-Create_custom_schema.sh` - Created custom schema
@@ -166,7 +164,7 @@ cd /root/script
 ### To Re-run Installation
 ```bash
 cd /root/script
-./install-automated.sh
+./install-symas-openldap-all-in-one.sh
 ```
 
 ---

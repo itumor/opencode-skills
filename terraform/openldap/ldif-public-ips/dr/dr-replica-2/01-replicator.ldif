@@ -1,0 +1,6 @@
+dn: cn=replicator,dc=cae,dc=local
+objectClass: simpleSecurityObject
+objectClass: organizationalRole
+cn: replicator
+userPassword: {SSHA}yViD/zI8IRspUMEYqpxLVtR8+R33UPLl
+description: Replication user

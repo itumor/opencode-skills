@@ -1,0 +1,75 @@
+---
+- name: Fix Symas OpenLDAP serverID URL mismatch (offline edit) and restart
+  hosts: all
+  gather_facts: false
+  become: true
+  ignore_unreachable: true
+
+  tasks:
+    - name: Derive role from hostname
+      ansible.builtin.set_fact:
+        _is_master: "{{ inventory_hostname is match('.*-master-\\d+$') }}"
+        _node_index: "{{ (inventory_hostname | regex_search('-(\\d+)$', '\\1')) | int }}"
+
+    - name: Compute expected server id (Terraform scheme)
+      ansible.builtin.set_fact:
+        _server_id: "{{ _is_master | ternary(_node_index, 100 + _node_index) }}"
+
+    - name: Check Symas cn=config dir exists
+      ansible.builtin.stat:
+        path: /opt/symas/etc/openldap/slapd.d
+      register: _slapdd
+
+    - name: Apply offline serverID fix (edit cn=config.ldif + slaptest -u)
+      when:
+        - _slapdd is defined
+        - _slapdd.stat is defined
+        - _slapdd.stat.exists | bool
+      ansible.builtin.shell:
+        cmd: |
+          set -euo pipefail
+
+          conf_dir="/opt/symas/etc/openldap/slapd.d"
+          cn_cfg="${conf_dir}/cn=config.ldif"
+          sid="${OPENLDAP_SERVER_ID}"
+          test -f "$cn_cfg"
+
+          # Stop if running. (If it's failed, this is a no-op.)
+          if systemctl list-unit-files | grep -q '^symas-openldap-servers\\.service'; then
+            systemctl stop symas-openldap-servers >/dev/null 2>&1 || true
+          fi
+
+          # Force numeric-only serverID to avoid URL/listener matching issues.
+          # Also de-duplicate: some past runs may have appended multiple olcServerID values,
+          # and modern slapd will refuse to start with multiple values.
+          tmp="$(mktemp)"
+          awk -v sid="${sid}" '
+            /^olcServerID:/ { next }
+            { print }
+            /^createTimestamp:/ { print "olcServerID: " sid }
+          ' "$cn_cfg" >"$tmp"
+          mv -f "$tmp" "$cn_cfg"
+
+          # Ensure sane permissions/labels after rewriting (SELinux can block even root).
+          chmod 0755 "$conf_dir" || true
+          chmod 0640 "$cn_cfg" || true
+          if command -v restorecon >/dev/null 2>&1; then
+            restorecon -Rv "$conf_dir" /var/symas/openldap-data /var/symas/run >/dev/null 2>&1 || true
+          fi
+
+          # Regenerate checksums / validate config.
+          if command -v /opt/symas/sbin/slaptest >/dev/null 2>&1; then
+            /opt/symas/sbin/slaptest -F "$conf_dir" -u
+          elif command -v slaptest >/dev/null 2>&1; then
+            slaptest -F "$conf_dir" -u
+          fi
+
+          # Start and confirm.
+          if systemctl list-unit-files | grep -q '^symas-openldap-servers\\.service'; then
+            systemctl start symas-openldap-servers
+            systemctl is-active --quiet symas-openldap-servers
+          fi
+      args:
+        executable: /bin/bash
+      environment:
+        OPENLDAP_SERVER_ID: "{{ _server_id }}"

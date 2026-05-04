@@ -26,9 +26,11 @@ if [[ ! -x "$CREATE_SCRIPT" ]]; then
   exit 1
 fi
 
-LDAP_URI="${LDAP_URI:-ldap:///}"
+LDAP_URI="${LDAP_URI:-ldap://localhost}"
+LDAP_STARTTLS="${LDAP_STARTTLS:-1}"
+LDAPTLS_REQCERT="${LDAPTLS_REQCERT:-never}"
 MW_BIND_DN="${MW_BIND_DN:-uid=mw,ou=ServiceAccounts,ou=Systems,dc=eab,dc=bank,dc=local}"
-MW_BIND_PW="${MW_BIND_PW:-}"
+MW_BIND_PW="${MW_BIND_PW:-ChangeMe123!}"
 USER_BASE_DN="${USER_BASE_DN:-ou=Users,dc=eab,dc=bank,dc=local}"
 
 if [[ -z "$MW_BIND_PW" ]]; then
@@ -42,6 +44,8 @@ USER_UID="mwtest${timestamp}"
 MW_BIND_DN="$MW_BIND_DN" \
 MW_BIND_PW="$MW_BIND_PW" \
 LDAP_URI="$LDAP_URI" \
+USE_STARTTLS="$LDAP_STARTTLS" \
+LDAPTLS_REQCERT="$LDAPTLS_REQCERT" \
 USER_BASE_DN="$USER_BASE_DN" \
 USER_UID="$USER_UID" \
 USER_CN="MW Test ${timestamp}" \
@@ -54,6 +58,10 @@ VERIFY_BIND_DN="${ADMIN_BIND_DN:-$MW_BIND_DN}"
 VERIFY_BIND_PW="${ADMIN_BIND_PW:-$MW_BIND_PW}"
 
 verify_args=(-x -H "$LDAP_URI" -D "$VERIFY_BIND_DN" -w "$VERIFY_BIND_PW")
+if [[ "$LDAP_STARTTLS" == "1" ]]; then
+  verify_args+=(-ZZ)
+  export LDAPTLS_REQCERT
+fi
 if ! "$LDAPWHOAMI" "${verify_args[@]}" >/dev/null 2>&1; then
   echo "[FATAL] Verify bind failed for ${VERIFY_BIND_DN}" >&2
   exit 1

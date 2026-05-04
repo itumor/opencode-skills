@@ -1,0 +1,485 @@
+---
+- name: Gather minimal facts (distro + network)
+  ansible.builtin.setup:
+    gather_subset:
+      - "!all"
+      - "!min"
+      - network
+      - platform
+
+- name: Capture inventory hostname and optional EC2 tags (dynamic inventory)
+  ansible.builtin.set_fact:
+    openldap_name_tag: "{{ inventory_hostname }}"
+    _openldap_tag_vpc: "{{ (ec2_tags | default({})).get('VPC', '') }}"
+    _openldap_tag_role: "{{ (ec2_tags | default({})).get('Role', '') }}"
+
+- name: Derive node key (strip project_name prefix)
+  ansible.builtin.set_fact:
+    openldap_node_key: "{{ openldap_name_tag | regex_replace('^' + (openldap_project_name | regex_escape) + '-', '') }}"
+
+- name: Split node key for static inventory fallback (vpc-role-index)
+  ansible.builtin.set_fact:
+    _openldap_node_parts: "{{ openldap_node_key.split('-') }}"
+
+- name: Derive vpc/role from tags (preferred) or hostname (static inventory)
+  ansible.builtin.set_fact:
+    openldap_vpc_name: "{{ ((_openldap_tag_vpc | length > 0) | ternary(_openldap_tag_vpc, (_openldap_node_parts[0] | default('')))) | lower }}"
+    openldap_role: "{{ ((_openldap_tag_role | length > 0) | ternary(_openldap_tag_role, (_openldap_node_parts[1] | default('')))) | lower }}"
+    openldap_node_index: "{{ (_openldap_node_parts | last | default('0')) | int }}"
+
+- name: Determine private IP (prefer Terraform-rendered host var)
+  ansible.builtin.set_fact:
+    openldap_private_ip: "{{ ec2_private_ip_address | default(ansible_default_ipv4.address) }}"
+
+- name: Validate required identity vars
+  ansible.builtin.assert:
+    that:
+      - openldap_role in ['master','replica']
+      - openldap_vpc_name in ['live','dr']
+      - openldap_private_ip | length > 0
+    fail_msg: "Missing required identity vars (Role/VPC tags or hostname parsing)."
+
+- name: Keepalived computed defaults (only master-1 in each VPC)
+  ansible.builtin.set_fact:
+    openldap_keepalived_enabled: "{{ (openldap_enable_keepalived | bool) and (openldap_role == 'master') and (openldap_node_index == 1) }}"
+    openldap_keepalived_role: "{{ (openldap_vpc_name == 'live') | ternary('MASTER', 'BACKUP') }}"
+    openldap_keepalived_priority: "{{ (openldap_vpc_name == 'live') | ternary(200, 150) }}"
+
+- name: Compute keepalived peer IP (live<->dr master-1)
+  vars:
+    live_master_1: "{{ (groups['vpc_live'] | default([])) | intersect(groups['role_master'] | default([])) | select('match', '.*-live-master-1$') | list | first | default('') }}"
+    dr_master_1: "{{ (groups['vpc_dr'] | default([])) | intersect(groups['role_master'] | default([])) | select('match', '.*-dr-master-1$') | list | first | default('') }}"
+  ansible.builtin.set_fact:
+    openldap_keepalived_peer_ip: >-
+      {{
+        (openldap_vpc_name == 'live')
+        | ternary(
+            (dr_master_1 | length > 0) | ternary(hostvars[dr_master_1].ec2_private_ip_address | default(''), ''),
+            (live_master_1 | length > 0) | ternary(hostvars[live_master_1].ec2_private_ip_address | default(''), '')
+          )
+      }}
+
+- name: Ensure swap exists (avoid OOM during dnf on small instances)
+  when: openldap_enable_swap | bool
+  block:
+    - name: Create swapfile if missing
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if swapon --show | awk '{print $1}' | grep -q '^/swapfile$'; then
+          exit 0
+        fi
+        if [[ ! -f /swapfile ]]; then
+          if command -v fallocate >/dev/null 2>&1; then
+            fallocate -l {{ openldap_swap_mb }}M /swapfile || true
+          fi
+          if [[ ! -s /swapfile ]]; then
+            dd if=/dev/zero of=/swapfile bs=1M count={{ openldap_swap_mb }}
+          fi
+          chmod 600 /swapfile
+          mkswap /swapfile >/dev/null 2>&1 || true
+        fi
+        swapon /swapfile >/dev/null 2>&1 || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+- name: Ensure base directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /opt/openldap
+    - /opt/openldap/bootstrap
+
+- name: Install dependencies (curl/awscli)
+  ansible.builtin.dnf:
+    name:
+      - curl
+      - awscli
+    state: present
+  failed_when: false
+
+- name: Configure Symas OpenLDAP repo
+  ansible.builtin.get_url:
+    url: "{{ openldap_symas_repo_url }}"
+    dest: /etc/yum.repos.d/soldap-release26.repo
+    mode: "0644"
+
+- name: Install Symas OpenLDAP packages
+  ansible.builtin.dnf:
+    name:
+      - symas-openldap-servers
+      - symas-openldap-clients
+    state: present
+
+- name: Check whether Symas cn=config already exists
+  ansible.builtin.stat:
+    path: /opt/symas/etc/openldap/slapd.d/cn=config.ldif
+  register: _symas_cnconfig
+
+- name: Detect ldap user
+  ansible.builtin.getent:
+    database: passwd
+    key: ldap
+  register: _ldap_user
+  failed_when: false
+  changed_when: false
+
+- name: Initialize Symas cn=config (offline slapadd) if missing
+  when: not (_symas_cnconfig.stat.exists | default(false) | bool)
+  block:
+    - name: Ensure Symas directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - /opt/symas/etc/openldap/slapd.d
+        - /var/symas/openldap-data
+        - /var/symas/run
+
+    - name: Best-effort restore SELinux contexts (Symas paths)
+      ansible.builtin.command: restorecon -Rv /opt/symas/etc/openldap/slapd.d /var/symas/openldap-data /var/symas/run
+      changed_when: false
+      failed_when: false
+
+    - name: Hash admin password (slappasswd)
+      ansible.builtin.command: /opt/symas/sbin/slappasswd -s {{ openldap_admin_pw | quote }}
+      register: _admin_hashed
+      changed_when: false
+
+    - name: Slurp Symas schema LDIFs (remote)
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      register: _schema_slurp
+      failed_when: false
+      changed_when: false
+      loop: "{{ openldap_symas_schema_files }}"
+
+    - name: Publish schema contents
+      ansible.builtin.set_fact:
+        _schema_contents: >-
+          {{
+            dict(
+              _schema_slurp.results
+              | selectattr('content', 'defined')
+              | map(attribute='item')
+              | zip(
+                _schema_slurp.results
+                | selectattr('content', 'defined')
+                | map(attribute='content')
+                | map('b64decode')
+              )
+            )
+          }}
+
+    - name: Render Symas bootstrap LDIF (cn=config + schema)
+      ansible.builtin.copy:
+        dest: /tmp/symas-slapd.ldif
+        mode: "0600"
+        content: |
+          dn: cn=config
+          objectClass: olcGlobal
+          cn: config
+          olcArgsFile: /var/symas/run/slapd.args
+          olcPidFile: /var/symas/run/slapd.pid
+          olcAuthzRegexp: gidNumber=0\+uidNumber=0,cn=peercred,cn=external,cn=auth cn=config
+
+          dn: cn=module{0},cn=config
+          objectClass: olcModuleList
+          cn: module{0}
+          olcModulepath: /opt/symas/lib/openldap
+          olcModuleload: back_mdb.la
+
+          dn: cn=schema,cn=config
+          objectClass: olcSchemaConfig
+          cn: schema
+
+          dn: olcDatabase=frontend,cn=config
+          objectClass: olcDatabaseConfig
+          objectClass: olcFrontendConfig
+          olcDatabase: frontend
+
+          dn: olcDatabase={1}mdb,cn=config
+          objectClass: olcDatabaseConfig
+          objectClass: olcMdbConfig
+          olcDatabase: {1}mdb
+          olcDbMaxSize: 1073741824
+          olcSuffix: {{ openldap_base_dn }}
+          olcRootDN: {{ openldap_admin_dn }}
+          olcRootPW: {{ _admin_hashed.stdout }}
+          olcDbDirectory: /var/symas/openldap-data
+          olcDbIndex: objectClass eq
+
+          dn: olcDatabase=monitor,cn=config
+          objectClass: olcDatabaseConfig
+          olcDatabase: monitor
+          olcRootDN: cn=config
+          olcMonitoring: FALSE
+
+          {{ (_schema_contents.get('/opt/symas/etc/openldap/schema/core.ldif', '') | trim) }}
+
+          {{ (_schema_contents.get('/opt/symas/etc/openldap/schema/cosine.ldif', '') | trim) }}
+
+          {{ (_schema_contents.get('/opt/symas/etc/openldap/schema/inetorgperson.ldif', '') | trim) }}
+
+          {{ (_schema_contents.get('/opt/symas/etc/openldap/schema/nis.ldif', '') | trim) }}
+
+    - name: Reset cn=config directory (fresh init)
+      ansible.builtin.file:
+        path: /opt/symas/etc/openldap/slapd.d
+        state: absent
+
+    - name: Recreate cn=config directory
+      ansible.builtin.file:
+        path: /opt/symas/etc/openldap/slapd.d
+        state: directory
+        mode: "0755"
+
+    - name: Run slapadd to initialize cn=config
+      ansible.builtin.command: /opt/symas/sbin/slapadd -n 0 -F /opt/symas/etc/openldap/slapd.d -l /tmp/symas-slapd.ldif
+
+    - name: Best-effort restore SELinux contexts after slapadd
+      ansible.builtin.command: restorecon -Rv /opt/symas/etc/openldap/slapd.d /var/symas/openldap-data /var/symas/run
+      changed_when: false
+      failed_when: false
+
+    - name: Chown Symas dirs to ldap user (if present)
+      when: _ldap_user is defined and (_ldap_user.ansible_facts.getent_passwd is defined)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        recurse: true
+        owner: ldap
+        group: ldap
+      loop:
+        - /opt/symas/etc/openldap/slapd.d
+        - /var/symas/openldap-data
+        - /var/symas/run
+
+- name: Configure Symas systemd defaults (SLAPD_URLS + cn=config dir)
+  vars:
+    _slapd_opts: >-
+      {{
+        ('-F /opt/symas/etc/openldap/slapd.d -u ldap -g ldap')
+        if (_ldap_user is defined and (_ldap_user.ansible_facts.getent_passwd is defined))
+        else
+        ('-F /opt/symas/etc/openldap/slapd.d')
+      }}
+  ansible.builtin.copy:
+    dest: /etc/default/symas-openldap
+    mode: "0644"
+    content: |
+      # Keep an explicit URL that matches olcServerID URL values in LDIF bundles.
+      SLAPD_URLS="ldap://127.0.0.1:{{ openldap_ldap_port }} ldap://{{ openldap_private_ip }}:{{ openldap_ldap_port }} ldapi:///"
+      SLAPD_OPTIONS="{{ _slapd_opts }}"
+
+- name: Start Symas OpenLDAP service
+  ansible.builtin.service:
+    name: symas-openldap-servers
+    state: started
+    enabled: true
+
+- name: Wait for LDAPI EXTERNAL bind to succeed
+  ansible.builtin.command:
+    argv:
+      - /opt/symas/bin/ldapwhoami
+      - -Y
+      - EXTERNAL
+      - -H
+      - "{{ openldap_ldapi_uri }}"
+  register: _whoami_ext
+  retries: 60
+  delay: 2
+  until: _whoami_ext.rc == 0
+  changed_when: false
+
+- name: Probe whether simple bind currently requires TLS
+  ansible.builtin.command:
+    argv:
+      - /opt/symas/bin/ldapwhoami
+      - -x
+      - -o
+      - nettimeout=5
+      - -H
+      - "ldap://localhost:{{ openldap_ldap_port }}"
+      - -D
+      - "{{ openldap_admin_dn }}"
+      - -w
+      - "{{ openldap_admin_pw }}"
+  register: _whoami_plain_probe
+  failed_when: false
+  changed_when: false
+
+- name: Determine whether bootstrap admin binds should use StartTLS
+  ansible.builtin.set_fact:
+    _bootstrap_admin_use_starttls: >-
+      {{
+        (_whoami_plain_probe.rc != 0) and
+        ((_whoami_plain_probe.stderr | default('')) is search('Confidentiality required'))
+      }}
+  changed_when: false
+
+- name: Wait for LDAP listener to accept admin bind (localhost)
+  vars:
+    _bootstrap_whoami_argv: "{{ ['/opt/symas/bin/ldapwhoami', '-x', '-o', 'nettimeout=5', '-H', 'ldap://localhost:' ~ (openldap_ldap_port | string)] + (['-ZZ'] if (_bootstrap_admin_use_starttls | bool) else []) + ['-D', openldap_admin_dn, '-w', openldap_admin_pw] }}"
+  ansible.builtin.command:
+    argv: "{{ _bootstrap_whoami_argv }}"
+  register: _whoami_simple
+  retries: 60
+  delay: 2
+  until: _whoami_simple.rc == 0
+  changed_when: false
+
+- name: Hash admin password for olcRootPW
+  ansible.builtin.command: /opt/symas/sbin/slappasswd -s {{ openldap_admin_pw | quote }}
+  register: _admin_hashed_runtime
+  changed_when: false
+
+- name: Configure base DN and root DN on mdb database (cn=config)
+  ansible.builtin.command:
+    argv:
+      - /opt/symas/bin/ldapmodify
+      - -Y
+      - EXTERNAL
+      - -H
+      - "{{ openldap_ldapi_uri }}"
+    stdin: |
+      dn: {{ openldap_db_dn }}
+      changetype: modify
+      replace: olcSuffix
+      olcSuffix: {{ openldap_base_dn }}
+      -
+      replace: olcRootDN
+      olcRootDN: {{ openldap_admin_dn }}
+      -
+      replace: olcRootPW
+      olcRootPW: {{ _admin_hashed_runtime.stdout }}
+  changed_when: false
+
+- name: Check base DN exists (admin bind)
+  vars:
+    _bootstrap_base_check_argv: "{{ ['/opt/symas/bin/ldapsearch', '-LLL', '-x', '-o', 'nettimeout=5', '-o', 'timelimit=10', '-H', 'ldap://localhost:' ~ (openldap_ldap_port | string)] + (['-ZZ'] if (_bootstrap_admin_use_starttls | bool) else []) + ['-D', openldap_admin_dn, '-w', openldap_admin_pw, '-b', openldap_base_dn, '-s', 'base', 'dn'] }}"
+  ansible.builtin.command:
+    argv: "{{ _bootstrap_base_check_argv }}"
+  register: _base_search
+  failed_when: false
+  changed_when: false
+
+- name: Determine whether base DN is present
+  ansible.builtin.set_fact:
+    _base_dn_present: "{{ _base_search.rc == 0 and (_base_search.stdout | regex_search('(?m)^dn:') is not none) }}"
+  changed_when: false
+
+- name: Create base entries (base DN + OUs) if missing
+  when: (not _base_dn_present) and openldap_role == "master"
+  block:
+    - name: Compute first dc for base entry
+      ansible.builtin.set_fact:
+        # regex_search with backreference strings returns a list; use group index to get a scalar string.
+        _base_dc: "{{ (openldap_base_dn | regex_findall('dc=([^,]+)') | first) | default('example') }}"
+
+    - name: Render base LDIF
+      ansible.builtin.copy:
+        dest: /tmp/openldap-base.ldif
+        mode: "0600"
+        content: |
+          dn: {{ openldap_base_dn }}
+          objectClass: top
+          objectClass: dcObject
+          objectClass: organization
+          o: {{ openldap_org_name }}
+          dc: {{ _base_dc }}
+
+          dn: ou=people,{{ openldap_base_dn }}
+          objectClass: organizationalUnit
+          ou: people
+
+          dn: ou=groups,{{ openldap_base_dn }}
+          objectClass: organizationalUnit
+          ou: groups
+
+    - name: Add base LDIF (admin bind)
+      vars:
+        _bootstrap_ldapadd_argv: "{{ ['/opt/symas/bin/ldapadd', '-x', '-o', 'nettimeout=5', '-H', 'ldap://localhost:' ~ (openldap_ldap_port | string)] + (['-ZZ'] if (_bootstrap_admin_use_starttls | bool) else []) + ['-D', openldap_admin_dn, '-w', openldap_admin_pw, '-f', '/tmp/openldap-base.ldif'] }}"
+      ansible.builtin.command:
+        argv: "{{ _bootstrap_ldapadd_argv }}"
+      changed_when: false
+
+    - name: Verify base DN now exists
+      vars:
+        _bootstrap_base_verify_argv: "{{ ['/opt/symas/bin/ldapsearch', '-LLL', '-x', '-o', 'nettimeout=5', '-o', 'timelimit=10', '-H', 'ldap://localhost:' ~ (openldap_ldap_port | string)] + (['-ZZ'] if (_bootstrap_admin_use_starttls | bool) else []) + ['-D', openldap_admin_dn, '-w', openldap_admin_pw, '-b', openldap_base_dn, '-s', 'base', 'dn'] }}"
+      ansible.builtin.command:
+        argv: "{{ _bootstrap_base_verify_argv }}"
+      register: _base_verify
+      retries: 30
+      delay: 2
+      until: _base_verify.rc == 0 and (_base_verify.stdout | regex_search('(?m)^dn:') is not none)
+      changed_when: false
+
+- name: Configure TLS and secure listener settings
+  ansible.builtin.include_tasks: tls.yml
+
+- name: Configure keepalived for EIP failover (masters only)
+  when:
+    - openldap_keepalived_enabled | bool
+    - openldap_keepalived_eip_allocation_id | default('') | length > 0
+    - openldap_keepalived_peer_ip | default('') | length > 0
+  block:
+    - name: Install keepalived
+      ansible.builtin.dnf:
+        name:
+          - keepalived
+          - awscli
+        state: present
+
+    - name: Render keepalived.conf
+      vars:
+        _iface: "{{ ansible_default_ipv4.interface }}"
+        _iid: "{{ ec2_instance_id | default('') }}"
+        _region: "{{ openldap_aws_region }}"
+        _eip: "{{ openldap_keepalived_eip_allocation_id }}"
+      ansible.builtin.copy:
+        dest: /etc/keepalived/keepalived.conf
+        mode: "0644"
+        content: |
+          vrrp_instance VI_1 {
+            state {{ openldap_keepalived_role }}
+            interface {{ _iface }}
+            virtual_router_id 51
+            priority {{ openldap_keepalived_priority }}
+            advert_int 1
+            unicast_src_ip {{ openldap_private_ip }}
+            unicast_peer {
+              {{ openldap_keepalived_peer_ip }}
+            }
+            authentication {
+              auth_type PASS
+              auth_pass {{ openldap_keepalived_auth_pass }}
+            }
+            track_process {
+              slapd
+            }
+            notify_master "/usr/bin/aws ec2 associate-address --allocation-id {{ _eip }} --instance-id {{ _iid }} --allow-reassociation --region {{ _region }}"
+          }
+
+    - name: Enable keepalived
+      ansible.builtin.service:
+        name: keepalived
+        state: started
+        enabled: true
+
+- name: Mark bootstrap complete
+  ansible.builtin.file:
+    path: /opt/openldap/.bootstrap_done
+    state: touch
+    mode: "0644"
+
+- name: Ensure keepalived is stopped when not enabled (stability for future runs)
+  when: not (openldap_enable_keepalived | bool)
+  ansible.builtin.service:
+    name: keepalived
+    state: stopped
+    enabled: false
+  failed_when: false
