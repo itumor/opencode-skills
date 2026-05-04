@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Minimal bootstrap so this instance can be used as an LDAP/LDAPS test box.
+
+dnf -y install openldap-clients openssl nmap-ncat >/dev/null 2>&1 || true
+
+cat >/usr/local/bin/ldaps-test <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+HOST="$${1:-$${LDAPS_HOST:-}}"
+PORT="$${2:-$${LDAPS_PORT:-636}}"
+
+if [[ -z "$${HOST}" ]]; then
+  echo "Usage: ldaps-test <host> [port]" >&2
+  echo "Tip: export LDAPS_HOST=... and optionally LDAPS_PORT=636" >&2
+  exit 2
+fi
+
+echo "[INFO] TCP check: $${HOST}:$${PORT}"
+nc -vz -w 5 "$${HOST}" "$${PORT}"
+
+echo
+echo "[INFO] TLS handshake (certificate validation may fail if hostname/SANs don't match):"
+echo | openssl s_client -connect "$${HOST}:$${PORT}" -servername "$${HOST}" -showcerts 2>&1 | head -n 40 || true
+
+echo
+echo "[INFO] LDAP whoami (anonymous bind, may fail if server disallows anonymous):"
+ldapwhoami -x -H "ldaps://$${HOST}:$${PORT}" 2>&1 || true
+EOF
+
+chmod 0755 /usr/local/bin/ldaps-test
+
+cat >/etc/profile.d/ldaps-env.sh <<EOF
+export LDAPS_HOST="${ldaps_host}"
+export LDAPS_PORT="${ldaps_port}"
+EOF

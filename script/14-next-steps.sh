@@ -11,7 +11,9 @@ next_steps=(
   "21 - hardening"
   "22 - tuning"
   "23 - ensure installation not under root"
-  "24 - configure SSL/TLS"
+  "24 - configure TLS"
+  "25 - configure accesslog audit overlay"
+  "26 - configure bindings (replication bind user + ACL)"
 )
 
 printf '%s\n' "${next_steps[@]}"

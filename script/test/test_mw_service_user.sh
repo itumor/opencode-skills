@@ -48,8 +48,10 @@ BASE_DN="${BASE_DN:-dc=eab,dc=bank,dc=local}"
 BIND_DN="${BIND_DN:-cn=admin,${BASE_DN}}"
 LDAP_URI="${LDAP_URI:-ldap://localhost}"
 BIND_PW="${BIND_PW:-$(read_exampledb_password "$EXAMPLEDB_FILE" || true)}"
+LDAP_STARTTLS="${LDAP_STARTTLS:-1}"
+LDAPTLS_REQCERT="${LDAPTLS_REQCERT:-never}"
 
-SERVICE_OU="${SERVICE_OU:-ou=ServiceAccounts,${BASE_DN}}"
+SERVICE_OU="${SERVICE_OU:-ou=ServiceAccounts,ou=Systems,${BASE_DN}}"
 MW_UID="${MW_UID:-mw}"
 MW_DN="uid=${MW_UID},${SERVICE_OU}"
 
@@ -57,7 +59,12 @@ AUTH_ARGS=( -x -D "$BIND_DN" )
 if [[ -n "$BIND_PW" ]]; then
   AUTH_ARGS+=( -w "$BIND_PW" )
 else
-  AUTH_ARGS+=( -W )
+  echo "BIND_PW is empty and could not be auto-detected from ${EXAMPLEDB_FILE}. Set BIND_PW to run this test non-interactively." >&2
+  exit 1
+fi
+if [[ "$LDAP_STARTTLS" == "1" ]]; then
+  AUTH_ARGS+=( -ZZ )
+  export LDAPTLS_REQCERT
 fi
 
 echo "======================================"

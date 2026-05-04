@@ -1,0 +1,8 @@
+---
+# Remote staging root (matches terraform/openldap/ldif-public-ips/apply_over_ssh.sh)
+openldap_ldif_public_ips_remote_root: /tmp/ldif-public-ips
+
+# Also apply terraform/openldap/ldif-public-ips/cross-vpc/* bundles to master-1 nodes.
+# This is optional (see terraform/openldap/ldif-public-ips/README.md).
+openldap_ldif_public_ips_apply_cross_vpc: false
+

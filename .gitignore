@@ -28,3 +28,10 @@ terraform.rc
 .terraform.d/
 *.tfstate.backup
 .terraform.tfstate.lock.info
+terraform/key.aws.text
+terraform/ec2-rhel97/.local-ssh/
+terraform/openldap/.local-ssh/
+terraform/openldap/reports/ansible_inventory.ini
+terraform/openldap/reports/ansible_extra_vars.json
+terraform/openldap/tools/load/runs/20260212T105929Z/logs/*
+terraform/openldap/tools/load/runs/20260212T105929Z/state

@@ -105,66 +105,165 @@ Each environment (DEV/QA/PROD) hosts an OpenLDAP cluster of at least two nodes (
 ---
 
 ### 6. Modules, Overlays, and Features
-6.1 **Modules**  
-- Default modules: `back_mdb`, `syncprov`, `pcache`, `ppolicy`.  
-- Additional modules loaded in cn=config via `olcModuleLoad`.
 
-6.2 **Overlays**  
-- `syncprov`: required for replication.  
-- `accesslog`: captures change history per database.  
-- `ppolicy`: enforces password policies (lockout, grace logins).  
-- `memberof`: maintain membership attribute (if required).  
-- `rwm` (rewrite/remap): for protocol translation when needed.
+6.1 **Required Modules (Current Project Baseline)**  
+- `back_mdb`: MDB backend (primary data store).  
+- `syncprov`: replication provider for MirrorMode and delta sync (`openldap-mirrormode/ldif/19-load-syncprov.ldif`).  
+- `ppolicy`: password policy overlay (`script/9-password_policy.sh`).  
+- `ppm`: password quality check module used by ppolicy (`script/16-add-strong-password-quality-checker-PPM.sh`).  
+- `accesslog`: audit logging overlay for admin/system/user events (`script/25-configure-accesslog-audit.sh`).  
+- `back_monitor` (optional): diagnostic monitoring (`cn=Monitor` queries).  
 
-6.3 **Justification**  
-- `syncprov` ensures consistency for syncrepl consumers.  
-- `accesslog` enables audit and assists with delta sync.  
-- `ppolicy` maintains password hygiene and compliance.  
-- Others (memberof, rwm) only loaded when business requirements demand.
+6.2 **Overlays (Load Order)**  
+1. `syncprov`: required for replication and MirrorMode consistency.  
+2. `ppolicy`: required for password policy enforcement and compliance.  
+3. `accesslog`: required for audit trail (admin, system, and user operations).  
+4. `memberof` (deferred): not part of current baseline, enable only if business logic requires reverse membership attributes.  
+5. `rwm` (deferred): not part of current baseline, enable only for protocol translation/remap requirements.  
+
+6.3 **Configuration Example**  
+```ldif
+dn: cn=module{0},cn=config
+changetype: modify
+add: olcModuleLoad
+olcModuleLoad: syncprov
+olcModuleLoad: ppolicy
+olcModuleLoad: ppm
+olcModuleLoad: accesslog
+```
+
+6.4 **Justification**  
+- `syncprov` ensures consistency for syncrepl consumers and enables MirrorMode.  
+- `ppolicy` + `ppm` enforce password hygiene and strong password quality rules.  
+- `accesslog` provides comprehensive audit trails for compliance and troubleshooting.  
+- `memberof` and `rwm` remain explicitly out of the current implementation baseline to avoid unnecessary runtime complexity.
 
 ---
 
 ### 7. Schema Design
-7.1 **Standard Schemas**  
-- Load default: `core.schema`, `cosine.schema`, `inetorgperson.schema`, `nis.schema` for POSIX attributes, `collective.schema` if group policies require.
 
-7.2 **Custom Schema Approach**  
-- Define new schema LDIFs under `/etc/openldap/schema/` and load via cn=config.  
-- Use modular naming (e.g., `customOrganization.schema`).  
-- Validate with `slaptest` to ensure syntax.
+7.1 **Standard Schemas**  
+- Load default: `core.schema`, `cosine.schema`, `inetorgperson.schema`, `nis.schema` for POSIX attributes.  
+- `collective.schema` only if group policy requirements explicitly need it.  
+
+7.2 **Custom Schema Approach (Project-Aligned)**  
+- Use the implemented schema container name: `bank-custom` (`script/12-Create_custom_schema.sh`).  
+- Implemented custom attributes: `userisactive`, `memorableAnswer`, `memorableQuestion`, `activationdatetime`, `cif` (`script/13-Create_custom_schema_attr.sh`).  
+- Implemented custom object class: `bankUserExtension` (`script/13-Create_custom_schema_attr.sh`).  
+- Validate with `slaptest` and automated tests before promotion (`script/test/test_custom_schema_attr.sh`).  
 
 7.3 **Naming Conventions**  
-- Schema file names: `custom-{domain}.schema`.  
-- Attribute/object class names: prefix with `cust` (e.g., `cust-personAttributes`).  
-- OIDs based on assigned private enterprise root (`1.3.6.1.4.1.<enterprise>`).  
-- Example attribute OID: `1.3.6.1.4.1.99999.1.1`.
+- **Schema name**: `bank-custom`.  
+- **Object class**: `bankUserExtension`.  
+- **Custom attributes**: `userisactive`, `memorableAnswer`, `memorableQuestion`, `activationdatetime`, `cif`.  
+- **OID root**: current implementation uses `1.3.6.1.4.1.55555` (non-prod/lab default), replace with enterprise-assigned PEN before production.  
 
-7.4 **AttributeTypes/ObjectClasses Format**  
+7.4 **Load Order in cn=config**  
+1. Core schemas: `core`, `cosine`, `inetorgperson`, `nis`  
+2. Project custom schema: `bank-custom`  
+3. Overlays/modules: `syncprov`, `ppolicy`, `ppm`, `accesslog`  
+
+7.5 **AttributeTypes/ObjectClasses Format**  
 - Include REQUIRED/MUST and OPTIONAL/MAY clauses.  
-- Specify syntax (e.g., `1.3.6.1.4.1.1.1.1` for Directory String).  
-- Examples documented in appendices.
+- Use explicit syntaxes from the implementation (Boolean, Directory String, Generalized Time).  
+- Keep attribute/objectClass names and OIDs synchronized with migration mapping documents.  
 
-7.5 **OID Management**  
-- Register private enterprise OID (via IANA).  
-- Governance: central team owns `attributes` and `objectclasses` lists; maintain spreadsheet with descriptions.
+7.6 **OID Management (Project Decision)**  
 
-7.6 **Sample LDIF**  
-```
-dn: cn=schema,cn=config
-changetype: add
+**Decision**: OID management is **in scope** for this project because custom attributes/objectClass are implemented and required for migration compatibility.
+
+- **Current implementation**: uses temporary root `1.3.6.1.4.1.55555` in scripts.  
+- **Production requirement**: replace temporary root with enterprise-assigned private OID root before go-live.  
+- **Governance**: maintain a controlled OID registry (name, OID, syntax, MUST/MAY, owner, approval date), and require Git review for every schema change.  
+
+7.7 **Sample LDIF (Current Project Custom Schema)**  
+```ldif
+dn: cn=bank-custom,cn=schema,cn=config
 objectClass: olcSchemaConfig
-cn: customSchema
-olcObjectClasses: ( 1.3.6.1.4.1.99999.2.1 NAME 'custPerson' SUP person STRUCTURAL MUST (custEmployeeID) MAY (mail) )
-olcAttributeTypes: ( 1.3.6.1.4.1.99999.1.1 NAME 'custEmployeeID' SUP directoryString )
+cn: bank-custom
+olcAttributeTypes: ( 1.3.6.1.4.1.55555.1.1
+  NAME 'userisactive'
+  DESC 'User active flag'
+  EQUALITY booleanMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.7
+  SINGLE-VALUE )
+olcAttributeTypes: ( 1.3.6.1.4.1.55555.1.2
+  NAME 'memorableAnswer'
+  DESC 'Memorable answer'
+  EQUALITY caseExactMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15
+  SINGLE-VALUE )
+olcAttributeTypes: ( 1.3.6.1.4.1.55555.1.3
+  NAME 'memorableQuestion'
+  DESC 'Memorable question'
+  EQUALITY caseIgnoreMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15
+  SINGLE-VALUE )
+olcAttributeTypes: ( 1.3.6.1.4.1.55555.1.4
+  NAME 'activationdatetime'
+  DESC 'Account activation datetime'
+  EQUALITY generalizedTimeMatch
+  ORDERING generalizedTimeOrderingMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.24
+  SINGLE-VALUE )
+olcAttributeTypes: ( 1.3.6.1.4.1.55555.1.5
+  NAME 'cif'
+  DESC 'Customer Information File ID'
+  EQUALITY caseExactMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15
+  SINGLE-VALUE )
+olcObjectClasses: ( 1.3.6.1.4.1.55555.2.1
+  NAME 'bankUserExtension'
+  SUP top AUXILIARY
+  MAY ( userisactive $ memorableAnswer $ memorableQuestion $ activationdatetime $ cif ) )
 ```
 
 ---
 
 ### 8. Security Design
-8.1 **TLS Configuration**  
-- Use strong cipher suites (TLS 1.2+).  
-- Certificates signed by internal CA stored under `/etc/ssl/ldap`.  
-- `olcTLSCertificateFile`, `olcTLSCertificateKeyFile`, `olcTLSCACertificateFile` under cn=config.
+
+8.1 **TLS Configuration (Project Decision: TLS, NOT SSL)**  
+
+**Decision**: Use **TLS only** (no SSL). For production, enforce **LDAPS-only** listeners.
+
+**Justification**:  
+- SSL 3.0 is deprecated and vulnerable (POODLE, DROWN, etc.).  
+- TLS 1.2+ is the modern standard.  
+- Implementation aligns to `script/24-configure-ssl-tls.sh` listener modes.  
+
+**Non-Production Compatibility Mode: StartTLS + LDAPS**  
+- LDAP standard port: 389 for initial connection  
+- Client issues STARTTLS command to upgrade to TLS  
+- Script mode: `LDAP_LISTENER_MODE=starttls_and_ldaps` -> `SLAPD_URLS="ldap:/// ldaps:/// ldapi:///"`  
+- Use in DEV/QA only when legacy clients still require this transition mode.  
+
+**Production Mode: LDAPS-only (Required)**  
+- LDAPS dedicated port: 636 for immediate TLS negotiation  
+- TLS established before any LDAP protocol exchange  
+- Script mode: `LDAP_LISTENER_MODE=ldaps_only` -> `SLAPD_URLS="ldaps:/// ldapi:///"`  
+- Plain LDAP listener (389) disabled for production.  
+
+**Final Decision**: production uses LDAPS-only. StartTLS+LDAPS remains an explicitly temporary compatibility mode for non-production.
+
+**Certificate Management**:  
+- Certificates signed by enterprise/internal PKI.  
+- Managed under `/opt/symas/etc/openldap/tls` (matches implementation script defaults).  
+- Configuration entries under cn=config:  
+  - `olcTLSCertificateFile`: server certificate path  
+  - `olcTLSCertificateKeyFile`: server private key path  
+  - `olcTLSCACertificateFile`: CA chain path  
+  - `olcTLSProtocolMin`: set to `3.3` (TLS 1.2 minimum)  
+  - `olcTLSCipherSuite`: enforce strong ciphers (no weak/export ciphers)  
+
+**TLS Certificate Renewal**:  
+- Monitor expiration via `cn=Monitor` queries; alert 30 days before expiry.  
+- Automate renewal process through enterprise PKI workflow (e.g., Vault/cert management pipeline).  
+- Test renewal in DEV/QA before production rotation.  
+
+**Client Configuration**:  
+- Applications must connect to LDAPS (636) or use StartTLS over 389.  
+- Distribute enterprise CA root certificate to all client systems for certificate validation.  
+- Disable certificate hostname verification only in non-prod labs (never in production).
 
 8.2 **Authentication Mechanisms**  
 - Simple binds over StartTLS/LDAPS for service accounts.  
@@ -175,8 +274,8 @@ olcAttributeTypes: ( 1.3.6.1.4.1.99999.1.1 NAME 'custEmployeeID' SUP directorySt
 - Base ACL for entire tree ensuring read-only access except for service accounts.  
 - Example:
   ```
-olcAccess: to dn.subtree="ou=People,dc=example,dc=com"
-    by dn.exact="cn=ldap-admin,dc=example,dc=com" write
+olcAccess: to dn.subtree="ou=Users,dc=eab,dc=bank,dc=local"
+    by dn.exact="cn=admin,dc=eab,dc=bank,dc=local" write
     by users read
     by * none
   ```
@@ -185,10 +284,120 @@ olcAccess: to dn.subtree="ou=People,dc=example,dc=com"
 - Configure ppolicy overlay: password history (5), lockout duration (30m), grace logins (3), min/max length (12/64).  
 - Enforcement via `ppolicy_default` entry under `cn=config`.
 
-8.5 **Audit & Logging**  
-- Logging level: `stats`, `stats2`, `config`.  
-- Accesslog overlay writes to separate database `olcDbDirectory=/var/lib/ldap/accesslog`.  
-- Log rotation via `logrotate` and `systemd-journald` for analytic ingestion.
+8.5 **Audit & Logging (Accesslog Implementation)**  
+
+**Comprehensive Audit Logging for Admin/System/User Events**  
+
+8.5.1 **Accesslog Overlay Configuration**  
+Configure the `accesslog` overlay to capture all directory changes for audit, compliance, and troubleshooting:
+
+**Enable Accesslog Module**:  
+```ldif
+dn: cn=module{0},cn=config
+changetype: modify
+add: olcModuleLoad
+olcModuleLoad: accesslog
+```
+
+**Create Accesslog Database**:  
+```ldif
+dn: olcDatabase={2}mdb,cn=config
+objectClass: olcDatabaseConfig
+objectClass: olcMdbConfig
+olcDatabase: {2}mdb
+olcSuffix: cn=accesslog
+olcRootDN: cn=accesslog-admin,cn=accesslog
+olcDbDirectory: /opt/symas/var/openldap-accesslog
+olcDbMaxSize: 1073741824
+olcDbIndex: reqStart eq
+olcDbIndex: reqEnd eq
+olcDbIndex: reqResult eq
+olcAccess: {0}to * by dn.exact=gidNumber=0+uidNumber=0,cn=peercred,cn=external,cn=auth manage by * none
+```
+
+**Attach Overlay to Primary Database**:  
+```ldif
+dn: olcOverlay=accesslog,olcDatabase={1}mdb,cn=config
+objectClass: olcOverlayConfig
+objectClass: olcAccessLogConfig
+olcOverlay: accesslog
+olcAccessLogDB: cn=accesslog
+olcAccessLogOps: writes reads session
+olcAccessLogPurge: 30+00:00 01+00:00
+```
+
+8.5.2 **Audit Event Capture**  
+The `olcAccessLogOps` parameter controls what events are recorded:
+
+- **writes** (REQUIRED): ADD, MODIFY, DELETE, MODRDN operations (admin/system/user changes)  
+- **reads** (OPTIONAL): SEARCH operations; verbose but essential for forensic analysis if required  
+- **session** (REQUIRED): BIND, UNBIND authentication events (successful and failed attempts)  
+
+**Captured Event Details**:  
+- `reqStart`: timestamp of operation  
+- `reqDN`: LDAP Distinguished Name (object modified)  
+- `reqAuthzID`: authenticated user performing operation  
+- `reqOp`: operation type (add/modify/delete/search/bind)  
+- `reqResult`: operation result code (0 = success, others = failure/error)  
+- `reqAssertion`, `reqMod`: search filters or modification details  
+
+8.5.3 **Log Retention & Purge Policy**  
+- Default in implementation: `olcAccessLogPurge: 30+00:00 01+00:00` (keep 30 days, purge job every 1 day).  
+- Adjust based on compliance requirements (e.g., 90 days for regulatory audit trails)  
+- Separate backups of accesslog database before purge operations  
+
+8.5.4 **SIEM Integration & Log Forwarding**  
+Forward accesslog entries to enterprise SIEM via syslog:
+
+**syslog Forwarding Configuration** (on OpenLDAP host):  
+```bash
+# rsyslog rule: forward OpenLDAP accesslog to SIEM
+# /etc/rsyslog.d/openldap-siem.conf
+:programname, isequal, "slapd"
+  *.* @@siem-collector.bank.local:514
+```
+
+**Field Mapping for SIEM** (document with SIEM team):  
+| LDAP Field | SIEM Field | Type | Example |
+|---|---|---|---|
+| `reqAuthzID` | user_id | string | cn=admin,dc=eab,dc=bank,dc=local |
+| `reqStart` | timestamp | ISO8601 | 2026-02-04T10:30:45.123Z |
+| `reqDN` | object_dn | string | uid=test5,ou=Users,dc=eab,dc=bank,dc=local |
+| `reqOp` | operation | enum | ADD, MODIFY, DELETE, BIND |
+| `reqResult` | result_code | integer | 0 (success), 49 (invalid credentials) |
+| `reqMod` | changes | string | userPassword=****,mail=user@bank.local |
+
+8.5.5 **Operational Logging Levels**  
+Configure slapd logging for diagnostic information:
+- `loglevel: stats` = high-level bind/search/modify counts  
+- `loglevel: stats2` = detailed operation timing  
+- `loglevel: config` = configuration changes in cn=config  
+- `loglevel: -1` (recommended for production) = log all levels (be cautious of log volume)  
+
+**Configuration in cn=config**:  
+```ldif
+dn: cn=config
+changetype: modify
+replace: olcLogLevel
+olcLogLevel: stats config
+```
+
+8.5.6 **Log Rotation & Disk Management**  
+- slapd logs via `systemd-journald` (default); configure retention in `/etc/systemd/journald.conf`  
+- accesslog database on separate filesystem to prevent data disk exhaustion  
+- Monitor `du -sh /opt/symas/var/openldap-accesslog` daily; alert if approaching capacity  
+- Implement nightly backup of accesslog before purge operations  
+
+8.5.7 **Audit Validation**  
+Validate accesslog is capturing events:
+```bash
+ldapsearch -H ldapi:// -Y EXTERNAL \
+  -b cn=accesslog \
+  -s sub '(reqAuthzID=cn=admin,dc=eab,dc=bank,dc=local)' \
+  reqStart reqDN reqOp reqResult
+```
+
+Expected output: audit entries with timestamps, target DNs, operation types, and results.
 
 ---
 
@@ -341,7 +550,7 @@ olcAccess: to dn.subtree="ou=People,dc=example,dc=com"
 
 ### 16. Appendices
 16.1 **Sample LDIF Snippets**  
-- Schema, ACL, overlay/ppolicy entries (see section 7.6 for example).  
+- Schema, ACL, overlay/ppolicy entries (see section 7.7 for schema example).  
 
 16.2 **Configuration Examples**  
 - Sample cn=config overlay entry:
@@ -365,5 +574,3 @@ olcSpSessionlog: 100
 **Next Steps**  
 1. Validate this design with stakeholders and capture feedback for adjustments.  
 2. Begin LDIF authoring + automation pipeline setup based on these specs.
-
-(Audio confirmation command executed after document preparation.)

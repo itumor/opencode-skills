@@ -13,7 +13,7 @@ locals {
         Resource = ["${local.artifacts_bucket_arn}/*"]
       }
     ] : [],
-    var.enable_keepalived ? [
+    local.effective_enable_keepalived ? [
       {
         Effect = "Allow"
         Action = [

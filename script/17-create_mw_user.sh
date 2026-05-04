@@ -62,20 +62,18 @@ if [[ -z "$BIND_PW" ]]; then
   exit 1
 fi
 
-SERVICE_OU="${SERVICE_OU:-ou=ServiceAccounts,${BASE_DN}}"
+# Default aligns with 8-create_top_ous.sh (creates ou=Systems under the base DN)
+SERVICE_OU="${SERVICE_OU:-ou=ServiceAccounts,ou=Systems,${BASE_DN}}"
 MW_UID="${MW_UID:-mw}"
 MW_DN="uid=${MW_UID},${SERVICE_OU}"
 
-if [[ -z "${MW_PASSWORD:-}" ]]; then
-  read -r -s -p "Enter password for ${MW_UID}: " MW_PASSWORD
-  echo
-else
-  MW_PASSWORD="$MW_PASSWORD"
-fi
-
+MW_PASSWORD="${MW_PASSWORD:-ChangeMe123!}"
 if [[ -z "$MW_PASSWORD" ]]; then
   echo "MW_PASSWORD is empty; aborting." >&2
   exit 1
+fi
+if [[ "$MW_PASSWORD" == "ChangeMe123!" ]]; then
+  echo "[WARN] Using default MW_PASSWORD=ChangeMe123! (override by setting MW_PASSWORD)"
 fi
 
 bind_ok() {
@@ -90,6 +88,17 @@ entry_exists() {
 if ! bind_ok; then
   echo "Bind failed for ${BIND_DN}. Verify credentials (BIND_DN/BIND_PW)." >&2
   exit 1
+fi
+
+SYSTEMS_OU="${SYSTEMS_OU:-ou=Systems,${BASE_DN}}"
+if ! entry_exists "$SYSTEMS_OU"; then
+  ldapadd -x -D "$BIND_DN" -w "$BIND_PW" -H "$LDAP_URI" <<EOF_LDIF
+dn: ${SYSTEMS_OU}
+objectClass: top
+objectClass: organizationalUnit
+ou: Systems
+description: Systems
+EOF_LDIF
 fi
 
 if ! entry_exists "$SERVICE_OU"; then

@@ -1,0 +1,4 @@
+dn: cn=replicator,dc=cae,dc=local
+changetype: modify
+replace: userPassword
+userPassword: {SSHA}yViD/zI8IRspUMEYqpxLVtR8+R33UPLl

@@ -1,0 +1,13 @@
+---
+- name: Apply terraform/openldap/ldif-public-ips bundles (live/dr, optional cross-vpc)
+  hosts: all
+  gather_facts: false
+  become: true
+
+  vars:
+    # Repo root from this playbook location: ansible/openldap/playbooks -> repo root
+    openldap_repo_root: "{{ playbook_dir }}/../../.."
+
+  roles:
+    - role: openldap_ldif_public_ips
+

@@ -19,16 +19,35 @@ if [[ -z "$LDAPSEARCH" ]]; then
 fi
 
 POLICY_DN="${POLICY_DN:-cn=default,ou=Policies,dc=eab,dc=bank,dc=local}"
-LDAP_URI="${LDAP_URI:-ldap:///}"
+LDAP_URI="${LDAP_URI:-ldap://localhost}"
 BIND_DN="${BIND_DN:-cn=admin,dc=eab,dc=bank,dc=local}"
-BIND_PW="${BIND_PW:-}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EXAMPLEDB_FILE="${EXAMPLEDB_FILE:-${SCRIPT_DIR}/Exampledb/exampledb.sh}"
+
+read_exampledb_password() {
+  local file="$1"
+  local pw=""
+  if [[ -f "$file" ]]; then
+    pw="$(awk '
+      /^[[:space:]]*#/ {next}
+      $1 == "rootpw" {print $2; exit}
+      $1 == "olcRootPW:" {print $2; exit}
+      $1 == "olcRootPw:" {print $2; exit}
+    ' "$file")"
+  fi
+  [[ -n "$pw" ]] || return 1
+  echo "$pw"
+}
+
+BIND_PW="${BIND_PW:-$(read_exampledb_password "$EXAMPLEDB_FILE" || true)}"
+if [[ -z "$BIND_PW" ]]; then
+  echo "[FATAL] BIND_PW is empty and could not be auto-detected from ${EXAMPLEDB_FILE}. Set BIND_PW to run non-interactively." >&2
+  exit 1
+fi
 
 auth_args=(-x -H "$LDAP_URI" -D "$BIND_DN")
-if [[ -n "$BIND_PW" ]]; then
-  auth_args+=(-w "$BIND_PW")
-else
-  auth_args+=(-W)
-fi
+auth_args+=(-w "$BIND_PW")
 
 existing="$($LDAPSEARCH "${auth_args[@]}" -b "$POLICY_DN" -s base objectClass pwdCheckQuality)"
 

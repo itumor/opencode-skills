@@ -35,13 +35,136 @@ require_cmd() {
   fi
 }
 
+detect_ldapi_uri() {
+  # Prefer the default ldapi:/// if it works; otherwise locate an actual socket path.
+  if ldapwhoami -Y EXTERNAL -H ldapi:/// >/dev/null 2>&1; then
+    echo "ldapi:///"
+    return 0
+  fi
+
+  local sock=""
+  local candidates=(
+    "/var/symas/run/ldapi"
+    "/var/run/slapd/ldapi"
+    "/run/slapd/ldapi"
+    "/run/openldap/ldapi"
+    "/var/run/openldap/ldapi"
+    "/var/run/ldap/ldapi"
+    "/opt/symas/var/run/ldapi"
+  )
+  for s in "${candidates[@]}"; do
+    if [[ -S "$s" ]]; then
+      sock="$s"
+      break
+    fi
+  done
+
+  if [[ -z "$sock" ]] && command -v ss >/dev/null 2>&1; then
+    sock="$(ss -xl 2>/dev/null | awk '/ldapi|slapd/ && $NF ~ /^\\// {print $NF; exit}')"
+  fi
+
+  if [[ -z "$sock" ]] && command -v find >/dev/null 2>&1; then
+    sock="$(find /run /var/run /var/symas/run -maxdepth 3 -type s -name 'ldapi*' 2>/dev/null | head -n 1 || true)"
+  fi
+
+  if [[ -z "$sock" ]]; then
+    return 1
+  fi
+
+  local enc
+  enc="$(printf '%s' "$sock" | sed 's,/,%%2F,g')"
+  echo "ldapi://${enc}"
+}
+
 update_defaults_urls() {
   local defaults_file="$1"
+  local listener_mode="$2"
+  local urls ldap_urls ldaps_urls ldapi_urls
+  local serverid_url=""
+  local p="${LDAPS_PORT:-636}"
+
+  to_ldaps_url() {
+    local ldap_url="$1"
+
+    if [[ "$ldap_url" == "ldap:///" ]]; then
+      echo "ldaps:///"
+      return 0
+    fi
+
+    local rest hostport host path host_only
+    rest="${ldap_url#ldap://}"
+    hostport="${rest%%/*}"
+    path=""
+    if [[ "$rest" == */* ]]; then
+      path="/${rest#*/}"
+    fi
+    host_only="${hostport%%:*}"
+    echo "ldaps://${host_only}:${p}${path}"
+  }
+
+  case "$listener_mode" in
+    ldaps_only)
+      # NOTE: Many OpenLDAP deployments set olcServerID with an explicit ldap://IP:389 URL.
+      # If we remove ldap:// from SLAPD_URLS, slapd will fail to start with:
+      # "read_config: no serverID / URL match found. Check slapd -h arguments."
+      urls='ldaps:/// ldapi:///'
+      ;;
+    starttls_and_ldaps)
+      urls='ldap:/// ldaps:/// ldapi:///'
+      ;;
+    *)
+      echo "[FATAL] Unknown LDAP_LISTENER_MODE=${listener_mode}. Use ldaps_only or starttls_and_ldaps." >&2
+      exit 1
+      ;;
+  esac
+
+  # Try to discover an explicit ldap:// URL from cn=config so we can keep SLAPD_URLS compatible
+  # with olcServerID mappings.
+  if [[ -f "${CONFIG_LDIF:-}" ]]; then
+    serverid_url="$(awk '/^olcServerID:/ {for (i=1;i<=NF;i++) if ($i ~ /^ldap:\/\//) {print $i; exit}}' "${CONFIG_LDIF}" 2>/dev/null || true)"
+  fi
+
   if [[ -f "$defaults_file" ]]; then
-    if grep -q '^SLAPD_URLS=' "$defaults_file"; then
-      sed -i 's|^SLAPD_URLS=.*|SLAPD_URLS="ldap:/// ldaps:/// ldapi:///"|' "$defaults_file"
+    # Preserve any existing ldapi:// socket URL (it may be an encoded-path ldapi://%2F... form).
+    ldapi_urls="$(awk -F= '/^SLAPD_URLS=/ {gsub(/"/,"",$2); print $2}' "$defaults_file" 2>/dev/null | tr ' ' '\n' | awk '/^ldapi:\/\// {print}' | xargs || true)"
+
+    # Preserve explicit ldap:// URL(s) if present; otherwise fall back to olcServerID URL if available.
+    ldap_urls="$(awk -F= '/^SLAPD_URLS=/ {gsub(/"/,"",$2); print $2}' "$defaults_file" 2>/dev/null | tr ' ' '\n' | awk '/^ldap:\/\// {print}' | xargs || true)"
+    if [[ -z "$ldap_urls" && -n "$serverid_url" ]]; then
+      ldap_urls="$serverid_url"
+    fi
+    if [[ -z "$ldap_urls" ]]; then
+      ldap_urls="ldap:///"
+    fi
+
+    # Derive LDAPS URL(s) from the LDAP URL(s).
+    ldaps_urls=""
+    for u in $ldap_urls; do
+      if [[ "$u" == "ldap:///" ]]; then
+        ldaps_urls="${ldaps_urls} ldaps:///"
+      else
+        # Keep host the same as the ldap:// URL and swap scheme+port.
+        ldaps_urls="${ldaps_urls} $(to_ldaps_url "$u")"
+      fi
+    done
+    ldaps_urls="$(echo "$ldaps_urls" | xargs)"
+
+    # If serverID is explicitly ldap://... and caller requested ldaps_only, refuse because it bricks slapd.
+    if [[ "$listener_mode" == "ldaps_only" && -n "$serverid_url" ]]; then
+      echo "[FATAL] LDAP_LISTENER_MODE=ldaps_only is incompatible with olcServerID URL ${serverid_url}. Use starttls_and_ldaps." >&2
+      exit 1
+    fi
+
+    if [[ "$listener_mode" == "ldaps_only" ]]; then
+      urls="$(echo "${ldaps_urls} ${ldapi_urls:-ldapi:///}" | xargs)"
     else
-      echo 'SLAPD_URLS="ldap:/// ldaps:/// ldapi:///"' >>"$defaults_file"
+      urls="$(echo "${ldap_urls} ${ldaps_urls} ${ldapi_urls:-ldapi:///}" | xargs)"
+    fi
+
+    if grep -q '^SLAPD_URLS=' "$defaults_file"; then
+      sed -i "s|^SLAPD_URLS=.*|SLAPD_URLS=\"${urls}\"|" "$defaults_file"
+    else
+      echo "SLAPD_URLS=\"${urls}\"" >>"$defaults_file"
     fi
   else
     echo "[WARN] $defaults_file not found; skipping SLAPD_URLS update"
@@ -105,6 +228,7 @@ apply_online_config() {
   local protocol_min="$4"
   local cipher_suite="$5"
   local verify_client="$6"
+  local ldapi_uri="$7"
 
   local ldif
   ldif="$(mktemp /tmp/configure-tls.XXXXXX.ldif)"
@@ -140,7 +264,7 @@ apply_online_config() {
     fi
   } >"$ldif"
 
-  if ldapmodify -Y EXTERNAL -H ldapi:/// -f "$ldif"; then
+  if ldapmodify -Y EXTERNAL -H "$ldapi_uri" -f "$ldif"; then
     rm -f "$ldif"
     return 0
   fi
@@ -240,6 +364,7 @@ require_root
 ensure_symas_env
 require_cmd openssl
 require_cmd ldapmodify
+require_cmd ldapwhoami
 
 TLS_DIR="${TLS_DIR:-/opt/symas/etc/openldap/tls}"
 CA_CERT="${CA_CERT:-${TLS_DIR}/ca.crt}"
@@ -257,6 +382,11 @@ TLS_REQCERT="${TLS_REQCERT:-}"
 LDAP_CONF="${LDAP_CONF:-/opt/symas/etc/openldap/ldap.conf}"
 SLAPD_DEFAULTS="${SLAPD_DEFAULTS:-/etc/default/symas-openldap}"
 CONFIG_LDIF="${CONFIG_LDIF:-/opt/symas/etc/openldap/slapd.d/cn=config.ldif}"
+LDAP_LISTENER_MODE="${LDAP_LISTENER_MODE:-starttls_and_ldaps}"
+TLS_CERT_MODE="${TLS_CERT_MODE:-external_or_self_signed}"
+TLS_CA_CERT_PEM="${TLS_CA_CERT_PEM:-}"
+TLS_CERT_PEM="${TLS_CERT_PEM:-}"
+TLS_KEY_PEM="${TLS_KEY_PEM:-}"
 EXTRA_DNS="${TLS_DNS_NAMES:-}"
 EXTRA_IPS="${TLS_IPS:-}"
 FORCE_REGEN_CA="${FORCE_REGEN_CA:-0}"
@@ -264,8 +394,46 @@ FORCE_REGEN_SERVER="${FORCE_REGEN_SERVER:-0}"
 
 mkdir -p "$TLS_DIR"
 
+case "$TLS_CERT_MODE" in
+  external_or_self_signed|self_signed|external_required) ;;
+  *)
+    echo "[FATAL] TLS_CERT_MODE must be external_or_self_signed, self_signed, or external_required" >&2
+    exit 1
+    ;;
+esac
+
+have_external_bundle=0
+if [[ -n "$TLS_CA_CERT_PEM" || -n "$TLS_CERT_PEM" || -n "$TLS_KEY_PEM" ]]; then
+  if [[ -z "$TLS_CA_CERT_PEM" || -z "$TLS_CERT_PEM" || -z "$TLS_KEY_PEM" ]]; then
+    echo "[FATAL] External TLS PEM input is partial; provide TLS_CA_CERT_PEM, TLS_CERT_PEM, and TLS_KEY_PEM together." >&2
+    exit 1
+  fi
+  have_external_bundle=1
+fi
+
+if [[ "$TLS_CERT_MODE" == "external_required" && "$have_external_bundle" -ne 1 ]]; then
+  echo "[FATAL] TLS_CERT_MODE=external_required but external PEM values were not provided." >&2
+  exit 1
+fi
+
+if [[ "$have_external_bundle" -eq 1 ]]; then
+  printf '%s\n' "$TLS_CA_CERT_PEM" >"$CA_CERT"
+  printf '%s\n' "$TLS_CERT_PEM" >"$SERVER_CERT"
+  printf '%s\n' "$TLS_KEY_PEM" >"$SERVER_KEY"
+fi
+
+LDAPI_URI="${OPENLDAP_LDAPI_URI:-}"
+if [[ -z "$LDAPI_URI" ]]; then
+  if LDAPI_URI="$(detect_ldapi_uri)"; then
+    :
+  else
+    # We'll still attempt offline update below; online ldapmodify won't work.
+    LDAPI_URI="ldapi:///"
+  fi
+fi
+
 need_server_cert=0
-if [[ "$FORCE_REGEN_SERVER" -eq 1 || ! -f "$SERVER_CERT" ]]; then
+if [[ "$have_external_bundle" -ne 1 && ("$FORCE_REGEN_SERVER" -eq 1 || ! -f "$SERVER_CERT") ]]; then
   need_server_cert=1
 fi
 
@@ -274,7 +442,18 @@ if [[ -f "$SERVER_CERT" && ! -f "$SERVER_KEY" && "$FORCE_REGEN_SERVER" -ne 1 ]];
   exit 1
 fi
 
-if [[ "$FORCE_REGEN_CA" -eq 1 ]]; then
+if [[ "$have_external_bundle" -eq 1 ]]; then
+  :
+elif [[ "$TLS_CERT_MODE" == "self_signed" || "$TLS_CERT_MODE" == "external_or_self_signed" ]]; then
+  :
+else
+  echo "[FATAL] No certificate material available for TLS_CERT_MODE=${TLS_CERT_MODE}" >&2
+  exit 1
+fi
+
+if [[ "$have_external_bundle" -eq 1 ]]; then
+  :
+elif [[ "$FORCE_REGEN_CA" -eq 1 ]]; then
   echo "[INFO] Forcing CA regeneration"
   openssl genrsa -out "$CA_KEY" 4096
   openssl req -x509 -new -nodes -key "$CA_KEY" -sha256 -days "$CA_DAYS" \
@@ -297,12 +476,12 @@ elif [[ -f "$CA_CERT" && ! -f "$CA_KEY" && "$need_server_cert" -eq 1 ]]; then
   exit 1
 fi
 
-if [[ "$FORCE_REGEN_SERVER" -eq 1 || ! -f "$SERVER_KEY" ]]; then
+if [[ "$have_external_bundle" -ne 1 && ("$FORCE_REGEN_SERVER" -eq 1 || ! -f "$SERVER_KEY") ]]; then
   echo "[INFO] Generating server key"
   openssl genrsa -out "$SERVER_KEY" 4096
 fi
 
-if [[ "$FORCE_REGEN_SERVER" -eq 1 || ! -f "$SERVER_CERT" ]]; then
+if [[ "$have_external_bundle" -ne 1 && ("$FORCE_REGEN_SERVER" -eq 1 || ! -f "$SERVER_CERT") ]]; then
   if [[ ! -f "$CA_CERT" || ! -f "$CA_KEY" ]]; then
     echo "[FATAL] CA cert/key required to sign server certificate" >&2
     exit 1
@@ -319,10 +498,10 @@ if [[ "$FORCE_REGEN_SERVER" -eq 1 || ! -f "$SERVER_CERT" ]]; then
 fi
 
 fix_permissions "$TLS_DIR" "$CA_KEY" "$SERVER_KEY"
-update_defaults_urls "$SLAPD_DEFAULTS"
+update_defaults_urls "$SLAPD_DEFAULTS" "$LDAP_LISTENER_MODE"
 update_ldap_conf "$LDAP_CONF" "$CA_CERT" "$TLS_REQCERT"
 
-if apply_online_config "$SERVER_CERT" "$SERVER_KEY" "$CA_CERT" "$TLS_PROTOCOL_MIN" "$TLS_CIPHER_SUITE" "$TLS_VERIFY_CLIENT"; then
+if apply_online_config "$SERVER_CERT" "$SERVER_KEY" "$CA_CERT" "$TLS_PROTOCOL_MIN" "$TLS_CIPHER_SUITE" "$TLS_VERIFY_CLIENT" "$LDAPI_URI"; then
   echo "[OK] TLS configured via ldapmodify"
 else
   echo "[WARN] ldapmodify failed; falling back to offline update"
@@ -332,4 +511,4 @@ fi
 systemctl daemon-reload
 systemctl restart symas-openldap-servers >/dev/null 2>&1 || systemctl restart slapd
 
-echo "[SUCCESS] SSL/TLS configuration completed"
+echo "[SUCCESS] TLS configuration completed (listener mode: ${LDAP_LISTENER_MODE}; SSL is not used)"

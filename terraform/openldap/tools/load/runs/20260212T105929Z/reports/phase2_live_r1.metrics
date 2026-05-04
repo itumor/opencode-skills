@@ -1,0 +1,7 @@
+phase=phase2_live_r1
+write_total=3
+write_ok=3
+write_success_rate_pct=100.00
+lag_p95_ms=1230
+lag_p99_ms=1230
+lag_max_ms=1230

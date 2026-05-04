@@ -1,0 +1,188 @@
+---
+- name: Validate LDIF bundle assumptions (base DN + credentials)
+  ansible.builtin.assert:
+    that:
+      - openldap_base_dn == "dc=cae,dc=local"
+      - openldap_admin_dn == "cn=admin,dc=cae,dc=local"
+      - openldap_admin_pw == "admin"
+      - openldap_repl_dn == "cn=replicator,dc=cae,dc=local"
+      - openldap_repl_pw == "replpass"
+    fail_msg: >-
+      terraform/openldap/ldif-public-ips currently hardcodes dc=cae,dc=local + admin/repl passwords.
+      Either keep the Terraform variables at their defaults, or update this role to template the LDIFs dynamically.
+
+- name: Capture inventory hostname and optional EC2 tags (dynamic inventory)
+  ansible.builtin.set_fact:
+    openldap_name_tag: "{{ inventory_hostname }}"
+    _openldap_tag_vpc: "{{ (ec2_tags | default({})).get('VPC', '') }}"
+    _openldap_tag_role: "{{ (ec2_tags | default({})).get('Role', '') }}"
+
+- name: Derive node key (strip project_name prefix)
+  ansible.builtin.set_fact:
+    openldap_node_key: "{{ openldap_name_tag | regex_replace('^' + (openldap_project_name | regex_escape) + '-', '') }}"
+
+- name: Split node key for static inventory fallback (vpc-role-index)
+  ansible.builtin.set_fact:
+    _openldap_node_parts: "{{ openldap_node_key.split('-') }}"
+
+- name: Derive vpc/role from tags (preferred) or hostname (static inventory)
+  ansible.builtin.set_fact:
+    openldap_vpc_name: "{{ ((_openldap_tag_vpc | length > 0) | ternary(_openldap_tag_vpc, (_openldap_node_parts[0] | default('')))) | lower }}"
+    openldap_role: "{{ ((_openldap_tag_role | length > 0) | ternary(_openldap_tag_role, (_openldap_node_parts[1] | default('')))) | lower }}"
+
+- name: Derive node index (final -N)
+  ansible.builtin.set_fact:
+    openldap_node_index: "{{ (_openldap_node_parts | last | default('0')) | int }}"
+
+- name: Validate required identity vars
+  ansible.builtin.assert:
+    that:
+      - openldap_role in ['master','replica']
+      - openldap_vpc_name in ['live','dr']
+      - openldap_node_key | length > 0
+    fail_msg: "Missing required EC2 tags (Role, VPC) or Name tag. Inventory must provide ec2_tags and tag:Name."
+
+- name: Compute local bundle dir (live/dr)
+  ansible.builtin.set_fact:
+    _ldif_bundle_rel: "{{ openldap_vpc_name }}/{{ openldap_node_key }}"
+    _ldif_bundle_local_dir: "{{ openldap_repo_root }}/terraform/openldap/ldif-public-ips/{{ openldap_vpc_name }}/{{ openldap_node_key }}"
+    _ldif_bundle_remote_dir: "{{ openldap_ldif_public_ips_remote_root }}/{{ openldap_vpc_name }}/{{ openldap_node_key }}"
+
+- name: Ensure remote bundle dir exists (live/dr)
+  ansible.builtin.file:
+    path: "{{ _ldif_bundle_remote_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Copy LDIF bundle files (live/dr)
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ _ldif_bundle_remote_dir }}/{{ item | basename }}"
+    mode: "0644"
+  with_fileglob:
+    - "{{ _ldif_bundle_local_dir }}/*.ldif"
+
+- name: Apply LDIF bundle (live/dr)
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    # Prefer Symas locations, but allow PATH fallback for local testing.
+    if [[ -x /opt/symas/bin/ldapadd ]]; then
+      LDAP_BIN="/opt/symas/bin"
+    else
+      LDAP_BIN=""
+    fi
+
+    export PATH="/opt/symas/bin:/opt/symas/sbin:${PATH}"
+    LDAPI_URI='ldapi://%2Fvar%2Fsymas%2Frun%2Fldapi'
+
+    ADMIN_DN='{{ openldap_admin_dn }}'
+    ADMIN_PW='{{ openldap_admin_pw }}'
+    LDAP_PORT='{{ openldap_ldap_port }}'
+
+    bundle_dir='{{ _ldif_bundle_remote_dir }}'
+
+    ldapadd_local() {
+      sudo ${LDAP_BIN:+${LDAP_BIN}/}ldapadd -x -H "ldap://localhost:${LDAP_PORT}" -D "${ADMIN_DN}" -w "${ADMIN_PW}" -f "$1" || true
+    }
+    ldapmodify_local() {
+      sudo ${LDAP_BIN:+${LDAP_BIN}/}ldapmodify -x -H "ldap://localhost:${LDAP_PORT}" -D "${ADMIN_DN}" -w "${ADMIN_PW}" -f "$1" || true
+    }
+    ldapadd_cfg() {
+      sudo ${LDAP_BIN:+${LDAP_BIN}/}ldapadd -Y EXTERNAL -H "${LDAPI_URI}" -f "$1" || true
+    }
+    ldapmodify_cfg() {
+      sudo ${LDAP_BIN:+${LDAP_BIN}/}ldapmodify -Y EXTERNAL -H "${LDAPI_URI}" -f "$1" || true
+    }
+
+    is_readonly_dit() {
+      sudo ${LDAP_BIN:+${LDAP_BIN}/}ldapsearch -LLL -Y EXTERNAL -H "${LDAPI_URI}" \
+        -b 'olcDatabase={1}mdb,cn=config' -s base olcReadOnly 2>/dev/null | grep -qi 'olcReadOnly: *TRUE'
+    }
+
+    # Common
+    if ! is_readonly_dit; then
+      [[ -f "${bundle_dir}/01-replicator.ldif" ]] && ldapadd_local "${bundle_dir}/01-replicator.ldif"
+      [[ -f "${bundle_dir}/03-replicator-pw.ldif" ]] && ldapmodify_local "${bundle_dir}/03-replicator-pw.ldif"
+    fi
+    [[ -f "${bundle_dir}/02-replicator-acl.ldif" ]] && ldapmodify_cfg "${bundle_dir}/02-replicator-acl.ldif"
+
+    # Server ID
+    [[ -f "${bundle_dir}/10-serverid.ldif" ]] && ldapmodify_cfg "${bundle_dir}/10-serverid.ldif"
+    [[ -f "${bundle_dir}/10-serverid-cross.ldif" ]] && ldapmodify_cfg "${bundle_dir}/10-serverid-cross.ldif"
+
+    # Masters
+    [[ -f "${bundle_dir}/19-load-syncprov.ldif" ]] && ldapmodify_cfg "${bundle_dir}/19-load-syncprov.ldif"
+    [[ -f "${bundle_dir}/20-syncprov-master.ldif" ]] && ldapadd_cfg "${bundle_dir}/20-syncprov-master.ldif"
+    [[ -f "${bundle_dir}/21-mirrormode-cross.ldif" ]] && ldapmodify_cfg "${bundle_dir}/21-mirrormode-cross.ldif"
+
+    # Replicas
+    [[ -f "${bundle_dir}/30-replica-consumer.ldif" ]] && ldapmodify_cfg "${bundle_dir}/30-replica-consumer.ldif"
+    [[ -f "${bundle_dir}/31-replica-readonly.ldif" ]] && ldapmodify_cfg "${bundle_dir}/31-replica-readonly.ldif"
+
+    echo "applied: ${bundle_dir}"
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Compute cross-vpc bundle dir (masters only)
+  when:
+    - openldap_ldif_public_ips_apply_cross_vpc | bool
+    - openldap_role == "master"
+    - openldap_node_index == 1
+  ansible.builtin.set_fact:
+    _ldif_cross_bundle_rel: "cross-vpc/{{ openldap_node_key }}"
+    _ldif_cross_bundle_local_dir: "{{ openldap_repo_root }}/terraform/openldap/ldif-public-ips/cross-vpc/{{ openldap_node_key }}"
+    _ldif_cross_bundle_remote_dir: "{{ openldap_ldif_public_ips_remote_root }}/cross-vpc/{{ openldap_node_key }}"
+
+- name: Ensure remote cross-vpc bundle dir exists (masters only)
+  when:
+    - openldap_ldif_public_ips_apply_cross_vpc | bool
+    - openldap_role == "master"
+    - openldap_node_index == 1
+  ansible.builtin.file:
+    path: "{{ _ldif_cross_bundle_remote_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Copy LDIF bundle files (cross-vpc, masters only)
+  when:
+    - openldap_ldif_public_ips_apply_cross_vpc | bool
+    - openldap_role == "master"
+    - openldap_node_index == 1
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ _ldif_cross_bundle_remote_dir }}/{{ item | basename }}"
+    mode: "0644"
+  with_fileglob:
+    - "{{ _ldif_cross_bundle_local_dir }}/*.ldif"
+
+- name: Apply LDIF bundle (cross-vpc, masters only)
+  when:
+    - openldap_ldif_public_ips_apply_cross_vpc | bool
+    - openldap_role == "master"
+    - openldap_node_index == 1
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    if [[ -x /opt/symas/bin/ldapmodify ]]; then
+      LDAP_BIN="/opt/symas/bin"
+    else
+      LDAP_BIN=""
+    fi
+
+    export PATH="/opt/symas/bin:/opt/symas/sbin:${PATH}"
+    LDAPI_URI='ldapi://%2Fvar%2Fsymas%2Frun%2Fldapi'
+    bundle_dir='{{ _ldif_cross_bundle_remote_dir }}'
+
+    ldapmodify_cfg() {
+      sudo ${LDAP_BIN:+${LDAP_BIN}/}ldapmodify -Y EXTERNAL -H "${LDAPI_URI}" -f "$1" || true
+    }
+
+    [[ -f "${bundle_dir}/10-serverid-cross.ldif" ]] && ldapmodify_cfg "${bundle_dir}/10-serverid-cross.ldif"
+    [[ -f "${bundle_dir}/21-mirrormode-cross.ldif" ]] && ldapmodify_cfg "${bundle_dir}/21-mirrormode-cross.ldif"
+
+    echo "applied: ${bundle_dir}"
+  args:
+    executable: /bin/bash
+  changed_when: false

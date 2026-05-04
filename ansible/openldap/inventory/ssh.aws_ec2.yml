@@ -1,0 +1,24 @@
+plugin: amazon.aws.aws_ec2
+
+regions:
+  - us-east-1
+
+filters:
+  tag:Name: openldap-mm-*
+
+hostnames:
+  - tag:Name
+
+compose:
+  ansible_host: public_ip_address
+  ec2_instance_id: instance_id
+  ec2_private_ip_address: private_ip_address
+  ec2_public_ip_address: public_ip_address
+  ec2_tags: tags
+
+keyed_groups:
+  - key: tags.VPC
+    prefix: vpc
+  - key: tags.Role
+    prefix: role
+

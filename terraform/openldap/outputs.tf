@@ -18,6 +18,11 @@ output "instance_private_ips" {
   value       = { for k, v in aws_instance.node : k => v.private_ip }
 }
 
+output "instance_ids" {
+  description = "Instance IDs for LDAP instances."
+  value       = { for k, v in aws_instance.node : k => v.id }
+}
+
 output "artifacts_bucket_name" {
   description = "S3 bucket name storing scripts and LDIFs."
   value       = local.artifacts_bucket_name

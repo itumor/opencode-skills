@@ -3,9 +3,13 @@ set -euo pipefail
 
 SERVICE_NAME="${SERVICE_NAME:-}"
 if [[ -z "$SERVICE_NAME" ]]; then
-  if systemctl list-unit-files --type=service | awk '{print $1}' | grep -qx 'symas-openldap-servers.service'; then
+  if systemctl list-unit-files --type=service --no-pager --no-legend 'symas-openldap-servers.service' 2>/dev/null | awk '{print $1}' | grep -qx 'symas-openldap-servers.service'; then
     SERVICE_NAME="symas-openldap-servers"
-  elif systemctl list-unit-files --type=service | awk '{print $1}' | grep -qx 'slapd.service'; then
+  elif systemctl list-unit-files --type=service --no-pager --no-legend 'slapd.service' 2>/dev/null | awk '{print $1}' | grep -qx 'slapd.service'; then
+    SERVICE_NAME="slapd"
+  elif systemctl status symas-openldap-servers >/dev/null 2>&1; then
+    SERVICE_NAME="symas-openldap-servers"
+  elif systemctl status slapd >/dev/null 2>&1; then
     SERVICE_NAME="slapd"
   else
     echo "[FATAL] Could not detect service name; set SERVICE_NAME" >&2
