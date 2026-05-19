@@ -35,3 +35,6 @@ terraform/openldap/reports/ansible_inventory.ini
 terraform/openldap/reports/ansible_extra_vars.json
 terraform/openldap/tools/load/runs/20260212T105929Z/logs/*
 terraform/openldap/tools/load/runs/20260212T105929Z/state
+.env
+.DS_Store
+.DS_Store
