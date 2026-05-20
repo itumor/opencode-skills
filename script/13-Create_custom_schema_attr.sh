@@ -48,6 +48,51 @@ fi
 
 schema_dump="$(ldapsearch -Y EXTERNAL -H "$LDAPI_URI" -b "$SCHEMA_DN" -s base -LLL olcAttributeTypes olcObjectClasses || true)"
 
+if echo "$schema_dump" | grep -Fq "NAME '${OBJECTCLASS_NAME}'"; then
+  echo "[INFO] ObjectClass ${OBJECTCLASS_NAME} already exists; skipping"
+  exit 0
+fi
+
+ldif_file="$(mktemp /tmp/add-schema-attr.XXXXXX.ldif)"
+cat >"$ldif_file" <<EOF
+dn: ${SCHEMA_DN}
+changetype: modify
+add: olcAttributeTypes
+olcAttributeTypes: ( 1.3.6.1.4.1.55555.1.1 NAME 'userisactive' DESC 'User active flag' EQUALITY booleanMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.7 SINGLE-VALUE )
+-
+add: olcAttributeTypes
+olcAttributeTypes: ( 1.3.6.1.4.1.55555.1.2 NAME 'memorableanswer' DESC 'Memorable answer' EQUALITY caseExactMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+-
+add: olcAttributeTypes
+olcAttributeTypes: ( 1.3.6.1.4.1.55555.1.3 NAME 'memorablequestion' DESC 'Memorable question' EQUALITY caseIgnoreMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+-
+add: olcAttributeTypes
+olcAttributeTypes: ( 1.3.6.1.4.1.55555.1.4 NAME 'activationdatetime' DESC 'Account activation timestamp in milliseconds (13 digits)' EQUALITY caseExactMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+-
+add: olcAttributeTypes
+olcAttributeTypes: ( 1.3.6.1.4.1.55555.1.5 NAME 'cif' DESC 'Customer Information File ID' EQUALITY caseExactMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+-
+add: olcAttributeTypes
+olcAttributeTypes: ( 1.3.6.1.4.1.55555.1.12 NAME 'lastvisit' DESC 'Last visit timestamp in milliseconds (13 digits)' EQUALITY caseExactMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+-
+add: olcAttributeTypes
+olcAttributeTypes: ( 1.3.6.1.4.1.55555.1.13 NAME 'oblastloginattemptdate' DESC 'Last login attempt datetime' EQUALITY generalizedTimeMatch ORDERING generalizedTimeOrderingMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.24 SINGLE-VALUE )
+-
+add: olcAttributeTypes
+olcAttributeTypes: ( 1.3.6.1.4.1.55555.1.14 NAME 'oblastfailedlogin' DESC 'Last failed login timestamp in seconds (10 digits)' EQUALITY caseExactMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+-
+add: olcAttributeTypes
+olcAttributeTypes: ( 1.3.6.1.4.1.55555.1.15 NAME 'userfullname' DESC 'User full name' EQUALITY caseIgnoreMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+-
+add: olcObjectClasses
+olcObjectClasses: ( 1.3.6.1.4.1.55555.2.1 NAME 'bankUserExtension' SUP top AUXILIARY MAY ( userisactive $ memorableAnswer $ memorableQuestion $ activationdatetime $ cif $ mail $ lastvisit $ oblastloginattemptdate $ oblastfailedlogin $ userfullname ) )
+EOF
+
+ldapmodify -Y EXTERNAL -H "$LDAPI_URI" -f "$ldif_file"
+rm -f "$ldif_file"
+echo "[OK] Added custom attributes and objectClass ${OBJECTCLASS_NAME}"
+exit 0
+
 add_attribute_type() {
   local oid="$1"
   local name="$2"

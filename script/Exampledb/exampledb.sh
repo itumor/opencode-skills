@@ -265,7 +265,8 @@ fi
 
 if [ "$config" = "2" ]; then
   echo "Creating server configuration..."
-  $SBIN/slapadd -q -n 0 -F $CONFIGDIR <<EOF
+  TMP_CONFIG=$(mktemp)
+  cat > "$TMP_CONFIG" <<EOF
 dn: cn=config
 objectClass: olcGlobal
 cn: config
@@ -273,54 +274,64 @@ olcLogLevel: Sync
 olcLogLevel: Stats
 olcPidFile: /var/symas/run/slapd.pid
 olcArgsFile: /var/symas/run/slapd.args
+olcAuthzRegexp: gidNumber=0\\+uidNumber=0,cn=peercred,cn=external,cn=auth cn=config
+
+dn: cn=module,cn=config
+objectClass: olcModuleList
+cn: module
+olcModulepath: /opt/symas/lib/openldap
+olcModuleload: back_mdb.la
 
 dn: cn=schema,cn=config
 objectClass: olcSchemaConfig
 cn: schema
+EOF
 
-include: file:///opt/symas/etc/openldap/schema/core.ldif
-include: file:///opt/symas/etc/openldap/schema/cosine.ldif
-include: file:///opt/symas/etc/openldap/schema/inetorgperson.ldif
+  # cn=config LDIF does not support "include:" directives. Append the schema
+  # entries directly so slapadd can initialize a complete config database.
+  for schema in core cosine inetorgperson nis; do
+    if [ -f "/opt/symas/etc/openldap/schema/${schema}.ldif" ]; then
+      echo "" >> "$TMP_CONFIG"
+      cat "/opt/symas/etc/openldap/schema/${schema}.ldif" >> "$TMP_CONFIG"
+    fi
+  done
 
-dn: cn=module{0},cn=config
-objectClass: olcModuleList
-cn: module{0}
-olcModulePath: /opt/symas/lib/openldap
-olcModuleLoad: {0}back_mdb.la
-olcModuleLoad: {1}back_monitor.la
-
-dn: olcDatabase={-1}frontend,cn=config
+  cat >> "$TMP_CONFIG" <<EOF
+dn: olcDatabase=frontend,cn=config
 objectClass: olcDatabaseConfig
 objectClass: olcFrontendConfig
-olcDatabase: {-1}frontend
+olcDatabase: frontend
 olcAccess: {0}to dn=""  by * read
 olcAccess: {1}to *  by self write  by sockurl.exact="ldapi:///" write  by users read  by anonymous auth
 
-dn: olcDatabase={0}config,cn=config
+dn: olcDatabase=config,cn=config
 objectClass: olcDatabaseConfig
-olcDatabase: {0}config
+olcDatabase: config
 olcRootPW: TheN1le1
-olcAccess: {0}to *  by * none
+olcAccess: {0}to * by dn.exact=gidNumber=0+uidNumber=0,cn=peercred,cn=external,cn=auth manage by * none
 
-dn: olcDatabase={1}mdb,cn=config
+dn: olcDatabase=mdb,cn=config
 objectClass: olcDatabaseConfig
 objectClass: olcMdbConfig
-olcDatabase: {1}mdb
+olcDatabase: mdb
 olcSuffix: dc=eab,dc=bank,dc=local
 olcRootDN: cn=admin,dc=eab,dc=bank,dc=local
-olcRootPw: TheN1le1
+olcRootPW: TheN1le1
 olcDbDirectory: /var/symas/openldap-data/example
 olcDbIndex: default eq
 olcDbIndex: objectClass
 olcDbIndex: cn
 olcDbMaxSize: 1073741824
 
-dn: olcDatabase={2}monitor,cn=config
+dn: olcDatabase=monitor,cn=config
 objectClass: olcDatabaseConfig
-olcDatabase: {2}monitor
-olcRootDn: cn=config
+olcDatabase: monitor
+olcRootDN: cn=config
 olcMonitoring: FALSE
 EOF
+
+  $SBIN/slapadd -q -n 0 -F $CONFIGDIR -l "$TMP_CONFIG"
+  rm -f "$TMP_CONFIG"
 
 fi
 

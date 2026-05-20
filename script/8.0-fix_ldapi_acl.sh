@@ -154,10 +154,26 @@ first_acl_is_manage() {
   local uri="$1"
   local first
   # Disable LDIF line wrapping so the ACL appears on a single line for matching.
-  first=$(ldapsearch -o ldif-wrap=no -Y EXTERNAL -H "$uri" -b 'olcDatabase={0}config,cn=config' -LLL olcAccess 2>/dev/null | awk '/^olcAccess:/ {print; exit}')
+  first=$(ldapsearch -o ldif-wrap=no -Y EXTERNAL -H "$uri" -b 'cn=config' -LLL '(olcDatabase=config)' olcAccess 2>/dev/null | awk '/^olcAccess:/ {print; exit}')
   [[ -n "$first" ]] || return 1
   [[ "$first" =~ dn\.exact=gidNumber=0\+uidNumber=0,cn=peercred,cn=external,cn=auth[[:space:]]+manage ]] && return 0
   return 1
+}
+
+detect_config_db_file() {
+  local cfg="$1"
+  local dir="${cfg}/cn=config"
+  local file=""
+  [[ -d "$dir" ]] || err "Missing cn=config directory under ${cfg}"
+
+  # Symas/OpenLDAP may write either olcDatabase={0}config.ldif or
+  # olcDatabase=config.ldif depending on how cn=config was initialized.
+  file=$(find "$dir" -maxdepth 1 -type f -name 'olcDatabase*config.ldif' 2>/dev/null | sort | head -n 1 || true)
+  if [[ -z "$file" ]]; then
+    file=$(grep -RIl '^olcDatabase: .*config$' "$dir" 2>/dev/null | sort | head -n 1 || true)
+  fi
+  [[ -n "$file" ]] || err "Could not find config database LDIF under ${dir}"
+  echo "$file"
 }
 
 rewrite_acl_file() {
@@ -326,7 +342,7 @@ main() {
     log "Stopping slapd service: ${unit:-<unknown>}"
     stop_slapd "$unit"
     cfg=$(detect_config_dir)
-    cfg_file="${cfg}/cn=config/olcDatabase={0}config.ldif"
+    cfg_file=$(detect_config_db_file "$cfg")
     rewrite_acl_file "$cfg_file"
     fix_config_permissions "$cfg"
     refresh_config_checksums "$cfg"
