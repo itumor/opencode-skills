@@ -37,6 +37,8 @@ LDAPTLS_REQCERT="${LDAPTLS_REQCERT:-never}"
 
 BASE_DN="${BASE_DN:-dc=eab,dc=bank,dc=local}"
 TARGET_DB_DN="${TARGET_DB_DN:-}"
+ADMIN_DN="${ADMIN_DN:-cn=admin,${BASE_DN}}"
+ADMIN_PW="${ADMIN_PW:-}"
 
 REPL_CN="${REPL_CN:-replicator}"
 REPL_DN="${REPL_DN:-cn=${REPL_CN},${BASE_DN}}"
@@ -52,6 +54,24 @@ ldapsearch_attr() {
   local attr="$2"
   ldapsearch -o ldif-wrap=no -Y EXTERNAL -H "$LDAPI_URI" -b "$dn" -s base -LLL "$attr" 2>/dev/null \
     | awk -F': ' -v a="$attr" '$1==a {print $2; exit}'
+}
+
+detect_example_password() {
+  local candidates=(
+    "/opt/symas/share/symas/exampledb.sh"
+    "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/Exampledb/exampledb.sh"
+  )
+  local file pw
+  for file in "${candidates[@]}"; do
+    if [[ -f "$file" ]]; then
+      pw=$(awk 'tolower($1) ~ /^(rootpw|olcrootpw:)$/ {print $2; exit}' "$file")
+      if [[ -n "$pw" ]]; then
+        echo "$pw"
+        return 0
+      fi
+    fi
+  done
+  return 1
 }
 
 detect_db_dn() {
@@ -72,11 +92,31 @@ check_cn_config() {
 
 ensure_repl_entry() {
   local pw_hash="$1"
+  local admin_pw="${ADMIN_PW}"
+  if [[ -z "$admin_pw" ]]; then
+    admin_pw="$(detect_example_password || true)"
+  fi
+  [[ -n "$admin_pw" ]] || fatal "ADMIN_PW not set and could not detect password from exampledb.sh"
 
+  # Build admin bind args - always use StartTLS when the server requires it.
+  # We detect this by checking olcRequires on cn=config (needs EXTERNAL access).
+  local requires_tls=0
+  if ldapsearch -Y EXTERNAL -H "$LDAPI_URI" -b cn=config -LLL '(objectClass=olcGlobal)' olcRequires 2>/dev/null \
+       | grep -qi 'olcRequires.*tls\|olcRequires.*\bbind\b'; then
+    requires_tls=1
+  fi
+
+  local ldap_args=( -x -H "$LDAP_URI" -D "$ADMIN_DN" -w "$admin_pw" )
+  if [[ "$requires_tls" == "1" || "${VERIFY_STARTTLS:-1}" == "1" ]]; then
+    ldap_args+=( -ZZ )
+    export LDAPTLS_REQCERT="${LDAPTLS_REQCERT:-never}"
+  fi
+
+  # Use SASL EXTERNAL (ldapi) for existence check - avoids plain bind TLS requirement.
   if ldapsearch -Y EXTERNAL -H "$LDAPI_URI" -b "$REPL_DN" -s base -LLL dn >/dev/null 2>&1; then
     log "Replication bind entry already exists: ${REPL_DN}"
     if [[ "$UPDATE_REPL_PW" == "1" ]]; then
-      ldapmodify -Y EXTERNAL -H "$LDAPI_URI" >/dev/stdin <<LDIF
+      ldapmodify "${ldap_args[@]}" <<LDIF
 dn: ${REPL_DN}
 changetype: modify
 replace: userPassword
@@ -87,7 +127,7 @@ LDIF
     return 0
   fi
 
-  ldapadd -Y EXTERNAL -H "$LDAPI_URI" >/dev/stdin <<LDIF
+  ldapadd "${ldap_args[@]}" <<LDIF
 dn: ${REPL_DN}
 objectClass: simpleSecurityObject
 objectClass: organizationalRole

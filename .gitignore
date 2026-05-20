@@ -14,6 +14,7 @@ terraform/AWS-access-keys.text
 *.tfvars
 *.tfvars.json
 *.tfplan
+tfplan.*
 *.tfplan.json
 .terraform/
 .terraform.lock.hcl
@@ -31,6 +32,7 @@ terraform.rc
 terraform/key.aws.text
 terraform/ec2-rhel97/.local-ssh/
 terraform/openldap/.local-ssh/
+terraform/openldap-master-replica/.local-ssh/
 terraform/openldap/reports/ansible_inventory.ini
 terraform/openldap/reports/ansible_extra_vars.json
 terraform/openldap/tools/load/runs/20260212T105929Z/logs/*
