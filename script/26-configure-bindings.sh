@@ -47,6 +47,9 @@ UPDATE_REPL_PW="${UPDATE_REPL_PW:-0}"
 
 APPLY_REPL_USER="${APPLY_REPL_USER:-1}"
 APPLY_REPL_ACL="${APPLY_REPL_ACL:-1}"
+APPLY_SYNCPROV="${APPLY_SYNCPROV:-1}"
+APPLY_SERVER_ID="${APPLY_SERVER_ID:-1}"
+MASTER_SERVER_ID="${MASTER_SERVER_ID:-1}"
 VERIFY_BINDS="${VERIFY_BINDS:-1}"
 
 ldapsearch_attr() {
@@ -213,6 +216,75 @@ if [[ "$APPLY_REPL_ACL" == "1" ]]; then
   ensure_repl_acl "$TARGET_DB_DN"
 else
   log "Skipping replication ACL configuration (APPLY_REPL_ACL=0)"
+fi
+
+# ---------------------------------------------------------------------------
+# olcServerID — set on master so replicas can identify the provider
+# ---------------------------------------------------------------------------
+if [[ "$APPLY_SERVER_ID" == "1" ]]; then
+  current_sid="$(ldapsearch -o ldif-wrap=no -Y EXTERNAL -H "$LDAPI_URI" \
+    -b cn=config -s base -LLL olcServerID 2>/dev/null \
+    | awk '/^olcServerID:/{print $2; exit}')"
+  if [[ "$current_sid" == "$MASTER_SERVER_ID" ]]; then
+    log "olcServerID already set to ${MASTER_SERVER_ID}"
+  else
+    op="replace"; [[ -z "$current_sid" ]] && op="add"
+    ldapmodify -Y EXTERNAL -H "$LDAPI_URI" >/dev/null <<LDIF
+dn: cn=config
+changetype: modify
+${op}: olcServerID
+olcServerID: ${MASTER_SERVER_ID}
+LDIF
+    log "Set olcServerID to ${MASTER_SERVER_ID}"
+  fi
+else
+  log "Skipping olcServerID configuration (APPLY_SERVER_ID=0)"
+fi
+
+# ---------------------------------------------------------------------------
+# syncprov module + overlay — makes this node a replication provider
+# ---------------------------------------------------------------------------
+if [[ "$APPLY_SYNCPROV" == "1" ]]; then
+  # Load syncprov module if not already loaded
+  module_dn="$(ldapsearch -o ldif-wrap=no -Y EXTERNAL -H "$LDAPI_URI" \
+    -b cn=config -LLL '(objectClass=olcModuleList)' dn 2>/dev/null \
+    | awk '/^dn:/{print $2; exit}')"
+  if [[ -n "$module_dn" ]]; then
+    existing_mods="$(ldapsearch -o ldif-wrap=no -Y EXTERNAL -H "$LDAPI_URI" \
+      -b "$module_dn" -s base -LLL olcModuleLoad 2>/dev/null || true)"
+    if echo "$existing_mods" | grep -qi "syncprov"; then
+      log "syncprov module already loaded"
+    else
+      ldapmodify -Y EXTERNAL -H "$LDAPI_URI" >/dev/null <<LDIF
+dn: ${module_dn}
+changetype: modify
+add: olcModuleLoad
+olcModuleLoad: syncprov.la
+LDIF
+      log "Loaded syncprov module in ${module_dn}"
+    fi
+  else
+    warn "No olcModuleList found — skipping syncprov module load"
+  fi
+
+  # Add syncprov overlay to main database if not present
+  existing_overlay="$(ldapsearch -o ldif-wrap=no -Y EXTERNAL -H "$LDAPI_URI" \
+    -b "$TARGET_DB_DN" -s one -LLL '(objectClass=olcSyncProvConfig)' dn 2>/dev/null | grep '^dn:' || true)"
+  if [[ -n "$existing_overlay" ]]; then
+    log "syncprov overlay already present on ${TARGET_DB_DN}"
+  else
+    ldapadd -Y EXTERNAL -H "$LDAPI_URI" >/dev/null <<LDIF
+dn: olcOverlay=syncprov,${TARGET_DB_DN}
+objectClass: olcOverlayConfig
+objectClass: olcSyncProvConfig
+olcOverlay: syncprov
+olcSpCheckpoint: 100 10
+olcSpSessionLog: 100
+LDIF
+    log "Added syncprov overlay to ${TARGET_DB_DN}"
+  fi
+else
+  log "Skipping syncprov configuration (APPLY_SYNCPROV=0)"
 fi
 
 if [[ "$VERIFY_BINDS" == "1" ]]; then

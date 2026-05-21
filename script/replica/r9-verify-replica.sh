@@ -100,12 +100,12 @@ echo ""
 echo "--- Replication Config ---"
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
   syncrepl="$(ldapsearch -Y EXTERNAL -H "$LDAPI_URI" -b cn=config \
-    -LLL '(objectClass=olcMdbConfig)' olcSyncRepl 2>/dev/null | grep olcSyncRepl || true)"
+    -LLL '(objectClass=olcMdbConfig)' olcSyncrepl 2>/dev/null | grep -i olcSyncrepl || true)"
   if [[ -n "$syncrepl" ]]; then
-    ok "olcSyncRepl configured"
+    ok "olcSyncrepl configured"
     info "$(echo "$syncrepl" | head -1)"
   else
-    bad "olcSyncRepl not found in cn=config"
+    bad "olcSyncrepl not found in cn=config (run r2-configure-replica-instance.sh)"
   fi
 
   updateref="$(ldapsearch -Y EXTERNAL -H "$LDAPI_URI" -b cn=config \

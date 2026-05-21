@@ -51,6 +51,8 @@ MASTER_IP="${MASTER_IP:-}"
 SSH_KEY="${SSH_KEY:-}"
 SSH_USER="${SSH_USER:-ec2-user}"
 COPY_FROM_MASTER="${COPY_FROM_MASTER:-1}"
+STAGED_CA_CERT="${STAGED_CA_CERT:-}"   # pre-staged CA cert path (skips SSH to master)
+STAGED_CA_KEY="${STAGED_CA_KEY:-}"    # pre-staged CA key path (skips SSH to master)
 TLS_DIR="${TLS_DIR:-/opt/symas/etc/openldap/tls}"
 CA_CERT="${TLS_DIR}/ca.crt"
 CA_KEY="${TLS_DIR}/ca.key"
@@ -65,18 +67,28 @@ SERVER_DAYS="${SERVER_DAYS:-825}"
 mkdir -p "$TLS_DIR"
 
 # ---------------------------------------------------------------------------
-# Mode 1: copy CA from master, sign new server cert for replica
+# Mode 1: copy CA from master (SSH or pre-staged files)
 # ---------------------------------------------------------------------------
 if [[ "$COPY_FROM_MASTER" == "1" ]]; then
-  [[ -n "$MASTER_IP" ]] || fatal "MASTER_IP required when COPY_FROM_MASTER=1"
-  [[ -n "$SSH_KEY"   ]] || fatal "SSH_KEY required when COPY_FROM_MASTER=1"
+  # Sub-mode A: pre-staged CA files provided (avoids SSH between hosts)
+  if [[ -n "$STAGED_CA_CERT" && -n "$STAGED_CA_KEY" ]]; then
+    log "Using pre-staged CA cert: ${STAGED_CA_CERT}"
+    cp "$STAGED_CA_CERT" "$CA_CERT"
+    cp "$STAGED_CA_KEY"  "$CA_KEY"
+    chmod 600 "$CA_KEY"
+    log "CA cert+key copied from pre-staged files"
+  else
+    # Sub-mode B: SSH directly to master
+    [[ -n "$MASTER_IP" ]] || fatal "MASTER_IP required when COPY_FROM_MASTER=1 and STAGED_CA_CERT not set"
+    [[ -n "$SSH_KEY"   ]] || fatal "SSH_KEY required when COPY_FROM_MASTER=1 and STAGED_CA_CERT not set"
 
-  log "Copying CA cert+key from master ${MASTER_IP}"
-  scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
-    "${SSH_USER}@${MASTER_IP}:/opt/symas/etc/openldap/tls/ca.crt" "$CA_CERT"
-  scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
-    "${SSH_USER}@${MASTER_IP}:/opt/symas/etc/openldap/tls/ca.key" "$CA_KEY"
-  log "CA cert+key copied from master"
+    log "Copying CA cert+key from master ${MASTER_IP}"
+    scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
+      "${SSH_USER}@${MASTER_IP}:/opt/symas/etc/openldap/tls/ca.crt" "$CA_CERT"
+    scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
+      "${SSH_USER}@${MASTER_IP}:/opt/symas/etc/openldap/tls/ca.key" "$CA_KEY"
+    log "CA cert+key copied from master"
+  fi
 
   # Generate new server key + CSR + cert signed by master CA
   host_fqdn="$(hostname -f 2>/dev/null || hostname)"

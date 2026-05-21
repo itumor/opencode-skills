@@ -2,18 +2,21 @@
 # r2-configure-replica-instance.sh
 #
 # Initialises the OpenLDAP instance on the replica node.
-# - Copies the master Exampledb config (same suffix/org) to establish slapd.d
-# - Sets olcServerID (must differ from master, default 2)
-# - Does NOT create any data — data arrives via syncrepl from master
+# Uses slapd.conf (with schema includes) converted to cn=config via slaptest.
+# This ensures core/cosine/inetorgperson schemas load in the correct order.
+#
+# Does NOT create any data — data arrives via syncrepl from master.
 #
 # Requires:
-#   MASTER_IP   - IP or hostname of master (used for syncrepl provider)
+#   MASTER_IP   - IP or hostname of master
 #   BASE_DN     - LDAP base DN (default: dc=eab,dc=bank,dc=local)
 #   SERVER_ID   - olcServerID for this replica (default: 2)
 #   ADMIN_PW    - Admin password (must match master)
 #   REPL_PW     - Replication bind password (must match master cn=replicator)
+#   LDAP_PORT   - Master LDAP port (default: 389)
 #
-# Usage: sudo MASTER_IP=10.0.0.1 ADMIN_PW=secret REPL_PW=replpass bash r2-configure-replica-instance.sh
+# Usage:
+#   sudo MASTER_IP=10.0.0.1 ADMIN_PW=secret REPL_PW=replpass bash r2-configure-replica-instance.sh
 set -euo pipefail
 
 log()   { echo "[INFO] $*"; }
@@ -34,10 +37,8 @@ require_cmd() { command -v "$1" >/dev/null 2>&1 || fatal "$1 not found in PATH";
 
 ensure_symas_env
 require_cmd slappasswd
-require_cmd slapadd
 require_cmd slaptest
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MASTER_IP="${MASTER_IP:?MASTER_IP is required (IP/hostname of master)}"
 BASE_DN="${BASE_DN:-dc=eab,dc=bank,dc=local}"
 SERVER_ID="${SERVER_ID:-2}"
@@ -47,85 +48,65 @@ REPL_DN="${REPL_DN:-cn=replicator,${BASE_DN}}"
 LDAP_PORT="${LDAP_PORT:-389}"
 
 SLAPD_D="/opt/symas/etc/openldap/slapd.d"
+SLAPD_CONF="/opt/symas/etc/openldap/slapd.conf"
 DB_DIR="/var/symas/openldap-data/example"
-SBIN="/opt/symas/sbin"
 SCHEMA_DIR="/opt/symas/etc/openldap/schema"
 DEFAULTS_FILE="/etc/default/symas-openldap"
 
 log "Configuring replica (SERVER_ID=${SERVER_ID}, MASTER_IP=${MASTER_IP}, BASE_DN=${BASE_DN})"
 
-# Hash passwords
+# Hash password
 ADMIN_HASH="$(slappasswd -s "$ADMIN_PW")"
-REPL_HASH="$(slappasswd -s "$REPL_PW")"
 
 # Stop service if running
 systemctl stop symas-openldap-servers 2>/dev/null || systemctl stop slapd 2>/dev/null || true
+sleep 2
 
-# Clean existing slapd.d and data
-log "Clearing existing slapd.d and data directories"
-rm -rf "${SLAPD_D:?}/"*
-mkdir -p "$DB_DIR"
-chown -R root:root "$DB_DIR" 2>/dev/null || true
+# Ensure directories exist and are clean
+log "Preparing directories"
+mkdir -p "$SLAPD_D" "$DB_DIR"
+find "$SLAPD_D" -mindepth 1 -delete 2>/dev/null || rm -rf "${SLAPD_D:?}/"* 2>/dev/null || true
+rm -rf "${DB_DIR:?}/"* 2>/dev/null || true
 
-# Build fresh cn=config LDIF for replica
-TMP_CONFIG="$(mktemp /tmp/replica-config.XXXXXX.ldif)"
-log "Writing cn=config LDIF to ${TMP_CONFIG}"
-
-{
-cat <<EOF
-dn: cn=config
-objectClass: olcGlobal
-cn: config
-olcLogLevel: Stats
-olcServerID: ${SERVER_ID}
-
-EOF
-
-# Load schemas
-for schema in core cosine inetorgperson; do
-  if [[ -f "${SCHEMA_DIR}/${schema}.ldif" ]]; then
-    cat "${SCHEMA_DIR}/${schema}.ldif"
-    echo ""
+# Detect available schema files (.schema or .ldif)
+schema_include() {
+  local name="$1"
+  if [[ -f "${SCHEMA_DIR}/${name}.schema" ]]; then
+    echo "include ${SCHEMA_DIR}/${name}.schema"
+  elif [[ -f "${SCHEMA_DIR}/${name}.ldif" ]]; then
+    # Will be handled by ldapadd after service starts
+    echo "# ${name}.ldif will be loaded after service start"
   fi
-done
+}
 
-cat <<EOF
-dn: cn=module,cn=config
-objectClass: olcModuleList
-cn: module
-olcModulepath: /opt/symas/lib/openldap
-olcModuleload: back_mdb.la
-olcModuleload: syncprov.la
+# Write slapd.conf with schema includes
+log "Writing slapd.conf with schema includes"
+cat > "$SLAPD_CONF" << SLAPDEOF
+$(schema_include core)
+$(schema_include cosine)
+$(schema_include inetorgperson)
 
-dn: olcDatabase=frontend,cn=config
-objectClass: olcDatabaseConfig
-objectClass: olcFrontendConfig
-olcDatabase: frontend
-olcAccess: {0}to dn="" by * read
-olcAccess: {1}to * by self write by sockurl.exact="ldapi:///" write by users read by anonymous auth
+serverID ${SERVER_ID}
 
-dn: olcDatabase=config,cn=config
-objectClass: olcDatabaseConfig
-olcDatabase: config
-olcRootPW: ${ADMIN_HASH}
-olcAccess: {0}to * by dn.exact=gidNumber=0+uidNumber=0,cn=peercred,cn=external,cn=auth manage by * none
+moduleload back_mdb.la
+moduleload syncprov.la
 
-dn: olcDatabase=mdb,cn=config
-objectClass: olcDatabaseConfig
-objectClass: olcMdbConfig
-olcDatabase: mdb
-olcSuffix: ${BASE_DN}
-olcRootDN: cn=admin,${BASE_DN}
-olcRootPW: ${ADMIN_HASH}
-olcDbDirectory: ${DB_DIR}
-olcDbIndex: default eq
-olcDbIndex: objectClass
-olcDbIndex: cn
-olcDbIndex: uid
-olcDbIndex: entryUUID
-olcDbIndex: entryCSN
-olcDbMaxSize: 1073741824
-olcSyncRepl: rid=101
+database config
+rootpw ${ADMIN_HASH}
+
+access to *
+  by dn.exact=gidNumber=0+uidNumber=0,cn=peercred,cn=external,cn=auth manage
+  by * none
+
+database mdb
+suffix "${BASE_DN}"
+rootdn "cn=admin,${BASE_DN}"
+rootpw ${ADMIN_HASH}
+directory ${DB_DIR}
+index default eq
+index objectClass,cn,uid,entryUUID,entryCSN
+
+syncrepl rid=101
   provider=ldap://${MASTER_IP}:${LDAP_PORT}
   bindmethod=simple
   binddn="${REPL_DN}"
@@ -136,26 +117,30 @@ olcSyncRepl: rid=101
   timeout=1
   starttls=critical
   tls_reqcert=never
-olcUpdateRef: ldap://${MASTER_IP}:${LDAP_PORT}
 
-dn: olcDatabase=monitor,cn=config
-objectClass: olcDatabaseConfig
-olcDatabase: monitor
-olcRootDN: cn=config
-olcMonitoring: FALSE
-EOF
-} > "$TMP_CONFIG"
+updateref ldap://${MASTER_IP}:${LDAP_PORT}
 
-log "Loading cn=config into slapd.d via slapadd"
-"${SBIN}/slapadd" -n 0 -F "$SLAPD_D" -l "$TMP_CONFIG"
-rm -f "$TMP_CONFIG"
+database monitor
+SLAPDEOF
 
-# Fix ownership
-if id -u symas-openldap >/dev/null 2>&1; then
-  chown -R symas-openldap:symas-openldap "$SLAPD_D" "$DB_DIR"
+# Convert slapd.conf to cn=config via slaptest
+log "Converting slapd.conf to cn=config via slaptest"
+slaptest -f "$SLAPD_CONF" -F "$SLAPD_D" && log "slaptest OK"
+
+# If .schema files not available, we loaded LDIF schemas later — note for r3
+if ! [[ -f "${SCHEMA_DIR}/core.schema" ]]; then
+  log "Note: .schema files not present — schemas will be loaded via ldapadd after service start"
+  # Mark for schema post-load
+  touch /tmp/replica-needs-schema-load
 fi
-find "$SLAPD_D" -type d -exec chmod 700 {} + 2>/dev/null || true
-find "$SLAPD_D" -type f -exec chmod 600 {} + 2>/dev/null || true
+
+# Fix SELinux context
+if command -v restorecon >/dev/null 2>&1; then
+  restorecon -Rv "$SLAPD_D" 2>/dev/null || true
+  log "SELinux context restored on ${SLAPD_D}"
+elif command -v chcon >/dev/null 2>&1; then
+  chcon -Rt slapd_db_t "$SLAPD_D" 2>/dev/null || true
+fi
 
 # Configure SLAPD_URLS
 if [[ -f "$DEFAULTS_FILE" ]]; then
@@ -167,5 +152,6 @@ if [[ -f "$DEFAULTS_FILE" ]]; then
   log "Set SLAPD_URLS in ${DEFAULTS_FILE}"
 fi
 
-log "Replica cn=config initialised (SERVER_ID=${SERVER_ID})"
-log "Syncrepl configured: provider=ldap://${MASTER_IP}:${LDAP_PORT}, binddn=${REPL_DN}"
+log "Replica cn=config initialised via slapd.conf+slaptest"
+log "Syncrepl: provider=ldap://${MASTER_IP}:${LDAP_PORT}, binddn=${REPL_DN}"
+log "Run 3-install-example approach: custom schema will be loaded by r3/r5 after service starts"

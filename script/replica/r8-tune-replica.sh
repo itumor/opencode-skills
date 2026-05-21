@@ -17,15 +17,21 @@ LIMIT_NOFILE="${LIMIT_NOFILE:-524288}"
 SLAPD_URLS="${SLAPD_URLS:-}"
 SLAPD_OPTIONS="${SLAPD_OPTIONS:-}"
 
-# Detect service name
-SERVICE_NAME=""
-for svc in symas-openldap-servers slapd; do
-  if systemctl list-units --type=service 2>/dev/null | grep -q "$svc"; then
-    SERVICE_NAME="$svc"
-    break
-  fi
-done
-[[ -n "$SERVICE_NAME" ]] || fatal "Could not detect OpenLDAP service name"
+# Detect service name — check unit files (not just active units)
+SERVICE_NAME="${SERVICE_NAME:-}"
+if [[ -z "$SERVICE_NAME" ]]; then
+  for svc in symas-openldap-servers slapd; do
+    if systemctl list-unit-files --type=service 2>/dev/null | grep -qF "${svc}.service"; then
+      SERVICE_NAME="$svc"
+      break
+    fi
+  done
+fi
+# Final fallback: check if binary exists at known path
+if [[ -z "$SERVICE_NAME" ]] && [[ -f /usr/lib/systemd/system/symas-openldap-servers.service ]]; then
+  SERVICE_NAME="symas-openldap-servers"
+fi
+[[ -n "$SERVICE_NAME" ]] || fatal "Could not detect OpenLDAP service name; set SERVICE_NAME env var"
 
 # systemd drop-in for file descriptor limit
 DROPIN_DIR="/etc/systemd/system/${SERVICE_NAME}.service.d"

@@ -105,6 +105,34 @@ run "r1-install-symas-openldap-replica.sh"
 run "r2-configure-replica-instance.sh"
 run "r3-start-replica-daemon.sh"
 run "r4-fix-replica-env.sh"
+
+# ---- Schema (must run after service starts, before TLS/hardening) ----
+# Load cosine/inetorgperson if .ldif format only (no .schema files)
+echo ""
+echo "=== Loading base schemas (cosine, inetorgperson) ==="
+SCHEMA_DIR="/opt/symas/etc/openldap/schema"
+for schema in cosine inetorgperson; do
+  if [[ -f "${SCHEMA_DIR}/${schema}.ldif" ]] && ! [[ -f "${SCHEMA_DIR}/${schema}.schema" ]]; then
+    existing=$(ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=schema,cn=config -s one -LLL dn 2>/dev/null | grep "$schema" || true)
+    if [[ -n "$existing" ]]; then
+      echo "[INFO] Schema ${schema} already loaded"
+    else
+      ldapadd -Y EXTERNAL -H ldapi:/// -f "${SCHEMA_DIR}/${schema}.ldif" 2>&1 | grep -v "^SASL" | head -3
+    fi
+  fi
+done
+
+# Custom bank schema
+SCRIPT_DIR_OUTER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+echo ""
+echo "=== Loading custom bank schema ==="
+bash "${SCRIPT_DIR_OUTER}/12-Create_custom_schema.sh"
+bash "${SCRIPT_DIR_OUTER}/13-Create_custom_schema_attr.sh"
+
+# Restart after schema load
+systemctl restart symas-openldap-servers 2>/dev/null || systemctl restart slapd 2>/dev/null || true
+sleep 5
+
 run "r5-configure-replica-tls.sh"
 run "r6-fix-replica-ldapi-acl.sh"
 run "r7-harden-replica.sh"

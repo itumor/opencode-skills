@@ -95,10 +95,24 @@ MANAGE_RULE='olcAccess: {0}to * by dn.exact=gidNumber=0+uidNumber=0,cn=peercred,
 if grep -q "^olcAccess:" "$CONFIG_LDIF"; then
   sed -i '/^olcAccess:/d' "$CONFIG_LDIF"
 fi
+
+# Also remove any dangling continuation lines from a previous corrupted edit
+# (lines starting with space that aren't legitimate LDIF continuations after a known attr)
+# Safest: only remove lines that are orphaned manage/none continuations
+sed -i '/^ .*cn=auth manage by \* none/d' "$CONFIG_LDIF"
+
+# Append the correct ACL
 echo "$MANAGE_RULE" >> "$CONFIG_LDIF"
 
-# Refresh checksums
+# Refresh checksums — slaptest will rewrite the CRC line
 slaptest -F "/opt/symas/etc/openldap/slapd.d" -u 2>/dev/null || true
+
+# Restore SELinux context on slapd.d after offline edit
+if command -v restorecon >/dev/null 2>&1; then
+  restorecon -Rv "/opt/symas/etc/openldap/slapd.d" 2>/dev/null || true
+elif command -v chcon >/dev/null 2>&1; then
+  chcon -Rt slapd_db_t "/opt/symas/etc/openldap/slapd.d" 2>/dev/null || true
+fi
 
 log "Starting service: ${SVC}"
 systemctl start "$SVC"

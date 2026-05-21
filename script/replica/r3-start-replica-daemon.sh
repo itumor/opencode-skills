@@ -23,6 +23,13 @@ ensure_symas_env
 log "Enabling and starting Symas OpenLDAP service (replica)"
 systemctl daemon-reload
 
+# Ensure SELinux context correct on slapd.d before start
+if command -v restorecon >/dev/null 2>&1; then
+  restorecon -Rv /opt/symas/etc/openldap/slapd.d/ 2>/dev/null || true
+elif command -v chcon >/dev/null 2>&1; then
+  chcon -Rt slapd_db_t /opt/symas/etc/openldap/slapd.d/ 2>/dev/null || true
+fi
+
 if systemctl list-unit-files symas-openldap-servers.service >/dev/null 2>&1; then
   systemctl enable symas-openldap-servers
   systemctl restart symas-openldap-servers
