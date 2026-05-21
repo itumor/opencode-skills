@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# r8-tune-replica.sh
+#
+# Performance tuning for replica node.
+# Mirrors 22-tuning.sh from master exactly — same limits apply.
+#
+# Usage: sudo bash r8-tune-replica.sh
+set -euo pipefail
+
+log()   { echo "[INFO] $*"; }
+warn()  { echo "[WARN] $*" >&2; }
+fatal() { echo "[FATAL] $*" >&2; exit 1; }
+
+[[ "${EUID:-$(id -u)}" -eq 0 ]] || fatal "Run as root"
+
+LIMIT_NOFILE="${LIMIT_NOFILE:-524288}"
+SLAPD_URLS="${SLAPD_URLS:-}"
+SLAPD_OPTIONS="${SLAPD_OPTIONS:-}"
+
+# Detect service name
+SERVICE_NAME=""
+for svc in symas-openldap-servers slapd; do
+  if systemctl list-units --type=service 2>/dev/null | grep -q "$svc"; then
+    SERVICE_NAME="$svc"
+    break
+  fi
+done
+[[ -n "$SERVICE_NAME" ]] || fatal "Could not detect OpenLDAP service name"
+
+# systemd drop-in for file descriptor limit
+DROPIN_DIR="/etc/systemd/system/${SERVICE_NAME}.service.d"
+DROPIN_FILE="${DROPIN_DIR}/override.conf"
+mkdir -p "$DROPIN_DIR"
+
+if grep -q "LimitNOFILE=${LIMIT_NOFILE}" "$DROPIN_FILE" 2>/dev/null; then
+  log "LimitNOFILE already set in ${DROPIN_FILE}"
+else
+  cat > "$DROPIN_FILE" <<EOF
+[Service]
+LimitNOFILE=${LIMIT_NOFILE}
+EOF
+  log "Set LimitNOFILE=${LIMIT_NOFILE} in ${DROPIN_FILE}"
+fi
+
+DEFAULTS_FILE="/etc/default/${SERVICE_NAME}"
+[[ -f "$DEFAULTS_FILE" ]] || touch "$DEFAULTS_FILE"
+
+if [[ -n "$SLAPD_URLS" ]]; then
+  if grep -q '^SLAPD_URLS=' "$DEFAULTS_FILE"; then
+    sed -i "s|^SLAPD_URLS=.*|SLAPD_URLS=\"${SLAPD_URLS}\"|" "$DEFAULTS_FILE"
+  else
+    echo "SLAPD_URLS=\"${SLAPD_URLS}\"" >> "$DEFAULTS_FILE"
+  fi
+  log "Set SLAPD_URLS in ${DEFAULTS_FILE}"
+else
+  log "SLAPD_URLS not provided; skipping"
+fi
+
+if [[ -n "$SLAPD_OPTIONS" ]]; then
+  if grep -q '^SLAPD_OPTIONS=' "$DEFAULTS_FILE"; then
+    sed -i "s|^SLAPD_OPTIONS=.*|SLAPD_OPTIONS=\"${SLAPD_OPTIONS}\"|" "$DEFAULTS_FILE"
+  else
+    echo "SLAPD_OPTIONS=\"${SLAPD_OPTIONS}\"" >> "$DEFAULTS_FILE"
+  fi
+  log "Set SLAPD_OPTIONS in ${DEFAULTS_FILE}"
+else
+  log "SLAPD_OPTIONS not provided; skipping"
+fi
+
+systemctl daemon-reload
+systemctl restart "$SERVICE_NAME"
+log "Reloaded systemd and restarted ${SERVICE_NAME}"
