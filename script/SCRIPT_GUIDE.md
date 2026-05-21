@@ -2,39 +2,67 @@
 
 Complete reference for the `script/` directory: what each script does, the order to run them, environment variables, and how to execute them on a remote VM over SSH.
 
-> **Test Status — Verified on RHEL 9.7 + Symas OpenLDAP 2.6.13 — 2026-05-19**
+> **Test Status — Verified on RHEL 9.7 + Symas OpenLDAP 2.6.13 — 2026-05-20**
 >
 > | Suite | PASS | WARN | FAIL |
 > |-------|------|------|------|
-> | Smoke (syntax + orchestrator) | 79 | 0 | 0 |
-> | LDAP Integration (full install + all tests) | All PASS | 0 | 0 |
+> | Smoke (syntax + orchestrator) | 95 | 0 | 0 |
+> | LDAP Integration — master (full install + all tests) | All PASS | 0 | 0 |
+> | Connection tests | 26/26 | 0 | 0 |
 >
-> Tested on: AWS EC2 `t3.medium`, RHEL 9.7, us-west-2 (`i-07367b4591f1c98cc`)
+> Tested on: AWS EC2 `t3.medium`, RHEL 9.7/9.8, us-west-2 (`i-06ac02deae4c09011`)
 
 ---
 
 ## Table of Contents
 
-1. [Quick Start](#quick-start)
-2. [Requirements](#requirements)
-3. [Environment Variables](#environment-variables)
-4. [Running the Full Stack (All-in-One)](#running-the-full-stack-all-in-one)
-5. [Running Over SSH](#running-over-ssh)
-6. [Script Reference (Ordered)](#script-reference-ordered)
-7. [Test Suite](#test-suite)
-8. [Troubleshooting](#troubleshooting)
+1. [Quick Start — Master](#quick-start--master)
+2. [Quick Start — Replica](#quick-start--replica)
+3. [Requirements](#requirements)
+4. [Environment Variables — Master](#environment-variables--master)
+5. [Environment Variables — Replica](#environment-variables--replica)
+6. [Master: Running the Full Stack](#master-running-the-full-stack)
+7. [Replica: Running the Full Stack](#replica-running-the-full-stack)
+8. [Running Over SSH](#running-over-ssh)
+9. [Master Script Reference](#master-script-reference-ordered)
+10. [Replica Script Reference](#replica-script-reference-ordered)
+11. [Test Suite — Master](#test-suite--master)
+12. [Test Suite — Replica](#test-suite--replica)
+13. [Connection Testing](#connection-testing)
+14. [Troubleshooting](#troubleshooting)
 
 ---
 
-## Quick Start
+## Quick Start — Master
 
 ```bash
-# 1. Copy scripts to the target VM
-scp -r ./script ec2-user@<IP>:/tmp/script
+# 1. Copy scripts to master VM
+scp -r ./script ec2-user@<MASTER_IP>:/tmp/script
 
-# 2. SSH in and run the all-in-one installer
-ssh -i ~/.ssh/your-key.pem ec2-user@<IP>
+# 2. Run master all-in-one installer
+ssh -i ~/.ssh/your-key.pem ec2-user@<MASTER_IP>
 sudo bash /tmp/script/install-symas-openldap-all-in-one.sh
+```
+
+---
+
+## Quick Start — Replica
+
+```bash
+# Prerequisites:
+#   - Master is running (install-symas-openldap-all-in-one.sh complete)
+#   - Master has run 26-configure-bindings.sh (cn=replicator + syncprov)
+#   - SSH access from replica to master (for CA cert copy)
+
+# 1. Copy scripts to replica VM
+scp -r ./script ec2-user@<REPLICA_IP>:/tmp/script
+
+# 2. Run replica all-in-one installer
+ssh -i ~/.ssh/your-key.pem ec2-user@<REPLICA_IP>
+sudo MASTER_IP=<MASTER_IP> \
+     ADMIN_PW=<admin-password> \
+     SSH_KEY=~/.ssh/your-key.pem \
+     bash /tmp/script/install-symas-openldap-replica-all-in-one.sh
 ```
 
 ---
@@ -45,15 +73,14 @@ sudo bash /tmp/script/install-symas-openldap-all-in-one.sh
 |-------------|--------|
 | **OS** | RHEL 9 / AlmaLinux 9 / Rocky Linux 9 (or compatible) |
 | **User** | Must run as `root` (use `sudo`) |
-| **Internet** | Required for Symas repo and package download |
-| **OpenLDAP** | Symas OpenLDAP 2.6.x (installed by script 1) |
+| **Repo** | Symas SOLDAP repo enabled via Red Hat Satellite |
+| **OpenLDAP** | Symas OpenLDAP 2.6.x (installed by script 1 / r1) |
 | **Packages** | `openssl`, `ldap-utils` auto-installed |
+| **Replica extra** | SSH access from replica to master (for CA cert copy) |
 
 ---
 
-## Environment Variables
-
-All scripts use sensible defaults. Override any of these before running:
+## Environment Variables — Master
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -64,14 +91,10 @@ All scripts use sensible defaults. Override any of these before running:
 | `MW_BIND_DN` | `uid=mw,ou=ServiceAccounts,ou=Systems,<BASE_DN>` | MW user DN |
 | `MW_BIND_PW` | `ChangeMe123!` | MW user bind password |
 | `REPL_CN` | `replicator` | Replication user CN |
-| `REPL_PW` | *(generated)* | Replication user password |
+| `REPL_PW` | `replpass` | Replication user password |
 | `ACCESSLOG_SUFFIX` | `cn=accesslog` | Accesslog database suffix |
 | `SERVICE_OU` | `ou=ServiceAccounts,ou=Systems,<BASE_DN>` | Service accounts OU |
 | `USER_BASE_DN` | `ou=Users,dc=eab,dc=bank,dc=local` | Users OU for new accounts |
-| `USER_UID` | `testuser` | UID for script 19 test user |
-| `SKIP_DNF_UPDATE` | *(unset)* | Set to `1` to skip OS package update |
-
-Export variables before running:
 
 ```bash
 export BASE_DN="dc=example,dc=com"
@@ -81,175 +104,258 @@ sudo -E bash install-symas-openldap-all-in-one.sh
 
 ---
 
-## Running the Full Stack (All-in-One)
+## Environment Variables — Replica
 
-**`install-symas-openldap-all-in-one.sh`** — runs all scripts in the correct order.
+| Variable | Required | Default | Description |
+|----------|:--------:|---------|-------------|
+| `MASTER_IP` | **yes** | — | IP or hostname of master node |
+| `ADMIN_PW` | **yes** | — | Admin password (must match master) |
+| `REPL_PW` | no | `replpass` | Replication bind password (must match master) |
+| `BASE_DN` | no | `dc=eab,dc=bank,dc=local` | LDAP base DN (must match master) |
+| `SERVER_ID` | no | `2` | `olcServerID` — must differ from master (`1`) |
+| `SSH_KEY` | no | — | SSH private key path to copy CA cert from master |
+| `SSH_USER` | no | `ec2-user` | SSH user on master |
+| `COPY_FROM_MASTER` | no | `1` | `1` = copy CA from master; `0` = self-signed |
+| `LDAPTLS_REQCERT` | no | `never` | TLS cert verify mode for tests |
 
 ```bash
-# On the target VM, as root:
+sudo MASTER_IP=10.0.0.1 \
+     ADMIN_PW=MyAdminPass123 \
+     REPL_PW=ReplPass456 \
+     SSH_KEY=~/.ssh/key.pem \
+     bash install-symas-openldap-replica-all-in-one.sh
+```
+
+---
+
+## Master: Running the Full Stack
+
+**`install-symas-openldap-all-in-one.sh`** — runs all master scripts in order.
+
+```bash
+# Basic
 sudo bash /tmp/script/install-symas-openldap-all-in-one.sh
 
-# With custom base DN and password:
+# Custom base DN + password
 sudo BASE_DN="dc=example,dc=com" BIND_PW="Secret123!" \
   bash /tmp/script/install-symas-openldap-all-in-one.sh
 ```
 
-Execution order inside the all-in-one:
+Execution order:
 
 ```
-1  → 3 → 4 → 5 → 6 → 11 → 7 → 8.0 → 8 → 26 → 9 → 9.0 → 10 → 10.0
-→ 12 → 13 → 7 (re-verify) → 16 → 17 → 27 → 18 → 19 → 20 → 24 → 21
-→ 22 → 23 → 25
+1 → 3 → 4 → 5 → 6 → 11 → 7 → 8.0 → 8 → 26 → 9 → 9.0 → 10 → 10.0
+→ 12 → 13 → 7(re-verify) → 16 → 17 → 27 → 18 → 19 → 20 → 24 → 21
+→ 22 → 23 → 25 → tests
 ```
 
-Then runs all integration tests.
+---
+
+## Replica: Running the Full Stack
+
+**`install-symas-openldap-replica-all-in-one.sh`** — runs all `r1`–`r9` scripts in order.
+
+```bash
+# On replica node, after master is fully installed:
+sudo MASTER_IP=10.0.0.1 \
+     ADMIN_PW=MyAdminPass123 \
+     SSH_KEY=~/.ssh/key.pem \
+     bash /tmp/script/install-symas-openldap-replica-all-in-one.sh
+```
+
+Execution order:
+
+```
+r1(install) → r2(configure syncrepl) → r3(start daemon)
+→ r4(fix env) → r5(TLS) → r6(fix ldapi ACL)
+→ r7(harden) → r8(tune) → r9(verify)
+→ tests(connections + readonly + sync)
+```
 
 ---
 
 ## Running Over SSH
 
-### Copy scripts to any VM
+### Copy to master
 
 ```bash
-# EC2 (Amazon Linux / RHEL)
-scp -i ~/.ssh/your-key.pem -r ./script ec2-user@<PUBLIC_IP>:/tmp/script
-
-# Generic VM (password auth)
-scp -r ./script user@<IP>:/tmp/script
+scp -i ~/.ssh/key.pem -r ./script ec2-user@<MASTER_IP>:/tmp/script
+chmod +x /tmp/script/*.sh /tmp/script/test/*.sh /tmp/script/replica/*.sh
 ```
 
-### Run the full installer remotely (single command)
+### Copy to replica
 
 ```bash
-ssh -i ~/.ssh/your-key.pem ec2-user@<PUBLIC_IP> \
-  "sudo bash /tmp/script/install-symas-openldap-all-in-one.sh"
+scp -i ~/.ssh/key.pem -r ./script ec2-user@<REPLICA_IP>:/tmp/script
+chmod +x /tmp/script/*.sh /tmp/script/replica/*.sh /tmp/script/replica/test/*.sh
 ```
 
-### Run with environment variables over SSH
+### Run master installer remotely (stream logs)
 
 ```bash
-ssh -i ~/.ssh/your-key.pem ec2-user@<PUBLIC_IP> \
-  "sudo BASE_DN='dc=example,dc=com' BIND_PW='Secret123!' \
-   bash /tmp/script/install-symas-openldap-all-in-one.sh"
+ssh -i ~/.ssh/key.pem ec2-user@<MASTER_IP> \
+  "sudo bash /tmp/script/install-symas-openldap-all-in-one.sh 2>&1" \
+  | tee master-install-$(date +%Y%m%d).log
+```
+
+### Run replica installer remotely (stream logs)
+
+```bash
+ssh -i ~/.ssh/key.pem ec2-user@<REPLICA_IP> \
+  "sudo MASTER_IP=<MASTER_IP> ADMIN_PW=<password> SSH_KEY=~/.ssh/key.pem \
+   bash /tmp/script/install-symas-openldap-replica-all-in-one.sh 2>&1" \
+  | tee replica-install-$(date +%Y%m%d).log
 ```
 
 ### Run a single script over SSH
 
 ```bash
-# Example: run only the hardening script
-ssh -i ~/.ssh/your-key.pem ec2-user@<PUBLIC_IP> \
-  "sudo bash /tmp/script/21-hardening.sh"
-```
-
-### Stream logs to local file
-
-```bash
-ssh -i ~/.ssh/your-key.pem ec2-user@<PUBLIC_IP> \
-  "sudo bash /tmp/script/install-symas-openldap-all-in-one.sh 2>&1" \
-  | tee install-$(date +%Y%m%d-%H%M%S).log
+ssh -i ~/.ssh/key.pem ec2-user@<IP> "sudo bash /tmp/script/21-hardening.sh"
+ssh -i ~/.ssh/key.pem ec2-user@<IP> "sudo bash /tmp/script/replica/r7-harden-replica.sh"
 ```
 
 ---
 
-## Script Reference (Ordered)
+## Master Script Reference (Ordered)
 
 ### Phase 1 — Installation
 
-| Script | Requires root | What it does |
-|--------|:---:|-------------|
-| `0-clean-openldap.sh` | yes | **Destructive reset** — removes all Symas packages, data, and config. Run before a fresh install. |
-| `1-install-symas-openldap.sh` | yes | Adds the Symas SOLDAP yum repo, updates OS packages, installs `symas-openldap-clients` and `symas-openldap-servers`. |
-| `3-install-example.sh` | yes | Replaces the vendor `exampledb.sh` with the customized version (custom suffix/domain), generates `slapd.conf`, converts it to `cn=config` via `slaptest`. |
-| `4-Start-the-daemon.sh` | yes | Enables and starts the `symas-openldap` (and optional `slapd`) systemd service. |
+| Script | Root | What it does |
+|--------|:----:|-------------|
+| `0-clean-openldap.sh` | yes | **Destructive reset** — removes all Symas packages, data, config. Run before fresh install. |
+| `1-install-symas-openldap.sh` | yes | Installs `symas-openldap-clients` + `symas-openldap-servers` via Satellite-managed repo. |
+| `3-install-example.sh` | yes | Deploys customised `exampledb.sh` (custom suffix/org), generates `slapd.conf`, converts to `cn=config` via `slaptest`. |
+| `4-Start-the-daemon.sh` | yes | Enables and starts `symas-openldap-servers` systemd service. |
 
 ### Phase 2 — Warning Fixes & Verification
 
-| Script | Requires root | What it does |
-|--------|:---:|-------------|
-| `5-fix_all_symas_warns.sh` | yes | Creates `/etc/profile.d/symas_env.sh` (PATH + LDAPCONF), ensures Symas binaries are discoverable system-wide. |
-| `6-fix_remaining_symas_warns.sh` | yes | Creates `/usr/local/sbin/slapd` symlink, adds Symas to PATH in env file, configures minimal TLS for the LDAPS listener. |
-| `11-fix_version_warns.sh` | yes | Patches the verification script to capture `stderr` so version checks don't produce false WARNs. |
-| `7-verify_symas_openldap.sh` | yes | Runs a full Symas verification: binary paths, service status, LDAP/LDAPS listeners, TLS, base DN reachability. Prints PASS/WARN/FAIL summary. |
+| Script | Root | What it does |
+|--------|:----:|-------------|
+| `5-fix_all_symas_warns.sh` | yes | Creates `/etc/profile.d/symas_env.sh` (PATH + LDAPCONF). |
+| `6-fix_remaining_symas_warns.sh` | yes | Creates `slapd` symlink, configures minimal TLS for LDAPS listener. |
+| `11-fix_version_warns.sh` | yes | Patches verification script to capture `stderr` (suppress false WARNs). |
+| `7-verify_symas_openldap.sh` | yes | Full verification: binaries, service, listeners, TLS, base DN. Prints PASS/WARN/FAIL. |
 
 ### Phase 3 — Directory Structure
 
-| Script | Requires root | What it does |
-|--------|:---:|-------------|
-| `8.0-fix_ldapi_acl.sh` | yes | Detects the active `ldapi://` socket; ensures `SASL/EXTERNAL` has `manage` access to `cn=config`; resets `olcRootPW` in the main database. Handles Symas 2.6.13 dynamic config DB file naming. |
-| `8-create_top_ous.sh` | yes | Creates the top-level OUs under `BASE_DN`: `ou=Users`, `ou=Groups`, `ou=Systems`, `ou=ServiceAccounts,ou=Systems`. |
-| `26-configure-bindings.sh` | yes | Creates the replication user (`cn=replicator`), configures `syncprov` overlay on the main database, sets up `olcSyncRepl` for replica nodes. Falls back to admin simple bind when EXTERNAL lacks data ACL. |
+| Script | Root | What it does |
+|--------|:----:|-------------|
+| `8.0-fix_ldapi_acl.sh` | yes | Ensures SASL/EXTERNAL has `manage` on `cn=config`; resets `olcRootPW` (hashed via `slappasswd`). Dynamic config DB detection for Symas 2.6.13. |
+| `8-create_top_ous.sh` | yes | Creates top-level OUs: `ou=Users`, `ou=Groups`, `ou=Systems`, `ou=ServiceAccounts,ou=Systems`. |
+| `26-configure-bindings.sh` | yes | Creates `cn=replicator` user, adds `syncprov` overlay, sets replication ACL. TLS-aware admin bind. |
 
 ### Phase 4 — Password Policy
 
-| Script | Requires root | What it does |
-|--------|:---:|-------------|
-| `9-password_policy.sh` | yes | Creates the `ou=Policies` container and a `cn=default` ppolicy entry with baseline rules (min length, lockout, history). |
-| `9.0-password_policy_load_module.sh` | yes | Loads the `ppolicy` overlay module into `cn=config` (`olcModuleLoad: ppolicy`). |
-| `10-ppolicy-container.sh` | yes | Adds the `ppolicy` overlay to the main database with a pointer to `cn=default,ou=Policies,BASE_DN`. |
-| `10.0-password_policy_make_default.sh` | yes | Sets `pwdDefaultPolicy` on the root entry so the default policy applies to all users. |
+| Script | Root | What it does |
+|--------|:----:|-------------|
+| `9-password_policy.sh` | yes | Creates `ou=Policies` + `cn=default` ppolicy entry (min length, lockout, history). |
+| `9.0-password_policy_load_module.sh` | yes | Loads `ppolicy` module into `cn=config`. |
+| `10-ppolicy-container.sh` | yes | Adds `ppolicy` overlay to main database. |
+| `10.0-password_policy_make_default.sh` | yes | Sets `pwdDefaultPolicy` so default policy applies to all users. |
 
 ### Phase 5 — Schema
 
-| Script | Requires root | What it does |
-|--------|:---:|-------------|
-| `12-Create_custom_schema.sh` | yes | Creates a custom schema container `cn=customSchema` in `cn=schema,cn=config` via SASL EXTERNAL. Idempotent — skips if already present. |
-| `13-Create_custom_schema_attr.sh` | yes | Adds custom attribute types (`userisactive`, `memorableanswer`, `memorablequestion`) and a custom objectClass to the schema. Idempotent. |
+| Script | Root | What it does |
+|--------|:----:|-------------|
+| `12-Create_custom_schema.sh` | yes | Creates `cn=bank-custom` schema container in `cn=schema,cn=config`. Idempotent. |
+| `13-Create_custom_schema_attr.sh` | yes | Adds custom attrs (`userisactive`, `memorableanswer`, `memorablequestion`, `cif`, `activationdatetime`, etc.) and `bankUserExtension` objectClass. Idempotent. |
 
 ### Phase 6 — Users & ACLs
 
-| Script | Requires root | What it does |
-|--------|:---:|-------------|
-| `15-add-password-checker.sh` | yes | Adds `pwdPolicyChecker` to the default password policy to enable server-side quality checking. |
-| `16-add-strong-password-quality-checker-PPM.sh` | yes | Loads the Symas `ppm` (Password Policy Module) for strong complexity rules. Gracefully skips if module not available. |
-| `17-create_mw_user.sh` | yes | Creates the middleware service account `uid=mw` under `ou=ServiceAccounts,ou=Systems,BASE_DN`. |
-| `27-configure-mw-acl.sh` | yes | Grants `uid=mw` read access to `ou=Users` and write access to specific attributes needed by middleware. |
-| `18-service-account-password-policy-never-expire.sh` | yes | Creates a separate password policy (`cn=no-expire`) with `pwdMaxAge: 0` and applies it to service accounts so their passwords never expire. |
-| `19-create-user-using-mw-user.sh` | yes | Creates a test user under `ou=Users` using the MW service account credentials (validates MW ACLs work). |
+| Script | Root | What it does |
+|--------|:----:|-------------|
+| `15-add-password-checker.sh` | yes | Adds `pwdPolicyChecker` to default policy (server-side quality check). |
+| `16-add-strong-password-quality-checker-PPM.sh` | yes | Loads Symas `ppm` module for strong complexity. Gracefully skips if not available (commercial). |
+| `17-create_mw_user.sh` | yes | Creates `uid=mw` middleware service account. |
+| `27-configure-mw-acl.sh` | yes | Grants `uid=mw` write ACL on `ou=Users`. |
+| `18-service-account-password-policy-never-expire.sh` | yes | Creates `cn=service-account` policy (`pwdMaxAge: 0`) for service accounts. |
+| `19-create-user-using-mw-user.sh` | yes | Creates test user via MW account (validates MW ACLs). |
 
 ### Phase 7 — Security & Hardening
 
-| Script | Requires root | What it does |
-|--------|:---:|-------------|
-| `21-hardening.sh` | yes | Removes anonymous read, restricts `rootdn` access, disables deprecated TLS versions, sets `olcSecurity` size/time limits. |
-| `22-tuning.sh` | yes | Sets `LimitNOFILE` in a systemd drop-in, configures `SLAPD_URLS` and `SLAPD_OPTIONS` in the defaults file, reloads systemd and restarts the service. |
-| `23-ensure-installation-not-under-root.sh` | yes | Verifies no Symas data directories are under `/root` (security check). Prints PASS/WARN/FAIL. |
-| `24-configure-ssl-tls.sh` | yes | Configures `olcTLSCertificateFile`, `olcTLSCertificateKeyFile`, `olcTLSCACertificateFile` in `cn=config`; enables LDAPS listener; adds TLS to `SLAPD_URLS`. |
-| `25-configure-accesslog-audit.sh` | yes | Loads the `accesslog` overlay module, creates a separate `cn=accesslog` MDB database, attaches the overlay to the main database. SELinux labels set if available. |
+| Script | Root | What it does |
+|--------|:----:|-------------|
+| `21-hardening.sh` | yes | Disables anonymous bind, requires TLS for simple binds (`simple_bind=128`), sets TLS protocol min + cipher suite, hardens fs permissions. |
+| `22-tuning.sh` | yes | `LimitNOFILE=524288` drop-in, configures `SLAPD_URLS`/`SLAPD_OPTIONS`, restarts service. |
+| `23-ensure-installation-not-under-root.sh` | yes | Verifies no Symas data under `/root`. |
+| `24-configure-ssl-tls.sh` | yes | Generates/installs TLS certs (self-signed or external), configures `olcTLS*` in `cn=config`, enables LDAPS listener. |
+| `25-configure-accesslog-audit.sh` | yes | Loads `accesslog` module, creates `cn=accesslog` MDB, attaches overlay to main database. |
 
-### Phase 8 — Migration & Next Steps
+### Phase 8 — Migration & Utilities
 
-| Script | Requires root | What it does |
-|--------|:---:|-------------|
-| `20-migration.sh` | yes | Placeholder — implement custom migration logic here (import from old LDAP, LDIF transforms, etc.). Currently a no-op. |
-| `14-next-steps.sh` | no | Prints post-install guidance (manual steps, recommended checks). |
-
-### Utilities
-
-| Script | Requires root | What it does |
-|--------|:---:|-------------|
-| `audio-test.sh` | no | Plays an audible confirmation bell (terminal bell + macOS `afplay`). Used by CI/agent hooks. |
-| `Exampledb/exampledb.sh` | yes | Customized Symas `exampledb.sh` — sets up the initial database with a custom suffix, org name, and root DN. Called by `3-install-example.sh`. |
+| Script | Root | What it does |
+|--------|:----:|-------------|
+| `20-migration.sh` | yes | Placeholder — add custom migration/import logic here. |
+| `14-next-steps.sh` | no | Prints post-install guidance. |
+| `audio-test.sh` | no | Plays audible confirmation bell (CI/agent hook). |
+| `Exampledb/exampledb.sh` | yes | Customised Symas `exampledb.sh` — initialises database with custom suffix, org, hashed rootpw. Called by `3-install-example.sh`. |
 
 ---
 
-## Test Suite
+## Replica Script Reference (Ordered)
 
-### Smoke Tests (safe on any machine, no LDAP needed)
+All replica scripts live under `script/replica/`. Run via `install-symas-openldap-replica-all-in-one.sh` or individually.
+
+### Key differences from master
+
+| Aspect | Master | Replica |
+|--------|--------|---------|
+| `olcServerID` | `1` | `2` (or higher, set via `SERVER_ID`) |
+| `syncprov` overlay | Added — provider | **Not added** — consumer only |
+| `olcSyncRepl` | Not set | Set — pulls from master via `refreshAndPersist` |
+| `olcUpdateRef` | Not set | Set — redirects writes back to master |
+| Data | Authoritative | Read-only, synced from master |
+| Writes | Accepted | Referred to master (or rejected) |
+
+### Script reference
+
+| Script | Root | What it does |
+|--------|:----:|-------------|
+| `r1-install-symas-openldap-replica.sh` | yes | Installs `symas-openldap-clients` + `symas-openldap-servers` via Satellite repo. Same packages as master. |
+| `r2-configure-replica-instance.sh` | yes | Initialises `cn=config` with `SERVER_ID`, `olcSyncRepl` (provider=master, `refreshAndPersist`, StartTLS), `olcUpdateRef`. No `syncprov`. Requires `MASTER_IP`, `ADMIN_PW`, `REPL_PW`. |
+| `r3-start-replica-daemon.sh` | yes | Enables + starts `symas-openldap-servers`, waits for `ldapi://` reachable. |
+| `r4-fix-replica-env.sh` | yes | Creates `/etc/profile.d/symas_env.sh`, creates `slapd` symlink. Mirrors master `5-fix_all_symas_warns.sh`. |
+| `r5-configure-replica-tls.sh` | yes | TLS setup. Mode 1 (`COPY_FROM_MASTER=1`): copies CA cert+key from master over SSH, signs new server cert for replica. Mode 0 (`COPY_FROM_MASTER=0`): generates standalone self-signed CA + cert. |
+| `r6-fix-replica-ldapi-acl.sh` | yes | Ensures SASL/EXTERNAL has `manage` on `cn=config`. Does NOT reset `olcRootPW` (data syncs from master). |
+| `r7-harden-replica.sh` | yes | Disables anon bind, requires TLS for simple binds, hardens fs permissions. Preserves `olcUpdateRef` (write redirect must stay). |
+| `r8-tune-replica.sh` | yes | `LimitNOFILE=524288` drop-in, `SLAPD_URLS`, restarts service. Same as master `22-tuning.sh`. |
+| `r9-verify-replica.sh` | yes | Full replica health check: service, ports, `olcSyncRepl` present, `olcUpdateRef` set, admin bind, data synced, `contextCSN` vs master, write rejection confirmed. |
+
+### Usage — individual replica scripts over SSH
 
 ```bash
-# From the script/ directory
-bash test/run_all.sh
+# Run a single replica script
+ssh -i ~/.ssh/key.pem ec2-user@<REPLICA_IP> \
+  "sudo MASTER_IP=<MASTER_IP> ADMIN_PW=<password> \
+   bash /tmp/script/replica/r2-configure-replica-instance.sh"
+
+# Re-run verification at any time
+ssh -i ~/.ssh/key.pem ec2-user@<REPLICA_IP> \
+  "sudo MASTER_IP=<MASTER_IP> ADMIN_PW=<password> \
+   bash /tmp/script/replica/r9-verify-replica.sh"
+
+# Re-run TLS config (copy new CA from master)
+ssh -i ~/.ssh/key.pem ec2-user@<REPLICA_IP> \
+  "sudo MASTER_IP=<MASTER_IP> SSH_KEY=~/.ssh/key.pem \
+   bash /tmp/script/replica/r5-configure-replica-tls.sh"
 ```
 
-Expected output: `PASS=80 WARN=0 FAIL=0`
+---
 
-Smoke tests verify that every `.sh` file passes `bash -n` (syntax check) and that the all-in-one orchestrator references all existing scripts.
+## Test Suite — Master
 
-### Integration Tests (requires a running OpenLDAP instance)
+### Smoke tests (safe on any machine, no LDAP needed)
 
 ```bash
-# On the target VM after running install-symas-openldap-all-in-one.sh
-sudo RUN_LDAP_INTEGRATION_TESTS=1 bash /tmp/script/test/run_all.sh
+bash test/run_all.sh
+# Expected: PASS=95 WARN=0 FAIL=0
+```
+
+### Integration tests (requires running OpenLDAP)
+
+```bash
+sudo RUN_LDAP_INTEGRATION_TESTS=1 LDAPTLS_REQCERT=never \
+  bash /tmp/script/test/run_all.sh
 ```
 
 | Test | What it checks |
@@ -262,25 +368,70 @@ sudo RUN_LDAP_INTEGRATION_TESTS=1 bash /tmp/script/test/run_all.sh
 | `test_installation_not_under_root.sh` | No data under `/root` |
 | `test_tuning.sh` | `LimitNOFILE` drop-in present, service running |
 | `test_configure_ssl_tls.sh` | TLS certs in `cn=config`, LDAPS listener active |
-| `test_custom_schema_attr.sh` | Custom attrs (`userisactive`, etc.) queryable |
+| `test_custom_schema_attr.sh` | Custom attrs (`userisactive`, `cif`, etc.) readable |
 | `test_accesslog_audit.sh` | Accesslog DB present, overlay active |
 | `test_bindings.sh` | Replication user exists, syncprov overlay active |
 
 ---
 
-## Troubleshooting
-
-### Script fails: "Must be run as root"
+## Test Suite — Replica
 
 ```bash
-sudo bash <script-name>.sh
-# or with env vars:
-sudo BASE_DN="dc=example,dc=com" bash <script-name>.sh
+# Run all replica tests
+sudo MASTER_IP=<MASTER_IP> ADMIN_PW=<password> REPL_PW=replpass \
+  LDAPTLS_REQCERT=never bash /tmp/script/replica/test/test_replica_connections.sh
+
+sudo ADMIN_PW=<password> LDAPTLS_REQCERT=never \
+  bash /tmp/script/replica/test/test_replica_readonly.sh
+
+sudo MASTER_IP=<MASTER_IP> ADMIN_PW=<password> LDAPTLS_REQCERT=never \
+  bash /tmp/script/replica/test/test_replica_sync.sh
+```
+
+| Test | What it checks |
+|------|----------------|
+| `test_replica_connections.sh` | Ports 389/636, StartTLS, LDAPS, admin bind, replication bind |
+| `test_replica_readonly.sh` | Write/modify on replica returns referral or rejection |
+| `test_replica_sync.sh` | Write user on master → visible on replica within `SYNC_WAIT` seconds |
+
+---
+
+## Connection Testing
+
+`test-openldap-connections.sh` — 11-section connection test. Runs on either master or replica.
+
+```bash
+# On master or replica (as root for full coverage)
+sudo LDAPTLS_REQCERT=never bash /tmp/script/test-openldap-connections.sh
+
+# Custom server
+sudo bash test-openldap-connections.sh \
+  -H ldap://myserver \
+  -b dc=example,dc=com \
+  -w MyAdminPass \
+  -R MyReplPass
+
+# Verbose (show ldap output on failure)
+sudo bash test-openldap-connections.sh -v
+
+# Skip ldapi (no root)
+bash test-openldap-connections.sh --no-ldapi -H ldap://myserver -w MyPass
+```
+
+Tests covered: port 389/636, service status, LDAP plain, StartTLS, LDAPS, ldapi EXTERNAL, admin bind, replication bind, MW bind, TLS cert inspection, password policy + schema.
+
+---
+
+## Troubleshooting
+
+### "Must be run as root"
+
+```bash
+sudo bash <script>.sh
+sudo MASTER_IP=x ADMIN_PW=y bash replica/<script>.sh
 ```
 
 ### `ldapadd`/`ldapsearch` not found
-
-The Symas PATH is not loaded. Either:
 
 ```bash
 source /etc/profile.d/symas_env.sh
@@ -288,68 +439,100 @@ source /etc/profile.d/symas_env.sh
 export PATH=/opt/symas/bin:/opt/symas/sbin:$PATH
 ```
 
-### `olcDatabase={0}config.ldif` not found (Symas 2.6.13)
+### Replica not syncing — check syncrepl config
 
-Script `8.0-fix_ldapi_acl.sh` was patched to detect the config DB file dynamically. If you see this on an older version of the script, pull the latest from this branch.
+```bash
+sudo ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config \
+  -LLL '(objectClass=olcMdbConfig)' olcSyncRepl olcUpdateRef
+```
+
+### Replica contextCSN behind master — check logs
+
+```bash
+journalctl -u symas-openldap-servers -n 50 | grep -i "sync\|repl\|error"
+```
 
 ### Service fails to start after TLS config
-
-Check the TLS certificate paths in `cn=config`:
 
 ```bash
 sudo ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config \
   "(objectClass=olcGlobal)" olcTLSCertificateFile olcTLSCertificateKeyFile
-```
-
-Ensure the `ldap` user can read the cert files:
-
-```bash
 chown root:ldap /path/to/cert.pem /path/to/key.pem
 chmod 640 /path/to/key.pem
 ```
 
 ### PPM module not loading
 
-The `ppm` module requires a Symas commercial license on some builds. Script `16` will print `[WARN]` and continue — this is non-fatal. Basic password policy still works via `ppolicy`.
+Non-fatal on Symas free build. Script 16 prints `[WARN]` and continues. Requires Symas commercial license.
 
-### Replication not working
-
-1. Verify `syncprov` overlay is active on master: `ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config "(objectClass=olcSyncProvConfig)"`
-2. Check the replication user exists: `ldapsearch -x -D "cn=admin,BASE_DN" -W -b BASE_DN "(cn=replicator)"`
-3. Check replica logs: `journalctl -u symas-openldap -n 50`
-
-### Wipe and start over
+### Replication not working — master side
 
 ```bash
-# DESTRUCTIVE — removes all data and packages
+# 1. syncprov overlay present?
+sudo ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config "(objectClass=olcSyncProvConfig)"
+# 2. replicator user exists?
+LDAPTLS_REQCERT=never ldapsearch -x -ZZ -H ldap://localhost \
+  -D "cn=admin,dc=eab,dc=bank,dc=local" -w $ADMIN_PW -b dc=eab,dc=bank,dc=local "(cn=replicator)"
+# 3. Re-run bindings script
+sudo bash /tmp/script/26-configure-bindings.sh
+```
+
+### Wipe master and start over
+
+**Warning:** Permanently deletes all data and packages on that node.
+
+```bash
 sudo bash /tmp/script/0-clean-openldap.sh
-# Then re-run install
 sudo bash /tmp/script/install-symas-openldap-all-in-one.sh
+```
+
+### Wipe replica and re-run
+
+```bash
+sudo bash /tmp/script/0-clean-openldap.sh
+sudo MASTER_IP=<ip> ADMIN_PW=<pw> SSH_KEY=~/.ssh/key.pem \
+  bash /tmp/script/install-symas-openldap-replica-all-in-one.sh
 ```
 
 ---
 
-## Full SSH Example (EC2, RHEL 9)
+## Full SSH Example — Master + Replica (EC2, RHEL 9)
 
 ```bash
-# From your local machine:
+MASTER_IP=52.43.173.218
+REPLICA_IP=<replica-public-ip>
+KEY=~/.ssh/ldap-key.pem
+ADMIN_PW=TheN1le1
 
+# --- MASTER ---
 # 1. Copy scripts
-scp -i ~/.ssh/ldap-key.pem -r ./script ec2-user@52.13.60.230:/tmp/script
+scp -i $KEY -r ./script ec2-user@$MASTER_IP:/tmp/script
 
-# 2. Set executable
-ssh -i ~/.ssh/ldap-key.pem ec2-user@52.13.60.230 "chmod +x /tmp/script/*.sh /tmp/script/test/*.sh"
-
-# 3. Run full install (stream logs locally)
-ssh -i ~/.ssh/ldap-key.pem ec2-user@52.13.60.230 \
+# 2. Install master (stream logs)
+ssh -i $KEY ec2-user@$MASTER_IP \
   "sudo bash /tmp/script/install-symas-openldap-all-in-one.sh 2>&1" \
-  | tee install-$(date +%Y%m%d).log
+  | tee master-$(date +%Y%m%d).log
 
-# 4. Run integration tests
-ssh -i ~/.ssh/ldap-key.pem ec2-user@52.13.60.230 \
-  "sudo RUN_LDAP_INTEGRATION_TESTS=1 bash /tmp/script/test/run_all.sh 2>&1"
+# 3. Run master integration tests
+ssh -i $KEY ec2-user@$MASTER_IP \
+  "sudo LDAPTLS_REQCERT=never RUN_LDAP_INTEGRATION_TESTS=1 \
+   bash /tmp/script/test/run_all.sh"
 
-# 5. Verify LDAP is serving
-ssh -i ~/.ssh/ldap-key.pem ec2-user@52.13.60.230 \
-  "ldapsearch -x -H ldap://localhost -b dc=eab,dc=bank,dc=local -s base"
+# --- REPLICA ---
+# 4. Copy scripts to replica
+scp -i $KEY -r ./script ec2-user@$REPLICA_IP:/tmp/script
+
+# 5. Copy SSH key to replica (needed for CA cert fetch from master)
+scp -i $KEY $KEY ec2-user@$REPLICA_IP:/tmp/ldap-key.pem
+
+# 6. Install replica (stream logs)
+ssh -i $KEY ec2-user@$REPLICA_IP \
+  "sudo MASTER_IP=$MASTER_IP ADMIN_PW=$ADMIN_PW \
+       SSH_KEY=/tmp/ldap-key.pem \
+   bash /tmp/script/install-symas-openldap-replica-all-in-one.sh 2>&1" \
+  | tee replica-$(date +%Y%m%d).log
+
+# 7. Run connection tests on replica
+ssh -i $KEY ec2-user@$REPLICA_IP \
+  "sudo LDAPTLS_REQCERT=never bash /tmp/script/test-openldap-connections.sh --no-color"
 ```
