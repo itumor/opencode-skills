@@ -157,6 +157,17 @@ resource "aws_instance" "master" {
   associate_public_ip_address = true
   key_name                    = local.ssh_key_name_effective
 
+  user_data = base64encode(templatefile("${path.module}/scripts/bootstrap-userdata.sh.tpl", {
+    role          = "master"
+    private_ip    = cidrhost(aws_subnet.public[0].cidr_block, 10)
+    master_ip     = ""
+    base_dn       = var.base_dn
+    org_name      = var.org_name
+    admin_pw      = var.admin_password
+    repl_pw       = var.replication_password
+    server_id     = "1"
+  }))
+
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-master-1"
     Role = "master"
@@ -172,65 +183,21 @@ resource "aws_instance" "replica" {
   associate_public_ip_address = true
   key_name                    = local.ssh_key_name_effective
 
+  depends_on = [aws_instance.master]
+
+  user_data = base64encode(templatefile("${path.module}/scripts/bootstrap-userdata.sh.tpl", {
+    role          = "replica"
+    private_ip    = cidrhost(aws_subnet.public[1].cidr_block, 10)
+    master_ip     = cidrhost(aws_subnet.public[0].cidr_block, 10)
+    base_dn       = var.base_dn
+    org_name      = var.org_name
+    admin_pw      = var.admin_password
+    repl_pw       = var.replication_password
+    server_id     = "2"
+  }))
+
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-replica-1"
     Role = "replica"
   })
-}
-
-resource "null_resource" "bootstrap_master" {
-  triggers = {
-    instance_id = aws_instance.master.id
-    script_sha  = filesha256("${path.module}/scripts/bootstrap-openldap.sh")
-  }
-
-  connection {
-    type        = "ssh"
-    host        = aws_instance.master.public_ip
-    user        = "ec2-user"
-    private_key = file(local.ssh_private_key_path)
-    timeout     = "15m"
-  }
-
-  provisioner "file" {
-    source      = "${path.module}/scripts/bootstrap-openldap.sh"
-    destination = "/tmp/bootstrap-openldap.sh"
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/bootstrap-openldap.sh",
-      "sudo ROLE='master' PRIVATE_IP='${aws_instance.master.private_ip}' BASE_DN='${var.base_dn}' ORG_NAME='${var.org_name}' ADMIN_PW='${var.admin_password}' REPL_PW='${var.replication_password}' SERVER_ID='1' /tmp/bootstrap-openldap.sh"
-    ]
-  }
-}
-
-resource "null_resource" "bootstrap_replica" {
-  depends_on = [null_resource.bootstrap_master]
-
-  triggers = {
-    instance_id        = aws_instance.replica.id
-    master_instance_id = aws_instance.master.id
-    script_sha         = filesha256("${path.module}/scripts/bootstrap-openldap.sh")
-  }
-
-  connection {
-    type        = "ssh"
-    host        = aws_instance.replica.public_ip
-    user        = "ec2-user"
-    private_key = file(local.ssh_private_key_path)
-    timeout     = "15m"
-  }
-
-  provisioner "file" {
-    source      = "${path.module}/scripts/bootstrap-openldap.sh"
-    destination = "/tmp/bootstrap-openldap.sh"
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/bootstrap-openldap.sh",
-      "sudo ROLE='replica' PRIVATE_IP='${aws_instance.replica.private_ip}' MASTER_IP='${aws_instance.master.private_ip}' BASE_DN='${var.base_dn}' ORG_NAME='${var.org_name}' ADMIN_PW='${var.admin_password}' REPL_PW='${var.replication_password}' SERVER_ID='2' /tmp/bootstrap-openldap.sh"
-    ]
-  }
 }

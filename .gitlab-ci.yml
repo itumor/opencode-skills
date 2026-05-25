@@ -43,12 +43,10 @@ deploy:
     name: hashicorp/terraform:1.10
     entrypoint: [""]
   before_script:
-    - apk add --no-cache openssh-client
     - mkdir -p $TF_ROOT/.local-ssh
     - echo "$SSH_PUBLIC_KEY_B64" | base64 -d > $TF_ROOT/.local-ssh/openldap_master_replica.pub
-    - echo "$SSH_PRIVATE_KEY_B64" | base64 -d > $TF_ROOT/.local-ssh/openldap_master_replica
+    - echo "dummy" > $TF_ROOT/.local-ssh/openldap_master_replica
     - chmod 644 $TF_ROOT/.local-ssh/openldap_master_replica.pub
-    - chmod 600 $TF_ROOT/.local-ssh/openldap_master_replica
   script:
     - cd $TF_ROOT
     - terraform init -backend=false
