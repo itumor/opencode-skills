@@ -69,8 +69,8 @@ chmod +x /opt/scripts/*.sh /opt/scripts/replica/*.sh /opt/scripts/replica/test/*
 cd /opt/scripts
 
 MASTER_IP=172.23.11.236 \
-ADMIN_PW=<ADMIN_PASSWORD> \
-REPL_PW=<REPLICATION_PASSWORD> \
+ADMIN_PW=admin \
+REPL_PW=replpass \
 BASE_DN=dc=eab,dc=bank,dc=local \
 LDAPTLS_REQCERT=never \
 bash install-symas-openldap-replica-all-in-one.sh
@@ -86,19 +86,19 @@ bash install-symas-openldap-replica-all-in-one.sh
 # Admin bind
 sudo LDAPTLS_REQCERT=never /opt/symas/bin/ldapwhoami -x -ZZ \
   -H ldap://localhost:389 \
-  -D 'cn=admin,dc=eab,dc=bank,dc=local' -w <ADMIN_PW>
+  -D 'cn=admin,dc=eab,dc=bank,dc=local' -w admin
 # Expected: dn:cn=admin,dc=eab,dc=bank,dc=local
 
 # List entries (must match master)
 sudo LDAPTLS_REQCERT=never /opt/symas/bin/ldapsearch -LLL -x -ZZ \
   -H ldap://localhost:389 \
-  -D 'cn=admin,dc=eab,dc=bank,dc=local' -w <ADMIN_PW> \
+  -D 'cn=admin,dc=eab,dc=bank,dc=local' -w admin \
   -b 'dc=eab,dc=bank,dc=local' -s one dn
 
 # Write rejected (read-only enforcement)
 sudo LDAPTLS_REQCERT=never /opt/symas/bin/ldapadd -x -ZZ \
   -H ldap://localhost:389 \
-  -D 'cn=admin,dc=eab,dc=bank,dc=local' -w <ADMIN_PW> <<LDIF
+  -D 'cn=admin,dc=eab,dc=bank,dc=local' -w admin <<LDIF
 dn: cn=test-write,dc=eab,dc=bank,dc=local
 objectClass: top
 objectClass: organizationalRole
@@ -107,16 +107,16 @@ LDIF
 # Expected: ldap_add: Referral (10) → ldap://172.23.11.236:389
 
 # Full test suite
-sudo MASTER_IP=172.23.11.236 ADMIN_PW=<PW> REPL_PW=<RPW> LDAPTLS_REQCERT=never \
+sudo MASTER_IP=172.23.11.236 ADMIN_PW=admin REPL_PW=replpass LDAPTLS_REQCERT=never \
   bash /opt/scripts/replica/r9-verify-replica.sh
 
-sudo ADMIN_PW=<PW> REPL_PW=<RPW> LDAPTLS_REQCERT=never \
+sudo ADMIN_PW=admin REPL_PW=replpass LDAPTLS_REQCERT=never \
   bash /opt/scripts/replica/test/test_replica_connections.sh
 
-sudo ADMIN_PW=<PW> LDAPTLS_REQCERT=never \
+sudo ADMIN_PW=admin LDAPTLS_REQCERT=never \
   bash /opt/scripts/replica/test/test_replica_readonly.sh
 
-sudo MASTER_IP=172.23.11.236 ADMIN_PW=<PW> LDAPTLS_REQCERT=never \
+sudo MASTER_IP=172.23.11.236 ADMIN_PW=admin LDAPTLS_REQCERT=never \
   bash /opt/scripts/replica/test/test_replica_sync.sh
 ```
 
@@ -148,5 +148,5 @@ sudo journalctl -u symas-openldap-servers -n 50 --no-pager | grep -i sync
 
 # Test connectivity from replica to master
 sudo /opt/symas/bin/ldapwhoami -x -H ldap://172.23.11.236:389 \
-  -D 'cn=replicator,dc=eab,dc=bank,dc=local' -w <REPL_PW>
+  -D 'cn=replicator,dc=eab,dc=bank,dc=local' -w replpass
 ```
