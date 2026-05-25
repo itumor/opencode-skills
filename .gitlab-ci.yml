@@ -19,13 +19,15 @@ shellcheck:
   stage: validate
   image: koalaman/shellcheck-alpine:v0.10.0
   script:
-    - shellcheck script/*.sh
-    - shellcheck script/replica/*.sh
-    - shellcheck script/replica/test/*.sh
+    - shellcheck --severity=error script/*.sh
+    - shellcheck --severity=error script/replica/*.sh
+    - shellcheck --severity=error script/replica/test/*.sh
 
 terraform-validate:
   stage: validate
-  image: hashicorp/terraform:1.10
+  image:
+    name: hashicorp/terraform:1.10
+    entrypoint: [""]
   script:
     - cd $TF_ROOT
     - terraform init -backend=false
@@ -37,7 +39,9 @@ terraform-validate:
 
 deploy:
   stage: deploy
-  image: hashicorp/terraform:1.10
+  image:
+    name: hashicorp/terraform:1.10
+    entrypoint: [""]
   before_script:
     - mkdir -p $TF_ROOT/.local-ssh
     - echo "$SSH_PUBLIC_KEY"  > $TF_ROOT/.local-ssh/openldap_master_replica.pub
@@ -179,9 +183,12 @@ test-sync:
 
 destroy:
   stage: destroy
-  image: hashicorp/terraform:1.10
+  image:
+    name: hashicorp/terraform:1.10
+    entrypoint: [""]
   needs: [deploy]
   when: always
+  allow_failure: true
   before_script:
     - mkdir -p $TF_ROOT/.local-ssh
     - echo "$SSH_PUBLIC_KEY"  > $TF_ROOT/.local-ssh/openldap_master_replica.pub
