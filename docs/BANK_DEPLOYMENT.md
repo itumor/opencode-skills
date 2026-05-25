@@ -37,10 +37,52 @@ All nodes reached through the jump station. No direct SSH to master or replica.
 
 ## Pre-Flight Checklist (before replica setup)
 
-- [ ] Master OpenLDAP installed and running
-- [ ] `cn=replicator` user exists on master  
-- [ ] Port 389 reachable from replica to master
-- [ ] Scripts copied to both nodes
+### 1. Master service running
+
+```bash
+ssh root@172.23.11.236 'systemctl is-active symas-openldap-servers'
+# Expected: active
+```
+
+### 2. `cn=replicator` user exists on master
+
+```bash
+# Check
+ssh root@172.23.11.236 \
+  '/opt/symas/bin/ldapsearch -LLL -x -H ldap://localhost:389 \
+   -D "cn=admin,dc=eab,dc=bank,dc=local" -w admin \
+   -b "dc=eab,dc=bank,dc=local" "(cn=replicator)" dn'
+# Expected: dn: cn=replicator,dc=eab,dc=bank,dc=local
+
+# If NOT found — create it (run on master):
+ssh root@172.23.11.236 '
+  REPL_HASH=$(/opt/symas/bin/slappasswd -s replpass)
+  /opt/symas/bin/ldapadd -x -H ldap://localhost:389 \
+   -D "cn=admin,dc=eab,dc=bank,dc=local" -w admin <<LDIF
+dn: cn=replicator,dc=eab,dc=bank,dc=local
+objectClass: simpleSecurityObject
+objectClass: organizationalRole
+cn: replicator
+userPassword: $REPL_HASH
+description: Replication bind user
+LDIF
+'
+```
+
+### 3. Port 389 reachable from replica to master
+
+```bash
+ssh root@172.23.11.237 \
+  'timeout 3 bash -c "echo >/dev/tcp/172.23.11.236/389" && echo "OK" || echo "FAIL: port 389 blocked"'
+# Expected: OK
+```
+
+### 4. Scripts copied to both nodes
+
+```bash
+scp -r ./script root@172.23.11.236:/tmp/script
+scp -r ./script root@172.23.11.237:/tmp/script
+```
 
 ---
 
