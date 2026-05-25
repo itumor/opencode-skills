@@ -28,7 +28,7 @@ ADMIN_PW="${ADMIN_PW:?ADMIN_PW is required}"
 SYNC_WAIT="${SYNC_WAIT:-10}"  # seconds to wait for replication
 
 TEST_UID="repl-sync-test-$(date +%Y%m%d%H%M%S)"
-TEST_DN="uid=${TEST_UID},ou=Users,${BASE_DN}"
+TEST_DN="uid=${TEST_UID},ou=people,${BASE_DN}"
 
 echo "======================================"
 echo "Test: Replication Sync (master→replica)"
@@ -56,7 +56,7 @@ sn: SyncTest
 description: Created by test_replica_sync.sh
 LDIF
 
-if LDAPTLS_REQCERT=never ldapadd -x -ZZ \
+if LDAPTLS_REQCERT=never ldapadd -x \
     -H "ldap://${MASTER_IP}" \
     -D "$ADMIN_DN" -w "$ADMIN_PW" \
     -f "$tmp_ldif" 2>&1; then
@@ -78,7 +78,7 @@ echo "[INFO] Searching for test user on replica (localhost)"
 result=$(LDAPTLS_REQCERT=never ldapsearch -x -ZZ \
   -H ldap://localhost \
   -D "$ADMIN_DN" -w "$ADMIN_PW" \
-  -b "ou=Users,${BASE_DN}" \
+  -b "ou=people,${BASE_DN}" \
   "(uid=${TEST_UID})" dn 2>/dev/null | grep "^dn:" || true)
 
 if [[ -n "$result" ]]; then
@@ -91,7 +91,7 @@ fi
 # Cleanup: delete from master (will sync to replica)
 echo ""
 echo "[INFO] Cleaning up test entry on master"
-LDAPTLS_REQCERT=never ldapdelete -x -ZZ \
+LDAPTLS_REQCERT=never ldapdelete -x \
   -H "ldap://${MASTER_IP}" \
   -D "$ADMIN_DN" -w "$ADMIN_PW" \
   "$TEST_DN" >/dev/null 2>&1 && echo "[INFO] Test entry deleted from master" || \

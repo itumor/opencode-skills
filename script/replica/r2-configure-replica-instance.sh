@@ -115,8 +115,7 @@ syncrepl rid=101
   type=refreshAndPersist
   retry="5 5 300 5"
   timeout=1
-  starttls=critical
-  tls_reqcert=never
+  starttls=no
 
 updateref ldap://${MASTER_IP}:${LDAP_PORT}
 

@@ -8,8 +8,6 @@
 #   - Symas SOLDAP repo enabled via Red Hat Satellite
 #   - Master is already installed and running (install-symas-openldap-all-in-one.sh)
 #   - Master has run 26-configure-bindings.sh (cn=replicator user + syncprov)
-#   - Master has run 24-configure-ssl-tls.sh (CA cert available)
-#   - SSH access from this replica to master (for CA cert copy)
 #
 # Required env:
 #   MASTER_IP   - IP or hostname of master
@@ -19,10 +17,14 @@
 #   REPL_PW          - Replication bind password (default: replpass)
 #   BASE_DN          - LDAP base DN (default: dc=eab,dc=bank,dc=local)
 #   SERVER_ID        - olcServerID for this replica (default: 2)
-#   SSH_KEY          - Path to SSH key to copy CA cert from master
-#   SSH_USER         - SSH user on master (default: ec2-user)
-#   COPY_FROM_MASTER - 1=copy CA from master (default), 0=self-signed
+#   COPY_FROM_MASTER - 0=self-signed (default), 1=manual staging of master CA
+#   STAGED_CA_CERT   - path to pre-staged CA cert (if COPY_FROM_MASTER=1)
+#   STAGED_CA_KEY    - path to pre-staged CA key  (if COPY_FROM_MASTER=1)
 #   LDAPTLS_REQCERT  - TLS verify mode for tests (default: never)
+#
+# Note: No SSH/SCP from replica to master. TLS is self-signed by default.
+#       To use master's CA, manually copy ca.crt+ca.key from master and set
+#       STAGED_CA_CERT/STAGED_CA_KEY.
 #
 # Usage:
 #   sudo MASTER_IP=10.0.0.1 ADMIN_PW=secret bash install-symas-openldap-replica-all-in-one.sh
@@ -59,9 +61,9 @@ export ADMIN_PW
 export REPL_PW="${REPL_PW:-replpass}"
 export BASE_DN="${BASE_DN:-dc=eab,dc=bank,dc=local}"
 export SERVER_ID="${SERVER_ID:-2}"
-export SSH_KEY="${SSH_KEY:-}"
-export SSH_USER="${SSH_USER:-ec2-user}"
-export COPY_FROM_MASTER="${COPY_FROM_MASTER:-1}"
+export COPY_FROM_MASTER="${COPY_FROM_MASTER:-0}"
+export STAGED_CA_CERT="${STAGED_CA_CERT:-}"
+export STAGED_CA_KEY="${STAGED_CA_KEY:-}"
 export LDAPTLS_REQCERT="${LDAPTLS_REQCERT:-never}"
 
 echo ""

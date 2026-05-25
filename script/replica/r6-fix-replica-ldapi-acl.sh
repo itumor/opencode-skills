@@ -91,15 +91,14 @@ sleep 2
 chown -R root:root "/opt/symas/etc/openldap/slapd.d" 2>/dev/null || true
 
 # Patch: replace olcAccess in config LDIF with manage rule
+# Must remove olcAccess line AND its continuation lines (space-prefixed)
 MANAGE_RULE='olcAccess: {0}to * by dn.exact=gidNumber=0+uidNumber=0,cn=peercred,cn=external,cn=auth manage by * none'
 if grep -q "^olcAccess:" "$CONFIG_LDIF"; then
-  sed -i '/^olcAccess:/d' "$CONFIG_LDIF"
+  sed -i '/^olcAccess:/,/^[^ ]/ { /^olcAccess:/d; /^ /d }' "$CONFIG_LDIF"
 fi
 
-# Also remove any dangling continuation lines from a previous corrupted edit
-# (lines starting with space that aren't legitimate LDIF continuations after a known attr)
-# Safest: only remove lines that are orphaned manage/none continuations
-sed -i '/^ .*cn=auth manage by \* none/d' "$CONFIG_LDIF"
+# Also clean any remaining orphaned continuation lines
+sed -i '/^ /d' "$CONFIG_LDIF"
 
 # Append the correct ACL
 echo "$MANAGE_RULE" >> "$CONFIG_LDIF"

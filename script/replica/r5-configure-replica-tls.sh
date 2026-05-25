@@ -2,29 +2,30 @@
 # r5-configure-replica-tls.sh
 #
 # Configures TLS on the replica node.
+# No SSH/SCP from replica to master — all TLS material is generated locally
+# or staged manually by the operator.
 #
-# Two modes:
-#   1. COPY_FROM_MASTER=1 (default):
-#      Copies CA cert + server cert + key from master over SSH.
-#      Signs a new server cert for the replica using the master CA.
-#      Requires SSH access to master (SSH_KEY + MASTER_IP).
-#
-#   2. COPY_FROM_MASTER=0:
+# Modes:
+#   1. COPY_FROM_MASTER=0 (default):
 #      Generates a self-signed CA + server cert locally (standalone).
-#      Use when master CA is not available.
+#      No dependency on master at all.
 #
-# Required env:
-#   MASTER_IP        - master hostname/IP (required when COPY_FROM_MASTER=1)
-#   SSH_KEY          - path to SSH private key for master access
-#   SSH_USER         - SSH user on master (default: ec2-user)
+#   2. COPY_FROM_MASTER=1 + STAGED_CA_CERT + STAGED_CA_KEY:
+#      Uses pre-staged CA files from the master (manually copied by operator).
+#      Signs a new server cert for the replica using the master's CA.
+#
+# Required env (all modes):
 #   ADMIN_PW         - admin password (for ldapmodify)
 #
 # Optional env:
-#   COPY_FROM_MASTER - 1 (default) or 0
+#   COPY_FROM_MASTER - 0 (default) or 1
+#   STAGED_CA_CERT   - path to pre-staged CA cert (manual staging, no SSH)
+#   STAGED_CA_KEY    - path to pre-staged CA key  (manual staging, no SSH)
 #   TLS_DIR          - where to store certs (default: /opt/symas/etc/openldap/tls)
 #
 # Usage:
-#   sudo MASTER_IP=10.0.0.1 SSH_KEY=~/.ssh/key.pem bash r5-configure-replica-tls.sh
+#   sudo ADMIN_PW=secret bash r5-configure-replica-tls.sh                            # self-signed
+#   sudo STAGED_CA_CERT=/tmp/ca.crt STAGED_CA_KEY=/tmp/ca.key ADMIN_PW=secret bash r5-configure-replica-tls.sh
 set -euo pipefail
 
 log()   { echo "[INFO] $*"; }
@@ -47,12 +48,9 @@ ensure_symas_env
 require_cmd openssl
 require_cmd ldapmodify
 
-MASTER_IP="${MASTER_IP:-}"
-SSH_KEY="${SSH_KEY:-}"
-SSH_USER="${SSH_USER:-ec2-user}"
-COPY_FROM_MASTER="${COPY_FROM_MASTER:-1}"
-STAGED_CA_CERT="${STAGED_CA_CERT:-}"   # pre-staged CA cert path (skips SSH to master)
-STAGED_CA_KEY="${STAGED_CA_KEY:-}"    # pre-staged CA key path (skips SSH to master)
+COPY_FROM_MASTER="${COPY_FROM_MASTER:-0}"
+STAGED_CA_CERT="${STAGED_CA_CERT:-}"
+STAGED_CA_KEY="${STAGED_CA_KEY:-}"
 TLS_DIR="${TLS_DIR:-/opt/symas/etc/openldap/tls}"
 CA_CERT="${TLS_DIR}/ca.crt"
 CA_KEY="${TLS_DIR}/ca.key"
@@ -67,10 +65,9 @@ SERVER_DAYS="${SERVER_DAYS:-825}"
 mkdir -p "$TLS_DIR"
 
 # ---------------------------------------------------------------------------
-# Mode 1: copy CA from master (SSH or pre-staged files)
+# Mode 1: use master CA via pre-staged files (manually copied by operator)
 # ---------------------------------------------------------------------------
 if [[ "$COPY_FROM_MASTER" == "1" ]]; then
-  # Sub-mode A: pre-staged CA files provided (avoids SSH between hosts)
   if [[ -n "$STAGED_CA_CERT" && -n "$STAGED_CA_KEY" ]]; then
     log "Using pre-staged CA cert: ${STAGED_CA_CERT}"
     cp "$STAGED_CA_CERT" "$CA_CERT"
@@ -78,16 +75,17 @@ if [[ "$COPY_FROM_MASTER" == "1" ]]; then
     chmod 600 "$CA_KEY"
     log "CA cert+key copied from pre-staged files"
   else
-    # Sub-mode B: SSH directly to master
-    [[ -n "$MASTER_IP" ]] || fatal "MASTER_IP required when COPY_FROM_MASTER=1 and STAGED_CA_CERT not set"
-    [[ -n "$SSH_KEY"   ]] || fatal "SSH_KEY required when COPY_FROM_MASTER=1 and STAGED_CA_CERT not set"
-
-    log "Copying CA cert+key from master ${MASTER_IP}"
-    scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
-      "${SSH_USER}@${MASTER_IP}:/opt/symas/etc/openldap/tls/ca.crt" "$CA_CERT"
-    scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
-      "${SSH_USER}@${MASTER_IP}:/opt/symas/etc/openldap/tls/ca.key" "$CA_KEY"
-    log "CA cert+key copied from master"
+    fatal "COPY_FROM_MASTER=1 requires STAGED_CA_CERT and STAGED_CA_KEY set.
+  To stage master CA files without SSH:
+    1. On MASTER, extract CA files:
+       sudo tar czf /tmp/master-ca.tar.gz \\
+         -C /opt/symas/etc/openldap/tls ca.crt ca.key
+       sudo chmod 644 /tmp/master-ca.tar.gz
+    2. Copy the archive to this replica via your preferred method
+       (AWS S3, scp FROM master, USB, etc. — just not from this replica)
+       Then extract to /tmp/ and set:
+       export STAGED_CA_CERT=/tmp/ca.crt
+       export STAGED_CA_KEY=/tmp/ca.key"
   fi
 
   # Generate new server key + CSR + cert signed by master CA
@@ -127,7 +125,7 @@ EOF
   log "Replica server cert generated and signed by master CA"
 
 # ---------------------------------------------------------------------------
-# Mode 0: standalone self-signed CA + cert (no master access)
+# Mode 0: standalone self-signed CA + cert (default, no master dependency)
 # ---------------------------------------------------------------------------
 else
   log "Generating standalone CA and server certificate (COPY_FROM_MASTER=0)"
