@@ -30,8 +30,8 @@ All nodes reached through the jump station. No direct SSH to master or replica.
 | SSH user | `root` |
 | LDAP Base DN | `dc=eab,dc=bank,dc=local` |
 | LDAP Admin DN | `cn=admin,dc=eab,dc=bank,dc=local` |
-| Admin password | *(provided separately)* |
-| Replication password | *(provided separately)* |
+| Admin password | `admin` |
+| Replication password | `replpass` |
 
 ---
 
@@ -45,6 +45,10 @@ All nodes reached through the jump station. No direct SSH to master or replica.
 ---
 
 ## Replica Setup
+
+No SSH/SCP from replica to master. Two TLS options below — choose one.
+
+### Common — Copy scripts + prep (do once)
 
 ```bash
 # === 1. COPY SCRIPTS TO REPLICA ===
@@ -64,8 +68,13 @@ mv /tmp/script/install-symas-openldap-replica-all-in-one.sh /opt/scripts/
 mv /tmp/script/12-Create_custom_schema.sh /opt/scripts/
 mv /tmp/script/13-Create_custom_schema_attr.sh /opt/scripts/
 chmod +x /opt/scripts/*.sh /opt/scripts/replica/*.sh /opt/scripts/replica/test/*.sh
+```
 
-# === 4. RUN INSTALLER ===
+### Option A — Self-signed TLS (simplest)
+
+Replica generates its own CA + server certificate. No master dependency.
+
+```bash
 cd /opt/scripts
 
 MASTER_IP=172.23.11.236 \
@@ -76,7 +85,62 @@ LDAPTLS_REQCERT=never \
 bash install-symas-openldap-replica-all-in-one.sh
 ```
 
-**No SSH/SCP from replica to master.** TLS is self-signed by default.
+| Pro | Con |
+|-----|-----|
+| Zero master dependency | Two separate PKI chains |
+| One command, no extra steps | `LDAPTLS_REQCERT=never` needed for self-signed |
+
+---
+
+### Option B — Use Master's CA (same TLS chain)
+
+Replica uses the same CA as master. Clients that trust master automatically trust replica.
+
+**Step 1 — Extract CA files on MASTER**
+
+```bash
+# SSH to master (172.23.11.236) and run:
+sudo tar czf /tmp/master-ca.tar.gz -C /opt/symas/etc/openldap/tls ca.crt ca.key
+sudo chmod 644 /tmp/master-ca.tar.gz
+```
+
+**Step 2 — Copy CA from master to replica**
+
+Transfer `/tmp/master-ca.tar.gz` from master (172.23.11.236) to replica (172.23.11.237) using any method:
+
+```bash
+# Method A: scp FROM master (push, not pull — run on MASTER)
+scp /tmp/master-ca.tar.gz root@172.23.11.237:/tmp/
+
+# Method B: Copy via jump station
+scp root@172.23.11.236:/tmp/master-ca.tar.gz .
+scp master-ca.tar.gz root@172.23.11.237:/tmp/
+```
+
+**Step 3 — Extract on replica and run installer**
+
+```bash
+# ON REPLICA (already SSH'd in):
+tar xzf /tmp/master-ca.tar.gz -C /tmp/
+ls -la /tmp/ca.crt /tmp/ca.key    # verify files exist
+
+cd /opt/scripts
+
+MASTER_IP=172.23.11.236 \
+ADMIN_PW=admin \
+REPL_PW=replpass \
+BASE_DN=dc=eab,dc=bank,dc=local \
+COPY_FROM_MASTER=1 \
+STAGED_CA_CERT=/tmp/ca.crt \
+STAGED_CA_KEY=/tmp/ca.key \
+LDAPTLS_REQCERT=never \
+bash install-symas-openldap-replica-all-in-one.sh
+```
+
+| Pro | Con |
+|-----|-----|
+| Same PKI as master | Extra manual step to copy CA files |
+| Clients trust both automatically | Must re-copy CA after renewal |
 
 ---
 
