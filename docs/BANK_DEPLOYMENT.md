@@ -2,11 +2,13 @@
 
 ## Node IPs
 
-| Role | IP | User |
-|------|-----|------|
-| **Master** | `172.23.11.236` | salama |
-| **Replica** | `172.23.11.237` | salama |
-| **Jump Station** | `172.23.10.32` | salama |
+| Role | IP |
+|------|-----|
+| **Master** | `172.23.11.236` |
+| **Replica** | `172.23.11.237` |
+| **Jump Station** | `172.23.10.32` |
+
+> Contact: Salama Hamdy
 
 ---
 
@@ -25,7 +27,7 @@ All nodes reached through the jump station. No direct SSH to master or replica.
 
 | Item | Value |
 |------|-------|
-| SSH user | `salama` |
+| SSH user | `root` |
 | LDAP Base DN | `dc=eab,dc=bank,dc=local` |
 | LDAP Admin DN | `cn=admin,dc=eab,dc=bank,dc=local` |
 | Admin password | *(provided separately)* |
@@ -48,10 +50,10 @@ All nodes reached through the jump station. No direct SSH to master or replica.
 # === 1. COPY SCRIPTS TO REPLICA ===
 # From your workstation, via jump station:
 
-scp -r ./script salama@172.23.11.237:/tmp/script
+scp -r ./script root@172.23.11.237:/tmp/script
 
 # === 2. SSH TO REPLICA ===
-ssh salama@172.23.11.237
+ssh root@172.23.11.237
 sudo -i
 
 # === 3. PREP SCRIPTS ===
