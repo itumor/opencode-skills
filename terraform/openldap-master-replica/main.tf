@@ -166,6 +166,7 @@ resource "aws_instance" "master" {
     admin_pw      = var.admin_password
     repl_pw       = var.replication_password
     server_id     = "1"
+    ldap_port     = "389"
   }))
 
   tags = merge(local.common_tags, {
@@ -194,6 +195,7 @@ resource "aws_instance" "replica" {
     admin_pw      = var.admin_password
     repl_pw       = var.replication_password
     server_id     = "2"
+    ldap_port     = "389"
   }))
 
   tags = merge(local.common_tags, {

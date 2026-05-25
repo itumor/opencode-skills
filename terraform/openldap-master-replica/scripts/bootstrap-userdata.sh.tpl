@@ -8,14 +8,14 @@ PRIVATE_IP="${private_ip}"
 MASTER_IP="${master_ip}"
 BASE_DN="${base_dn}"
 ORG_NAME="${org_name}"
-ADMIN_DN="cn=admin,${BASE_DN}"
+ADMIN_DN="cn=admin,${base_dn}"
 ADMIN_PW="${admin_pw}"
-REPL_DN="cn=replicator,${BASE_DN}"
+REPL_DN="cn=replicator,${base_dn}"
 REPL_PW="${repl_pw}"
 SERVER_ID="${server_id}"
-LDAP_PORT="389"
+LDAP_PORT="${ldap_port}"
 
-export PATH="/opt/symas/bin:/opt/symas/sbin:${PATH}"
+export PATH="/opt/symas/bin:/opt/symas/sbin:$$${PATH}"
 
 log() { printf '[openldap-bootstrap] %s\n' "$*"; }
 
@@ -48,17 +48,17 @@ systemctl stop symas-openldap-servers >/dev/null 2>&1 || true
 mkdir -p /opt/symas/etc/openldap/slapd.d /var/symas/openldap-data /var/symas/run
 rm -rf /opt/symas/etc/openldap/slapd.d/* /var/symas/openldap-data/*
 
-ADMIN_HASH=$(slappasswd -s "${ADMIN_PW}")
-TMP_LDIF="/tmp/symas-slapd-${ROLE}.ldif"
+ADMIN_HASH=$(slappasswd -s "${admin_pw}")
+TMP_LDIF="/tmp/symas-slapd-${role}.ldif"
 
-cat >"${TMP_LDIF}" <<LDIF
+cat >"$$${TMP_LDIF}" <<LDIF
 dn: cn=config
 objectClass: olcGlobal
 cn: config
 olcArgsFile: /var/symas/run/slapd.args
 olcPidFile: /var/symas/run/slapd.pid
 olcAuthzRegexp: gidNumber=0\\+uidNumber=0,cn=peercred,cn=external,cn=auth cn=config
-olcServerID: ${SERVER_ID}
+olcServerID: ${server_id}
 
 dn: cn=module,cn=config
 objectClass: olcModuleList
@@ -81,9 +81,9 @@ objectClass: olcDatabaseConfig
 objectClass: olcMdbConfig
 olcDatabase: mdb
 olcDbMaxSize: 1073741824
-olcSuffix: ${BASE_DN}
-olcRootDN: ${ADMIN_DN}
-olcRootPW: ${ADMIN_HASH}
+olcSuffix: ${base_dn}
+olcRootDN: $$${ADMIN_DN}
+olcRootPW: $$${ADMIN_HASH}
 olcDbDirectory: /var/symas/openldap-data
 olcDbIndex: objectClass eq
 olcDbIndex: entryCSN,entryUUID eq
@@ -96,23 +96,23 @@ olcMonitoring: FALSE
 LDIF
 
 for schema in core cosine inetorgperson nis; do
-  if [[ -f "/opt/symas/etc/openldap/schema/${schema}.ldif" ]]; then
-    printf '\n' >>"${TMP_LDIF}"
-    cat "/opt/symas/etc/openldap/schema/${schema}.ldif" >>"${TMP_LDIF}"
+  if [[ -f "/opt/symas/etc/openldap/schema/$${schema}.ldif" ]]; then
+    printf '\n' >>"$$${TMP_LDIF}"
+    cat "/opt/symas/etc/openldap/schema/$${schema}.ldif" >>"$$${TMP_LDIF}"
   fi
 done
 
-slapadd -n 0 -F /opt/symas/etc/openldap/slapd.d -l "${TMP_LDIF}"
+slapadd -n 0 -F /opt/symas/etc/openldap/slapd.d -l "$$${TMP_LDIF}"
 
 if id ldap >/dev/null 2>&1; then
   chown -R ldap:ldap /opt/symas/etc/openldap/slapd.d /var/symas/openldap-data /var/symas/run
   cat >/etc/default/symas-openldap <<EOF
-SLAPD_URLS="ldap://127.0.0.1:${LDAP_PORT} ldap://${PRIVATE_IP}:${LDAP_PORT} ldapi:///"
+SLAPD_URLS="ldap://127.0.0.1:${ldap_port} ldap://${private_ip}:${ldap_port} ldapi:///"
 SLAPD_OPTIONS="-F /opt/symas/etc/openldap/slapd.d -u ldap -g ldap"
 EOF
 else
   cat >/etc/default/symas-openldap <<EOF
-SLAPD_URLS="ldap://127.0.0.1:${LDAP_PORT} ldap://${PRIVATE_IP}:${LDAP_PORT} ldapi:///"
+SLAPD_URLS="ldap://127.0.0.1:${ldap_port} ldap://${private_ip}:${ldap_port} ldapi:///"
 SLAPD_OPTIONS="-F /opt/symas/etc/openldap/slapd.d"
 EOF
 fi
@@ -129,53 +129,53 @@ done
 
 # Open firewall
 if systemctl is-active --quiet firewalld; then
-  firewall-cmd --permanent --add-port="${LDAP_PORT}/tcp" || true
+  firewall-cmd --permanent --add-port="${ldap_port}/tcp" || true
   firewall-cmd --reload || true
 fi
 
 # Master: create data
 if [[ "$ROLE" == "master" ]]; then
-  REPL_HASH=$(slappasswd -s "${REPL_PW}")
-  BASE_DC=$(printf '%s' "${BASE_DN}" | awk -F'[=,]' '{print $2}')
+  REPL_HASH=$(slappasswd -s "${repl_pw}")
+  BASE_DC=$(printf '%s' "${base_dn}" | awk -F'[=,]' '{print $2}')
   DB_DN=$(ldapsearch -LLL -Y EXTERNAL -H ldapi:/// -b cn=config '(olcSuffix=*)' dn | awk '/^dn: / {print $2; exit}')
 
   log "creating base entries and replication user"
   cat >/tmp/openldap-base.ldif <<LDIF
-dn: ${BASE_DN}
+dn: ${base_dn}
 objectClass: top
 objectClass: dcObject
 objectClass: organization
-o: ${ORG_NAME}
-dc: ${BASE_DC}
+o: ${org_name}
+dc: $$${BASE_DC}
 
-dn: ou=people,${BASE_DN}
+dn: ou=people,${base_dn}
 objectClass: organizationalUnit
 ou: people
 
-dn: ou=groups,${BASE_DN}
+dn: ou=groups,${base_dn}
 objectClass: organizationalUnit
 ou: groups
 
-dn: ${REPL_DN}
+dn: $$${REPL_DN}
 objectClass: simpleSecurityObject
 objectClass: organizationalRole
 cn: replicator
-userPassword: ${REPL_HASH}
+userPassword: $$${REPL_HASH}
 description: Replication bind user
 LDIF
-  ldapadd -x -H "ldap://localhost:${LDAP_PORT}" -D "${ADMIN_DN}" -w "${ADMIN_PW}" -f /tmp/openldap-base.ldif
+  ldapadd -x -H "ldap://localhost:${ldap_port}" -D "$$${ADMIN_DN}" -w "${admin_pw}" -f /tmp/openldap-base.ldif
 
   cat >/tmp/openldap-master-acl.ldif <<LDIF
-dn: ${DB_DN}
+dn: $$${DB_DN}
 changetype: modify
 replace: olcAccess
 olcAccess: {0}to attrs=userPassword by self write by anonymous auth by * none
-olcAccess: {1}to * by dn.exact="${REPL_DN}" read by * read
+olcAccess: {1}to * by dn.exact="$$${REPL_DN}" read by * read
 LDIF
   ldapmodify -Y EXTERNAL -H ldapi:/// -f /tmp/openldap-master-acl.ldif
 
   cat >/tmp/openldap-master-syncprov.ldif <<LDIF
-dn: olcOverlay=syncprov,${DB_DN}
+dn: olcOverlay=syncprov,$$${DB_DN}
 objectClass: olcOverlayConfig
 objectClass: olcSyncProvConfig
 olcOverlay: syncprov
@@ -187,21 +187,21 @@ fi
 
 # Replica: configure syncrepl
 if [[ "$ROLE" == "replica" ]]; then
-  log "configuring replica consumer from ${MASTER_IP}"
+  log "configuring replica consumer from ${master_ip}"
   DB_DN=$(ldapsearch -LLL -Y EXTERNAL -H ldapi:/// -b cn=config '(olcSuffix=*)' dn | awk '/^dn: / {print $2; exit}')
 
   cat >/tmp/openldap-replica-config.ldif <<LDIF
-dn: ${DB_DN}
+dn: $$${DB_DN}
 changetype: modify
 replace: olcAccess
 olcAccess: {0}to attrs=userPassword by self write by anonymous auth by * none
 olcAccess: {1}to * by * read
 -
 add: olcSyncRepl
-olcSyncRepl: rid=101 provider=ldap://${MASTER_IP}:${LDAP_PORT} bindmethod=simple binddn="${REPL_DN}" credentials=${REPL_PW} searchbase="${BASE_DN}" type=refreshAndPersist retry="5 5 300 5" timeout=1 starttls=no
+olcSyncRepl: rid=101 provider=ldap://${master_ip}:${ldap_port} bindmethod=simple binddn="$$${REPL_DN}" credentials=${repl_pw} searchbase="${base_dn}" type=refreshAndPersist retry="5 5 300 5" timeout=1 starttls=no
 -
 add: olcUpdateRef
-olcUpdateRef: ldap://${MASTER_IP}:${LDAP_PORT}
+olcUpdateRef: ldap://${master_ip}:${ldap_port}
 -
 add: olcReadOnly
 olcReadOnly: TRUE
@@ -213,12 +213,12 @@ fi
 # Verify
 log "verifying $ROLE"
 for _ in $(seq 1 10); do
-  if ldapwhoami -x -H "ldap://localhost:${LDAP_PORT}" -D "${ADMIN_DN}" -w "${ADMIN_PW}" >/dev/null 2>&1; then
+  if ldapwhoami -x -H "ldap://localhost:${ldap_port}" -D "$$${ADMIN_DN}" -w "${admin_pw}" >/dev/null 2>&1; then
     break
   fi
   sleep 3
 done
-ldapwhoami -x -H "ldap://localhost:${LDAP_PORT}" -D "${ADMIN_DN}" -w "${ADMIN_PW}"
+ldapwhoami -x -H "ldap://localhost:${ldap_port}" -D "$$${ADMIN_DN}" -w "${admin_pw}"
 
 touch /opt/openldap-master-replica.done
 log "bootstrap complete"
