@@ -179,15 +179,62 @@ test-sync:
 destroy:
   stage: destroy
   image:
-    name: hashicorp/terraform:1.10
+    name: amazon/aws-cli:latest
     entrypoint: [""]
-  needs: [deploy]
+  needs: []
   when: always
   allow_failure: true
-  before_script:
-    - mkdir -p $TF_ROOT/.local-ssh
-    - echo "dummy" > $TF_ROOT/.local-ssh/openldap_master_replica
   script:
-    - cd $TF_ROOT
-    - terraform init -backend=false
-    - terraform destroy -auto-approve
+    - |
+      echo "=== Destroying all openldap-mr EC2 instances ==="
+      for id in $(aws ec2 describe-instances \
+        --filters "Name=tag:Project,Values=openldap-mr" "Name=instance-state-name,Values=running,stopped" \
+        --query 'Reservations[*].Instances[*].InstanceId' --output text); do
+        echo "Terminating $id"
+        aws ec2 terminate-instances --instance-ids $id || true
+      done
+    - |
+      echo "Waiting for instances to terminate..."
+      sleep 30
+    - |
+      echo "=== Destroying all openldap-mr VPCs ==="
+      for vpc in $(aws ec2 describe-vpcs \
+        --filters "Name=tag:Project,Values=openldap-mr" \
+        --query 'Vpcs[*].VpcId' --output text); do
+        echo "Deleting dependent resources for $vpc..."
+        # Detach and delete IGWs
+        for igw in $(aws ec2 describe-internet-gateways \
+          --filters "Name=attachment.vpc-id,Values=$vpc" \
+          --query 'InternetGateways[*].InternetGatewayId' --output text); do
+          aws ec2 detach-internet-gateway --internet-gateway-id $igw --vpc-id $vpc 2>/dev/null || true
+          aws ec2 delete-internet-gateway --internet-gateway-id $igw 2>/dev/null || true
+        done
+        # Delete subnets
+        for sn in $(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpc" --query 'Subnets[*].SubnetId' --output text); do
+          aws ec2 delete-subnet --subnet-id $sn 2>/dev/null || true
+        done
+        # Delete non-default security groups
+        for sg in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$vpc" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text); do
+          aws ec2 delete-security-group --group-id $sg 2>/dev/null || true
+        done
+        # Delete non-main route tables
+        for rt in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$vpc" --query 'RouteTables[?Associations[0].Main==`false`].RouteTableId' --output text); do
+          aws ec2 delete-route-table --route-table-id $rt 2>/dev/null || true
+        done
+        # Delete network interfaces
+        for eni in $(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$vpc" --query 'NetworkInterfaces[*].NetworkInterfaceId' --output text); do
+          aws ec2 delete-network-interface --network-interface-id $eni 2>/dev/null || true
+        done
+        sleep 10
+        # Delete VPC
+        aws ec2 delete-vpc --vpc-id $vpc 2>/dev/null && echo "Deleted VPC $vpc" || echo "Could not delete VPC $vpc (may have remaining deps)"
+      done
+    - |
+      echo "=== Deleting openldap-mr key pairs ==="
+      for kp in $(aws ec2 describe-key-pairs \
+        --filters "Name=key-name,Values=openldap-mr-*" \
+        --query 'KeyPairs[*].KeyName' --output text); do
+        aws ec2 delete-key-pair --key-name "$kp" 2>/dev/null && echo "Deleted key pair $kp" || true
+      done
+    - |
+      echo "=== Cleanup complete ==="
