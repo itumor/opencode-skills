@@ -223,6 +223,26 @@ test-sync:
     - MASTER_IP=$(jq -r '.master_public_ip.value' $TF_ROOT/outputs.json)
     - REPLICA_IP=$(jq -r '.replica_public_ip.value' $TF_ROOT/outputs.json)
     - BASE_DN=$(jq -r '.ldap_admin_dn.value' $TF_ROOT/outputs.json | sed 's/cn=admin,//')
+    - |
+      echo "Waiting for master LDAP ($MASTER_IP:389)..."
+      for i in $(seq 1 30); do
+        if ldapsearch -x -H "ldap://$MASTER_IP:389" -b '' -s base dn >/dev/null 2>&1; then
+          echo "Master LDAP ready"
+          break
+        fi
+        echo "  attempt $i/30, waiting 10s..."
+        sleep 10
+      done
+    - |
+      echo "Waiting for replica LDAP ($REPLICA_IP:389)..."
+      for i in $(seq 1 30); do
+        if LDAPTLS_REQCERT=never ldapsearch -x -ZZ -H "ldap://$REPLICA_IP:389" -b '' -s base dn >/dev/null 2>&1; then
+          echo "Replica LDAP ready"
+          break
+        fi
+        echo "  attempt $i/30, waiting 10s..."
+        sleep 10
+      done
   script:
     - TEST_UID="ci-sync-$(date -u +%Y%m%d%H%M%S)"
     - |
@@ -259,7 +279,6 @@ destroy:
   image:
     name: amazon/aws-cli:latest
     entrypoint: [""]
-  needs: []
   when: always
   allow_failure: true
   script:

@@ -15,7 +15,7 @@ REPL_PW="${repl_pw}"
 SERVER_ID="${server_id}"
 LDAP_PORT="${ldap_port}"
 
-export PATH="/opt/symas/bin:/opt/symas/sbin:$$${PATH}"
+export PATH="/opt/symas/bin:/opt/symas/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 log() { printf '[openldap-bootstrap] %s\n' "$*"; }
 
