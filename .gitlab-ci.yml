@@ -1,17 +1,20 @@
 stages:
   - validate
   - deploy
-  - test
   - destroy
 
 variables:
+  TF_IN_AUTOMATION: "true"
   TF_ROOT: terraform/openldap-master-replica/instances
+  AWS_DEFAULT_REGION: us-west-2
 
 shellcheck:
   stage: validate
   image: koalaman/shellcheck-alpine:v0.10.0
   script:
     - shellcheck --severity=error script/*.sh
+    - shellcheck --severity=error script/replica/*.sh
+    - shellcheck --severity=error script/replica/test/*.sh
 
 terraform-validate:
   stage: validate
@@ -22,3 +25,40 @@ terraform-validate:
     - cd $TF_ROOT
     - terraform init -backend=false
     - terraform validate
+
+deploy:
+  stage: deploy
+  image:
+    name: hashicorp/terraform:1.10
+    entrypoint: [""]
+  before_script:
+    - mkdir -p $TF_ROOT/.local-ssh
+    - echo "$SSH_PUBLIC_KEY_B64" | base64 -d > $TF_ROOT/.local-ssh/openldap_master_replica.pub
+    - echo "dummy" > $TF_ROOT/.local-ssh/openldap_master_replica
+    - chmod 644 $TF_ROOT/.local-ssh/openldap_master_replica.pub
+  script:
+    - cd $TF_ROOT
+    - terraform init
+    - terraform apply -auto-approve
+    - terraform output -json > outputs.json
+  artifacts:
+    paths:
+      - $TF_ROOT/outputs.json
+    expire_in: 1h
+
+destroy:
+  stage: destroy
+  image:
+    name: hashicorp/terraform:1.10
+    entrypoint: [""]
+  when: always
+  allow_failure: true
+  before_script:
+    - mkdir -p $TF_ROOT/.local-ssh
+    - echo "$SSH_PUBLIC_KEY_B64" | base64 -d > $TF_ROOT/.local-ssh/openldap_master_replica.pub
+    - echo "dummy" > $TF_ROOT/.local-ssh/openldap_master_replica
+    - chmod 644 $TF_ROOT/.local-ssh/openldap_master_replica.pub
+  script:
+    - cd $TF_ROOT
+    - terraform init
+    - terraform destroy -auto-approve
