@@ -1,18 +1,13 @@
 stages:
   - validate
-  - clean
   - deploy
   - test
   - destroy
 
 variables:
   TF_IN_AUTOMATION: "true"
-  TF_ROOT: terraform/openldap-master-replica
+  TF_ROOT: terraform/openldap-master-replica/instances
   AWS_DEFAULT_REGION: us-west-2
-  TF_VAR_admin_cidr_blocks: '["0.0.0.0/0"]'
-  TF_VAR_ldap_cidr_blocks: '["0.0.0.0/0"]'
-  TF_VAR_ssh_public_key_path: ".local-ssh/openldap_master_replica.pub"
-  TF_VAR_ssh_private_key_path: ".local-ssh/openldap_master_replica"
 
 # ---------------------------------------------------------------------------
 # Stage 1 — Validate
@@ -37,86 +32,11 @@ terraform-validate:
     - terraform validate
 
 # ---------------------------------------------------------------------------
-# Stage 2 — Clean (remove orphaned resources from previous runs)
-# ---------------------------------------------------------------------------
-
-cleanup:
-  stage: clean
-  image:
-    name: amazon/aws-cli:latest
-    entrypoint: [""]
-  resource_group: openldap-deploy
-  script:
-    - |
-      echo "=== Removing orphaned instances ==="
-      for id in $(aws ec2 describe-instances \
-        --filters "Name=tag:Project,Values=openldap-mr" "Name=instance-state-name,Values=running,stopped" \
-        --query 'Reservations[*].Instances[*].InstanceId' --output text); do
-        echo "Terminating $id"
-        aws ec2 terminate-instances --instance-ids $id
-      done
-    - |
-      # Wait for all instances to fully terminate (ENIs auto-detach)
-      for id in $(aws ec2 describe-instances \
-        --filters "Name=tag:Project,Values=openldap-mr" "Name=instance-state-name,Values=running,stopped,shutting-down" \
-        --query 'Reservations[*].Instances[*].InstanceId' --output text); do
-        echo "Waiting for $id to fully terminate (ENI cleanup)..."
-        aws ec2 wait instance-terminated --instance-ids $id
-      done
-      # Extra wait for ENIs to auto-detach
-      echo "Waiting 60s for ENIs to auto-detach..."
-      sleep 60
-    - |
-      echo "=== Removing orphaned VPCs ==="
-      for vpc in $(aws ec2 describe-vpcs \
-        --filters "Name=tag:Project,Values=openldap-mr" \
-        --query 'Vpcs[*].VpcId' --output text); do
-        echo "Deleting dependencies for VPC $vpc..."
-        # Detach and delete IGWs
-        for igw in $(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$vpc" --query 'InternetGateways[*].InternetGatewayId' --output text); do
-          aws ec2 detach-internet-gateway --internet-gateway-id $igw --vpc-id $vpc 2>/dev/null || true
-          aws ec2 delete-internet-gateway --internet-gateway-id $igw 2>/dev/null || true
-        done
-        # Delete subnets
-        for sn in $(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpc" --query 'Subnets[*].SubnetId' --output text); do
-          aws ec2 delete-subnet --subnet-id $sn 2>/dev/null || true
-        done
-        # Delete non-default security groups
-        for sg in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$vpc" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text); do
-          aws ec2 delete-security-group --group-id $sg 2>/dev/null || true
-        done
-        # Delete non-main and unassociated route tables
-        for rt in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$vpc" --query 'RouteTables[?length(Associations)==`0` || Associations[0].Main==`false`].RouteTableId' --output text); do
-          aws ec2 delete-route-table --route-table-id $rt 2>/dev/null || true
-        done
-        # Delete network ACLs (non-default)
-        for acl in $(aws ec2 describe-network-acls --filters "Name=vpc-id,Values=$vpc" --query 'NetworkAcls[?IsDefault==`false`].NetworkAclId' --output text); do
-          aws ec2 delete-network-acl --network-acl-id $acl 2>/dev/null || true
-        done
-        # Delete any remaining network interfaces
-        for eni in $(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$vpc" --query 'NetworkInterfaces[*].NetworkInterfaceId' --output text); do
-          aws ec2 delete-network-interface --network-interface-id $eni 2>/dev/null || true
-        done
-        sleep 10
-        if aws ec2 delete-vpc --vpc-id $vpc 2>&1; then
-          echo "Deleted VPC $vpc"
-        else
-          echo "VPC $vpc not deletable — may need manual cleanup"
-        fi
-      done
-    - |
-      for kp in $(aws ec2 describe-key-pairs --filters "Name=key-name,Values=openldap-mr-*" --query 'KeyPairs[*].KeyName' --output text); do
-        aws ec2 delete-key-pair --key-name "$kp" 2>/dev/null && echo "Deleted key pair $kp" || true
-      done
-    - echo "Cleanup complete"
-
-# ---------------------------------------------------------------------------
-# Stage 3 — Deploy
+# Stage 2 — Deploy (S3 backend, persistent VPC)
 # ---------------------------------------------------------------------------
 
 deploy:
   stage: deploy
-  resource_group: openldap-deploy
   image:
     name: hashicorp/terraform:1.10
     entrypoint: [""]
@@ -127,17 +47,16 @@ deploy:
     - chmod 644 $TF_ROOT/.local-ssh/openldap_master_replica.pub
   script:
     - cd $TF_ROOT
-    - terraform init -backend=false
+    - terraform init
     - terraform apply -auto-approve
     - terraform output -json > outputs.json
   artifacts:
     paths:
-      - $TF_ROOT/terraform.tfstate
       - $TF_ROOT/outputs.json
     expire_in: 1h
 
 # ---------------------------------------------------------------------------
-# Stage 3 — Test
+# Stage 3 — Test (LDAP protocol, no SSH)
 # ---------------------------------------------------------------------------
 
 test-master:
@@ -191,7 +110,6 @@ test-replica:
         sleep 10
       done
   script:
-    - REPLICA_IP=$(jq -r '.replica_public_ip.value' $TF_ROOT/outputs.json)
     - |
       echo "=== Replica admin bind ==="
       LDAPTLS_REQCERT=never ldapwhoami -x -ZZ \
@@ -271,67 +189,23 @@ test-sync:
         "uid=$TEST_UID,ou=people,$BASE_DN"
 
 # ---------------------------------------------------------------------------
-# Stage 4 — Destroy (always runs)
+# Stage 4 — Destroy (S3 backend, always runs)
 # ---------------------------------------------------------------------------
 
 destroy:
   stage: destroy
   image:
-    name: amazon/aws-cli:latest
+    name: hashicorp/terraform:1.10
     entrypoint: [""]
+  needs: []
   when: always
   allow_failure: true
+  before_script:
+    - mkdir -p $TF_ROOT/.local-ssh
+    - echo "$SSH_PUBLIC_KEY_B64" | base64 -d > $TF_ROOT/.local-ssh/openldap_master_replica.pub
+    - echo "dummy" > $TF_ROOT/.local-ssh/openldap_master_replica
+    - chmod 644 $TF_ROOT/.local-ssh/openldap_master_replica.pub
   script:
-    - |
-      echo "=== Destroying all openldap-mr EC2 instances ==="
-      for id in $(aws ec2 describe-instances \
-        --filters "Name=tag:Project,Values=openldap-mr" "Name=instance-state-name,Values=running,stopped" \
-        --query 'Reservations[*].Instances[*].InstanceId' --output text); do
-        echo "Terminating $id"
-        aws ec2 terminate-instances --instance-ids $id || true
-      done
-    - |
-      echo "Waiting for instances to terminate..."
-      sleep 30
-    - |
-      echo "=== Destroying all openldap-mr VPCs ==="
-      for vpc in $(aws ec2 describe-vpcs \
-        --filters "Name=tag:Project,Values=openldap-mr" \
-        --query 'Vpcs[*].VpcId' --output text); do
-        echo "Deleting dependent resources for $vpc..."
-        # Detach and delete IGWs
-        for igw in $(aws ec2 describe-internet-gateways \
-          --filters "Name=attachment.vpc-id,Values=$vpc" \
-          --query 'InternetGateways[*].InternetGatewayId' --output text); do
-          aws ec2 detach-internet-gateway --internet-gateway-id $igw --vpc-id $vpc 2>/dev/null || true
-          aws ec2 delete-internet-gateway --internet-gateway-id $igw 2>/dev/null || true
-        done
-        # Delete subnets
-        for sn in $(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpc" --query 'Subnets[*].SubnetId' --output text); do
-          aws ec2 delete-subnet --subnet-id $sn 2>/dev/null || true
-        done
-        # Delete non-default security groups
-        for sg in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$vpc" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text); do
-          aws ec2 delete-security-group --group-id $sg 2>/dev/null || true
-        done
-        # Delete non-main and unassociated route tables
-        for rt in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$vpc" --query 'RouteTables[?length(Associations)==`0` || Associations[0].Main==`false`].RouteTableId' --output text); do
-          aws ec2 delete-route-table --route-table-id $rt 2>/dev/null || true
-        done
-        # Delete network interfaces
-        for eni in $(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$vpc" --query 'NetworkInterfaces[*].NetworkInterfaceId' --output text); do
-          aws ec2 delete-network-interface --network-interface-id $eni 2>/dev/null || true
-        done
-        sleep 10
-        # Delete VPC
-        aws ec2 delete-vpc --vpc-id $vpc 2>/dev/null && echo "Deleted VPC $vpc" || echo "Could not delete VPC $vpc (may have remaining deps)"
-      done
-    - |
-      echo "=== Deleting openldap-mr key pairs ==="
-      for kp in $(aws ec2 describe-key-pairs \
-        --filters "Name=key-name,Values=openldap-mr-*" \
-        --query 'KeyPairs[*].KeyName' --output text); do
-        aws ec2 delete-key-pair --key-name "$kp" 2>/dev/null && echo "Deleted key pair $kp" || true
-      done
-    - |
-      echo "=== Cleanup complete ==="
+    - cd $TF_ROOT
+    - terraform init
+    - terraform destroy -auto-approve
