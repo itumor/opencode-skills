@@ -59,16 +59,13 @@ deploy:
 # Stage 3 — Test (SSM Run Command, no runner-to-EC2 ports needed)
 # ---------------------------------------------------------------------------
 
-.ssm_run: &ssm_run
+test-master:
   stage: test
   image:
     name: amazon/aws-cli:latest
     entrypoint: [""]
-  allow_failure: true
-
-test-master:
-  <<: *ssm_run
   needs: [deploy]
+  allow_failure: true
   before_script:
     - yum install -y jq >/dev/null 2>&1
     - MASTER_ID=$(jq -r '.master_instance_id.value' $TF_ROOT/outputs.json)
@@ -79,8 +76,12 @@ test-master:
     - ./.gitlab/ssm-exec.sh "$MASTER_ID" "/opt/symas/bin/ldapsearch -LLL -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -b dc=cae,dc=local (cn=replicator) dn"
 
 test-replica:
-  <<: *ssm_run
+  stage: test
+  image:
+    name: amazon/aws-cli:latest
+    entrypoint: [""]
   needs: [deploy]
+  allow_failure: true
   before_script:
     - yum install -y jq >/dev/null 2>&1
     - REPLICA_ID=$(jq -r '.replica_instance_id.value' $TF_ROOT/outputs.json)
@@ -91,8 +92,12 @@ test-replica:
     - ./.gitlab/ssm-exec.sh "$REPLICA_ID" 'LDAPTLS_REQCERT=never /opt/symas/bin/ldapadd -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -f /dev/null <<< "dn: cn=ci-test,dc=cae,dc=local" || true'
 
 test-sync:
-  <<: *ssm_run
+  stage: test
+  image:
+    name: amazon/aws-cli:latest
+    entrypoint: [""]
   needs: [deploy]
+  allow_failure: true
   before_script:
     - yum install -y jq >/dev/null 2>&1
     - MASTER_ID=$(jq -r '.master_instance_id.value' $TF_ROOT/outputs.json)
