@@ -56,23 +56,22 @@ cleanup:
         aws ec2 terminate-instances --instance-ids $id
       done
     - |
-      # Wait for all instances to terminate
+      # Wait for all instances to fully terminate (ENIs auto-detach)
       for id in $(aws ec2 describe-instances \
-        --filters "Name=tag:Project,Values=openldap-mr" "Name=instance-state-name,Values=running,stopped" \
+        --filters "Name=tag:Project,Values=openldap-mr" "Name=instance-state-name,Values=running,stopped,shutting-down" \
         --query 'Reservations[*].Instances[*].InstanceId' --output text); do
-        echo "Waiting for $id to terminate..."
+        echo "Waiting for $id to fully terminate (ENI cleanup)..."
         aws ec2 wait instance-terminated --instance-ids $id
       done
+      # Extra wait for ENIs to auto-detach
+      echo "Waiting 60s for ENIs to auto-detach..."
+      sleep 60
     - |
       echo "=== Removing orphaned VPCs ==="
       for vpc in $(aws ec2 describe-vpcs \
         --filters "Name=tag:Project,Values=openldap-mr" \
         --query 'Vpcs[*].VpcId' --output text); do
         echo "Deleting dependencies for VPC $vpc..."
-        # Delete network interfaces first
-        for eni in $(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$vpc" --query 'NetworkInterfaces[*].NetworkInterfaceId' --output text); do
-          aws ec2 delete-network-interface --network-interface-id $eni 2>/dev/null || true
-        done
         # Detach and delete IGWs
         for igw in $(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$vpc" --query 'InternetGateways[*].InternetGatewayId' --output text); do
           aws ec2 detach-internet-gateway --internet-gateway-id $igw --vpc-id $vpc 2>/dev/null || true
@@ -94,16 +93,12 @@ cleanup:
         for acl in $(aws ec2 describe-network-acls --filters "Name=vpc-id,Values=$vpc" --query 'NetworkAcls[?IsDefault==`false`].NetworkAclId' --output text); do
           aws ec2 delete-network-acl --network-acl-id $acl 2>/dev/null || true
         done
-        sleep 30
-        # Retry VPC deletion — sometimes ENIs take time to release
-        for attempt in 1 2 3; do
-          if aws ec2 delete-vpc --vpc-id $vpc 2>&1; then
-            echo "Deleted VPC $vpc (attempt $attempt)"
-            break
-          fi
-          echo "Retry $attempt failed, waiting 20s..."
-          sleep 20
-        done
+        sleep 15
+        if aws ec2 delete-vpc --vpc-id $vpc 2>&1; then
+          echo "Deleted VPC $vpc"
+        else
+          echo "VPC $vpc not deletable — may need manual cleanup"
+        fi
       done
     - |
       for kp in $(aws ec2 describe-key-pairs --filters "Name=key-name,Values=openldap-mr-*" --query 'KeyPairs[*].KeyName' --output text); do
