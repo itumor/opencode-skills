@@ -85,15 +85,19 @@ cleanup:
         for sg in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$vpc" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text); do
           aws ec2 delete-security-group --group-id $sg 2>/dev/null || true
         done
-        # Delete non-main route tables
-        for rt in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$vpc" --query 'RouteTables[?Associations[0].Main==`false`].RouteTableId' --output text); do
+        # Delete non-main and unassociated route tables
+        for rt in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$vpc" --query 'RouteTables[?length(Associations)==`0` || Associations[0].Main==`false`].RouteTableId' --output text); do
           aws ec2 delete-route-table --route-table-id $rt 2>/dev/null || true
         done
         # Delete network ACLs (non-default)
         for acl in $(aws ec2 describe-network-acls --filters "Name=vpc-id,Values=$vpc" --query 'NetworkAcls[?IsDefault==`false`].NetworkAclId' --output text); do
           aws ec2 delete-network-acl --network-acl-id $acl 2>/dev/null || true
         done
-        sleep 15
+        # Delete any remaining network interfaces
+        for eni in $(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$vpc" --query 'NetworkInterfaces[*].NetworkInterfaceId' --output text); do
+          aws ec2 delete-network-interface --network-interface-id $eni 2>/dev/null || true
+        done
+        sleep 10
         if aws ec2 delete-vpc --vpc-id $vpc 2>&1; then
           echo "Deleted VPC $vpc"
         else
@@ -121,7 +125,6 @@ deploy:
     - echo "$SSH_PUBLIC_KEY_B64" | base64 -d > $TF_ROOT/.local-ssh/openldap_master_replica.pub
     - echo "dummy" > $TF_ROOT/.local-ssh/openldap_master_replica
     - chmod 644 $TF_ROOT/.local-ssh/openldap_master_replica.pub
-  script:
   script:
     - cd $TF_ROOT
     - terraform init -backend=false
@@ -292,8 +295,8 @@ destroy:
         for sg in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$vpc" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text); do
           aws ec2 delete-security-group --group-id $sg 2>/dev/null || true
         done
-        # Delete non-main route tables
-        for rt in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$vpc" --query 'RouteTables[?Associations[0].Main==`false`].RouteTableId' --output text); do
+        # Delete non-main and unassociated route tables
+        for rt in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$vpc" --query 'RouteTables[?length(Associations)==`0` || Associations[0].Main==`false`].RouteTableId' --output text); do
           aws ec2 delete-route-table --route-table-id $rt 2>/dev/null || true
         done
         # Delete network interfaces
