@@ -82,6 +82,37 @@ test-replica:
     - ./.gitlab/ssm-exec.sh "$REPLICA_ID" 'LDAPTLS_REQCERT=never /opt/symas/bin/ldapwhoami -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin'
     - ./.gitlab/ssm-exec.sh "$REPLICA_ID" 'LDAPTLS_REQCERT=never /opt/symas/bin/ldapsearch -LLL -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -b dc=cae,dc=local -s one dn'
 
+test-sync:
+  stage: test
+  image:
+    name: amazon/aws-cli:latest
+    entrypoint: [""]
+  needs: [deploy]
+  allow_failure: true
+  before_script:
+    - yum install -y jq >/dev/null 2>&1
+    - MASTER_ID=$(jq -r '.master_instance_id.value' $TF_ROOT/outputs.json)
+    - REPLICA_ID=$(jq -r '.replica_instance_id.value' $TF_ROOT/outputs.json)
+    - ./.gitlab/ssm-wait.sh "$MASTER_ID"
+    - ./.gitlab/ssm-wait.sh "$REPLICA_ID"
+  script:
+    - TEST_UID="ci-sync-$(date -u +%Y%m%d%H%M%S)"
+    - |
+      CMD="echo -e 'dn: uid=$TEST_UID,ou=people,dc=cae,dc=local\nobjectClass: inetOrgPerson\ncn: CI Sync Test\nsn: Test\nuid: $TEST_UID' | /opt/symas/bin/ldapadd -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin"
+      echo "=== Write test user to master ==="
+      ./.gitlab/ssm-exec.sh "$MASTER_ID" "$CMD"
+    - |
+      echo "=== Wait for replication ==="
+      sleep 15
+    - |
+      echo "=== Verify test user on replica ==="
+      ./.gitlab/ssm-exec.sh "$REPLICA_ID" \
+        "LDAPTLS_REQCERT=never /opt/symas/bin/ldapsearch -LLL -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -b dc=cae,dc=local '(uid=$TEST_UID)' dn"
+    - |
+      echo "=== Cleanup ==="
+      ./.gitlab/ssm-exec.sh "$MASTER_ID" \
+        "/opt/symas/bin/ldapdelete -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin uid=$TEST_UID,ou=people,dc=cae,dc=local"
+
 # ---------------------------------------------------------------------------
 # Stage 4 — Destroy (S3 backend, always runs)
 # ---------------------------------------------------------------------------
