@@ -1,6 +1,7 @@
 stages:
   - validate
   - deploy
+  - test
   - destroy
 
 variables:
@@ -45,6 +46,45 @@ deploy:
     paths:
       - $TF_ROOT/outputs.json
     expire_in: 1h
+
+# ---------------------------------------------------------------------------
+# Stage 3 — Test (SSM Run Command)
+# ---------------------------------------------------------------------------
+
+test-master:
+  stage: test
+  image:
+    name: amazon/aws-cli:latest
+    entrypoint: [""]
+  needs: [deploy]
+  allow_failure: true
+  before_script:
+    - yum install -y jq >/dev/null 2>&1
+    - MASTER_ID=$(jq -r '.master_instance_id.value' $TF_ROOT/outputs.json)
+    - ./.gitlab/ssm-wait.sh "$MASTER_ID"
+  script:
+    - ./.gitlab/ssm-exec.sh "$MASTER_ID" '/opt/symas/bin/ldapwhoami -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin'
+    - ./.gitlab/ssm-exec.sh "$MASTER_ID" '/opt/symas/bin/ldapsearch -LLL -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -b dc=cae,dc=local -s one dn'
+    - ./.gitlab/ssm-exec.sh "$MASTER_ID" '/opt/symas/bin/ldapsearch -LLL -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -b dc=cae,dc=local (cn=replicator) dn'
+
+test-replica:
+  stage: test
+  image:
+    name: amazon/aws-cli:latest
+    entrypoint: [""]
+  needs: [deploy]
+  allow_failure: true
+  before_script:
+    - yum install -y jq >/dev/null 2>&1
+    - REPLICA_ID=$(jq -r '.replica_instance_id.value' $TF_ROOT/outputs.json)
+    - ./.gitlab/ssm-wait.sh "$REPLICA_ID"
+  script:
+    - ./.gitlab/ssm-exec.sh "$REPLICA_ID" 'LDAPTLS_REQCERT=never /opt/symas/bin/ldapwhoami -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin'
+    - ./.gitlab/ssm-exec.sh "$REPLICA_ID" 'LDAPTLS_REQCERT=never /opt/symas/bin/ldapsearch -LLL -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -b dc=cae,dc=local -s one dn'
+
+# ---------------------------------------------------------------------------
+# Stage 4 — Destroy (S3 backend, always runs)
+# ---------------------------------------------------------------------------
 
 destroy:
   stage: destroy
