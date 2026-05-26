@@ -94,8 +94,16 @@ cleanup:
         for acl in $(aws ec2 describe-network-acls --filters "Name=vpc-id,Values=$vpc" --query 'NetworkAcls[?IsDefault==`false`].NetworkAclId' --output text); do
           aws ec2 delete-network-acl --network-acl-id $acl 2>/dev/null || true
         done
-        sleep 15
-        aws ec2 delete-vpc --vpc-id $vpc && echo "Deleted VPC $vpc" || echo "VPC $vpc may have remaining deps"
+        sleep 30
+        # Retry VPC deletion — sometimes ENIs take time to release
+        for attempt in 1 2 3; do
+          if aws ec2 delete-vpc --vpc-id $vpc 2>&1; then
+            echo "Deleted VPC $vpc (attempt $attempt)"
+            break
+          fi
+          echo "Retry $attempt failed, waiting 20s..."
+          sleep 20
+        done
       done
     - |
       for kp in $(aws ec2 describe-key-pairs --filters "Name=key-name,Values=openldap-mr-*" --query 'KeyPairs[*].KeyName' --output text); do
