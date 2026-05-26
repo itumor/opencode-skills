@@ -88,7 +88,7 @@ test-replica:
   script:
     - ./.gitlab/ssm-exec.sh "$REPLICA_ID" "LDAPTLS_REQCERT=never /opt/symas/bin/ldapwhoami -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin"
     - ./.gitlab/ssm-exec.sh "$REPLICA_ID" "LDAPTLS_REQCERT=never /opt/symas/bin/ldapsearch -LLL -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -b dc=cae,dc=local -s one dn"
-    - ./.gitlab/ssm-exec.sh "$REPLICA_ID" "LDAPTLS_REQCERT=never /opt/symas/bin/ldapadd -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -f /dev/null <<< \"dn: cn=ci-test,dc=cae,dc=local\nobjectClass: top\nobjectClass: organizationalRole\ncn: ci-test\" || true"
+    - ./.gitlab/ssm-exec.sh "$REPLICA_ID" 'LDAPTLS_REQCERT=never /opt/symas/bin/ldapadd -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -f /dev/null <<< "dn: cn=ci-test,dc=cae,dc=local" || true'
 
 test-sync:
   <<: *ssm_run
@@ -104,13 +104,7 @@ test-sync:
     - |
       echo "=== Write test user to master ==="
       ./.gitlab/ssm-exec.sh "$MASTER_ID" \
-        "/opt/symas/bin/ldapadd -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin <<EOF
-      dn: uid=$TEST_UID,ou=people,dc=cae,dc=local
-      objectClass: inetOrgPerson
-      cn: CI Sync Test
-      sn: Test
-      uid: $TEST_UID
-      EOF"
+        "echo -e 'dn: uid=$TEST_UID,ou=people,dc=cae,dc=local\nobjectClass: inetOrgPerson\ncn: CI Sync Test\nsn: Test\nuid: $TEST_UID' | /opt/symas/bin/ldapadd -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin"
     - |
       echo "=== Wait for replication ==="
       sleep 15
