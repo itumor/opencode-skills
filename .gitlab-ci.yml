@@ -10,6 +10,8 @@ variables:
   AWS_DEFAULT_REGION: us-west-2
   TF_VAR_admin_cidr_blocks: '["0.0.0.0/0"]'
   TF_VAR_ldap_cidr_blocks: '["0.0.0.0/0"]'
+  TF_VAR_ssh_public_key_path: ".local-ssh/openldap_master_replica.pub"
+  TF_VAR_ssh_private_key_path: ".local-ssh/openldap_master_replica"
 
 # ---------------------------------------------------------------------------
 # Stage 1 — Validate
@@ -39,10 +41,51 @@ terraform-validate:
 
 deploy:
   stage: deploy
+  resource_group: openldap-deploy
   image:
     name: hashicorp/terraform:1.10
     entrypoint: [""]
   before_script:
+    - |
+      # Clean up any orphaned resources from previous pipeline runs
+      echo "=== Cleaning up previous pipeline resources ==="
+      for id in $(aws ec2 describe-instances \
+        --filters "Name=tag:Project,Values=openldap-mr" "Name=instance-state-name,Values=running,stopped" \
+        --query 'Reservations[*].Instances[*].InstanceId' --output text 2>/dev/null); do
+        echo "Terminating leftover instance $id"
+        aws ec2 terminate-instances --instance-ids $id 2>/dev/null || true
+      done
+      # Wait for instances to start terminating
+      for id in $(aws ec2 describe-instances \
+        --filters "Name=tag:Project,Values=openldap-mr" "Name=instance-state-name,Values=running,stopped" \
+        --query 'Reservations[*].Instances[*].InstanceId' --output text 2>/dev/null); do
+        aws ec2 wait instance-terminated --instance-ids $id 2>/dev/null
+      done
+      # Clean up VPCs
+      for vpc in $(aws ec2 describe-vpcs \
+        --filters "Name=tag:Project,Values=openldap-mr" \
+        --query 'Vpcs[*].VpcId' --output text 2>/dev/null); do
+        echo "Cleaning up leftover VPC $vpc..."
+        for igw in $(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$vpc" --query 'InternetGateways[*].InternetGatewayId' --output text 2>/dev/null); do
+          aws ec2 detach-internet-gateway --internet-gateway-id $igw --vpc-id $vpc 2>/dev/null || true
+          aws ec2 delete-internet-gateway --internet-gateway-id $igw 2>/dev/null || true
+        done
+        for sn in $(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpc" --query 'Subnets[*].SubnetId' --output text 2>/dev/null); do
+          aws ec2 delete-subnet --subnet-id $sn 2>/dev/null || true
+        done
+        for sg in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$vpc" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text 2>/dev/null); do
+          aws ec2 delete-security-group --group-id $sg 2>/dev/null || true
+        done
+        for rt in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$vpc" --query 'RouteTables[?Associations[0].Main==`false`].RouteTableId' --output text 2>/dev/null); do
+          aws ec2 delete-route-table --route-table-id $rt 2>/dev/null || true
+        done
+        sleep 10
+        aws ec2 delete-vpc --vpc-id $vpc 2>/dev/null && echo "Deleted VPC $vpc" || echo "VPC $vpc cleanup incomplete"
+      done
+      for kp in $(aws ec2 describe-key-pairs --filters "Name=key-name,Values=openldap-mr-*" --query 'KeyPairs[*].KeyName' --output text 2>/dev/null); do
+        aws ec2 delete-key-pair --key-name "$kp" 2>/dev/null || true
+      done
+      echo "=== Cleanup done ==="
     - mkdir -p $TF_ROOT/.local-ssh
     - echo "$SSH_PUBLIC_KEY_B64" | base64 -d > $TF_ROOT/.local-ssh/openldap_master_replica.pub
     - echo "dummy" > $TF_ROOT/.local-ssh/openldap_master_replica
