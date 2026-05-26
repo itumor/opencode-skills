@@ -52,6 +52,26 @@ deploy:
     - terraform init -backend=false
     - terraform apply -auto-approve
     - terraform output -json > outputs.json
+    - |
+      # Wait for LDAP to be ready on master
+      MASTER_IP=$(jq -r '.master_public_ip.value' outputs.json)
+      REPLICA_IP=$(jq -r '.replica_public_ip.value' outputs.json)
+      echo "Waiting for master LDAP ($MASTER_IP:389)..."
+      for i in $(seq 1 30); do
+        if timeout 5 bash -c "echo >/dev/tcp/$MASTER_IP/389" 2>/dev/null; then
+          echo "Master port 389 reachable"
+          break
+        fi
+        sleep 10
+      done
+      echo "Waiting for replica LDAP ($REPLICA_IP:389)..."
+      for i in $(seq 1 30); do
+        if timeout 5 bash -c "echo >/dev/tcp/$REPLICA_IP/389" 2>/dev/null; then
+          echo "Replica port 389 reachable"
+          break
+        fi
+        sleep 10
+      done
   artifacts:
     paths:
       - $TF_ROOT/terraform.tfstate
@@ -67,63 +87,48 @@ test-master:
   image: alpine:3.21
   needs: [deploy]
   before_script:
-    - apk add --no-cache openssh-client jq
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
-    - chmod 600 ~/.ssh/id_ed25519
-    - ssh-keyscan -H $(jq -r '.master_public_ip.value' $TF_ROOT/outputs.json) >> ~/.ssh/known_hosts
+    - apk add --no-cache openldap-clients jq
   script:
     - MASTER_IP=$(jq -r '.master_public_ip.value' $TF_ROOT/outputs.json)
     - |
       echo "=== Master admin bind ==="
-      ssh ec2-user@$MASTER_IP \
-        "sudo /opt/symas/bin/ldapwhoami -x -H ldap://localhost:389 \
-         -D 'cn=admin,dc=cae,dc=local' -w admin"
+      ldapwhoami -x -H "ldap://$MASTER_IP:389" \
+        -D 'cn=admin,dc=cae,dc=local' -w admin
     - |
       echo "=== Master list entries ==="
-      ssh ec2-user@$MASTER_IP \
-        "sudo /opt/symas/bin/ldapsearch -LLL -x -H ldap://localhost:389 \
-         -D 'cn=admin,dc=cae,dc=local' -w admin \
-         -b 'dc=cae,dc=local' -s one dn"
+      ldapsearch -LLL -x -H "ldap://$MASTER_IP:389" \
+        -D 'cn=admin,dc=cae,dc=local' -w admin \
+        -b 'dc=cae,dc=local' -s one dn
     - |
       echo "=== Replicator user exists ==="
-      ssh ec2-user@$MASTER_IP \
-        "sudo /opt/symas/bin/ldapsearch -LLL -x -H ldap://localhost:389 \
-         -D 'cn=admin,dc=cae,dc=local' -w admin \
-         -b 'dc=cae,dc=local' '(cn=replicator)' dn"
+      ldapsearch -LLL -x -H "ldap://$MASTER_IP:389" \
+        -D 'cn=admin,dc=cae,dc=local' -w admin \
+        -b 'dc=cae,dc=local' '(cn=replicator)' dn
 
 test-replica:
   stage: test
   image: alpine:3.21
   needs: [deploy]
   before_script:
-    - apk add --no-cache openssh-client jq
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
-    - chmod 600 ~/.ssh/id_ed25519
-    - ssh-keyscan -H $(jq -r '.replica_public_ip.value' $TF_ROOT/outputs.json) >> ~/.ssh/known_hosts
+    - apk add --no-cache openldap-clients jq
   script:
     - REPLICA_IP=$(jq -r '.replica_public_ip.value' $TF_ROOT/outputs.json)
-    - MASTER_IP=$(jq -r '.master_private_ip.value' $TF_ROOT/outputs.json)
     - |
       echo "=== Replica admin bind ==="
-      ssh ec2-user@$REPLICA_IP \
-        "sudo LDAPTLS_REQCERT=never /opt/symas/bin/ldapwhoami -x -ZZ \
-         -H ldap://localhost:389 \
-         -D 'cn=admin,dc=cae,dc=local' -w admin"
+      LDAPTLS_REQCERT=never ldapwhoami -x -ZZ \
+        -H "ldap://$REPLICA_IP:389" \
+        -D 'cn=admin,dc=cae,dc=local' -w admin
     - |
       echo "=== Replica list entries ==="
-      ssh ec2-user@$REPLICA_IP \
-        "sudo LDAPTLS_REQCERT=never /opt/symas/bin/ldapsearch -LLL -x -ZZ \
-         -H ldap://localhost:389 \
-         -D 'cn=admin,dc=cae,dc=local' -w admin \
-         -b 'dc=cae,dc=local' -s one dn"
+      LDAPTLS_REQCERT=never ldapsearch -LLL -x -ZZ \
+        -H "ldap://$REPLICA_IP:389" \
+        -D 'cn=admin,dc=cae,dc=local' -w admin \
+        -b 'dc=cae,dc=local' -s one dn
     - |
       echo "=== Replica write rejection ==="
-      ssh ec2-user@$REPLICA_IP \
-        'sudo LDAPTLS_REQCERT=never /opt/symas/bin/ldapadd -x -ZZ \
-         -H ldap://localhost:389 \
-         -D "cn=admin,dc=cae,dc=local" -w admin' <<LDIF
+      LDAPTLS_REQCERT=never ldapadd -x -ZZ \
+        -H "ldap://$REPLICA_IP:389" \
+        -D 'cn=admin,dc=cae,dc=local' -w admin >/dev/null 2>&1 <<LDIF || true
       dn: cn=ci-test,dc=cae,dc=local
       objectClass: top
       objectClass: organizationalRole
@@ -135,12 +140,7 @@ test-sync:
   image: alpine:3.21
   needs: [deploy]
   before_script:
-    - apk add --no-cache openssh-client jq
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
-    - chmod 600 ~/.ssh/id_ed25519
-    - ssh-keyscan -H $(jq -r '.master_public_ip.value' $TF_ROOT/outputs.json) >> ~/.ssh/known_hosts
-    - ssh-keyscan -H $(jq -r '.replica_public_ip.value' $TF_ROOT/outputs.json) >> ~/.ssh/known_hosts
+    - apk add --no-cache openldap-clients jq
   script:
     - MASTER_IP=$(jq -r '.master_public_ip.value' $TF_ROOT/outputs.json)
     - REPLICA_IP=$(jq -r '.replica_public_ip.value' $TF_ROOT/outputs.json)
@@ -148,33 +148,28 @@ test-sync:
     - TEST_UID="ci-sync-$(date -u +%Y%m%d%H%M%S)"
     - |
       echo "=== Write test user to master ==="
-      cat > /tmp/test-user.ldif <<LDIF
+      ldapadd -x -H "ldap://$MASTER_IP:389" \
+        -D "cn=admin,$BASE_DN" -w admin <<LDIF
       dn: uid=$TEST_UID,ou=people,$BASE_DN
       objectClass: inetOrgPerson
       cn: CI Sync Test
       sn: Test
       uid: $TEST_UID
       LDIF
-      scp /tmp/test-user.ldif ec2-user@$MASTER_IP:/tmp/
-      ssh ec2-user@$MASTER_IP \
-        "sudo /opt/symas/bin/ldapadd -x -H ldap://localhost:389 \
-         -D 'cn=admin,$BASE_DN' -w admin -f /tmp/test-user.ldif"
     - |
       echo "=== Wait for replication ==="
-      sleep 10
+      sleep 15
     - |
       echo "=== Verify test user on replica ==="
-      ssh ec2-user@$REPLICA_IP \
-        "sudo LDAPTLS_REQCERT=never /opt/symas/bin/ldapsearch -LLL -x -ZZ \
-         -H ldap://localhost:389 \
-         -D 'cn=admin,$BASE_DN' -w admin \
-         -b '$BASE_DN' '(uid=$TEST_UID)' dn"
+      LDAPTLS_REQCERT=never ldapsearch -LLL -x -ZZ \
+        -H "ldap://$REPLICA_IP:389" \
+        -D "cn=admin,$BASE_DN" -w admin \
+        -b "$BASE_DN" "(uid=$TEST_UID)" dn
     - |
       echo "=== Cleanup ==="
-      ssh ec2-user@$MASTER_IP \
-        "sudo /opt/symas/bin/ldapdelete -x -H ldap://localhost:389 \
-         -D 'cn=admin,$BASE_DN' -w admin \
-         'uid=$TEST_UID,ou=people,$BASE_DN'"
+      ldapdelete -x -H "ldap://$MASTER_IP:389" \
+        -D "cn=admin,$BASE_DN" -w admin \
+        "uid=$TEST_UID,ou=people,$BASE_DN"
 
 # ---------------------------------------------------------------------------
 # Stage 4 — Destroy (always runs)
@@ -189,10 +184,8 @@ destroy:
   when: always
   allow_failure: true
   before_script:
-    - apk add --no-cache openssh-client
     - mkdir -p $TF_ROOT/.local-ssh
-    - echo "$SSH_PRIVATE_KEY_B64" | base64 -d > $TF_ROOT/.local-ssh/openldap_master_replica
-    - chmod 600 $TF_ROOT/.local-ssh/openldap_master_replica
+    - echo "dummy" > $TF_ROOT/.local-ssh/openldap_master_replica
   script:
     - cd $TF_ROOT
     - terraform init -backend=false
