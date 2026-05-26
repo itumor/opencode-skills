@@ -42,6 +42,14 @@ curl -fsSL https://repo.symas.com/configs/SOLDAP/rhel9/release26.repo -o /etc/yu
 dnf clean all >/dev/null 2>&1 || true
 dnf -y install symas-openldap-servers symas-openldap-clients
 
+# Install SSM Agent (needed for CI test jobs)
+log "installing SSM Agent"
+if ! systemctl is-active --quiet amazon-ssm-agent 2>/dev/null; then
+  dnf install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm >/dev/null 2>&1 || true
+  systemctl enable amazon-ssm-agent 2>/dev/null || true
+  systemctl start amazon-ssm-agent 2>/dev/null || true
+fi
+
 # Generate slapd.conf then convert to cn=config via slaptest.
 # The direct cn=config LDIF path (slapadd -n 0) fails on newer Symas
 # schema LDIFs due to DC normalization issues. Using slapd.conf with

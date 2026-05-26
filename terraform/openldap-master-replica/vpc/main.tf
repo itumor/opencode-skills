@@ -161,3 +161,28 @@ resource "aws_dynamodb_table" "tf_lock" {
     Name = "${var.project_name}-tfstate-lock"
   })
 }
+
+# ---------------------------------------------------------------------------
+# SSM permissions for CI runner
+# ---------------------------------------------------------------------------
+
+resource "aws_iam_policy" "ci_ssm" {
+  name        = "${var.project_name}-ci-ssm"
+  description = "Allow CI runner to use SSM Run Command on tagged instances"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:SendCommand",
+          "ssm:GetCommandInvocation",
+          "ssm:DescribeInstanceInformation",
+          "ssm:ListCommandInvocations"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}

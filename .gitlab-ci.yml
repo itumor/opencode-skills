@@ -61,18 +61,20 @@ deploy:
 
 test-master:
   stage: test
-  image: alpine:3.21
+  image:
+    name: amazon/aws-cli:latest
+    entrypoint: [""]
   needs: [deploy]
-  when: manual
-  allow_failure: true
   before_script:
-    - apk add --no-cache openldap-clients jq
-    - MASTER_IP=$(jq -r '.master_public_ip.value' $TF_ROOT/outputs.json)
+    - yum install -y jq >/dev/null 2>&1
+    - MASTER_ID=$(jq -r '.master_instance_id.value' $TF_ROOT/outputs.json)
     - |
-      echo "Waiting for master LDAP ($MASTER_IP:389)..."
+      echo "Waiting for master SSM agent..."
       for i in $(seq 1 30); do
-        if ldapsearch -x -H "ldap://$MASTER_IP:389" -b '' -s base dn >/dev/null 2>&1; then
-          echo "Master LDAP ready"
+        if aws ssm describe-instance-information \
+          --filters "Key=InstanceIds,Values=$MASTER_ID" \
+          --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null | grep -q Online; then
+          echo "Master SSM online"
           break
         fi
         echo "  attempt $i/30, waiting 10s..."
@@ -81,33 +83,49 @@ test-master:
   script:
     - |
       echo "=== Master admin bind ==="
-      ldapwhoami -x -H "ldap://$MASTER_IP:389" \
-        -D 'cn=admin,dc=cae,dc=local' -w admin
+      aws ssm send-command --document-name "AWS-RunShellScript" \
+        --targets "Key=InstanceIds,Values=$MASTER_ID" \
+        --parameters '{"commands":["/opt/symas/bin/ldapwhoami -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin"]}' \
+        --query 'Command.CommandId' --output text > /tmp/cmd-id.txt
+      CMD_ID=$(cat /tmp/cmd-id.txt)
+      aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$MASTER_ID"
+      aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$MASTER_ID" \
+        --query 'StandardOutputContent' --output text
     - |
       echo "=== Master list entries ==="
-      ldapsearch -LLL -x -H "ldap://$MASTER_IP:389" \
-        -D 'cn=admin,dc=cae,dc=local' -w admin \
-        -b 'dc=cae,dc=local' -s one dn
+      CMD_ID=$(aws ssm send-command --document-name "AWS-RunShellScript" \
+        --targets "Key=InstanceIds,Values=$MASTER_ID" \
+        --parameters '{"commands":["/opt/symas/bin/ldapsearch -LLL -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -b dc=cae,dc=local -s one dn"]}' \
+        --query 'Command.CommandId' --output text)
+      aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$MASTER_ID"
+      aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$MASTER_ID" \
+        --query 'StandardOutputContent' --output text
     - |
       echo "=== Replicator user exists ==="
-      ldapsearch -LLL -x -H "ldap://$MASTER_IP:389" \
-        -D 'cn=admin,dc=cae,dc=local' -w admin \
-        -b 'dc=cae,dc=local' '(cn=replicator)' dn
+      CMD_ID=$(aws ssm send-command --document-name "AWS-RunShellScript" \
+        --targets "Key=InstanceIds,Values=$MASTER_ID" \
+        --parameters '{"commands":["/opt/symas/bin/ldapsearch -LLL -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -b dc=cae,dc=local (cn=replicator) dn"]}' \
+        --query 'Command.CommandId' --output text)
+      aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$MASTER_ID"
+      aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$MASTER_ID" \
+        --query 'StandardOutputContent' --output text
 
 test-replica:
   stage: test
-  image: alpine:3.21
+  image:
+    name: amazon/aws-cli:latest
+    entrypoint: [""]
   needs: [deploy]
-  when: manual
-  allow_failure: true
   before_script:
-    - apk add --no-cache openldap-clients jq
-    - REPLICA_IP=$(jq -r '.replica_public_ip.value' $TF_ROOT/outputs.json)
+    - yum install -y jq >/dev/null 2>&1
+    - REPLICA_ID=$(jq -r '.replica_instance_id.value' $TF_ROOT/outputs.json)
     - |
-      echo "Waiting for replica LDAP ($REPLICA_IP:389)..."
+      echo "Waiting for replica SSM agent..."
       for i in $(seq 1 30); do
-        if LDAPTLS_REQCERT=never ldapsearch -x -ZZ -H "ldap://$REPLICA_IP:389" -b '' -s base dn >/dev/null 2>&1; then
-          echo "Replica LDAP ready"
+        if aws ssm describe-instance-information \
+          --filters "Key=InstanceIds,Values=$REPLICA_ID" \
+          --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null | grep -q Online; then
+          echo "Replica SSM online"
           break
         fi
         echo "  attempt $i/30, waiting 10s..."
@@ -116,83 +134,72 @@ test-replica:
   script:
     - |
       echo "=== Replica admin bind ==="
-      LDAPTLS_REQCERT=never ldapwhoami -x -ZZ \
-        -H "ldap://$REPLICA_IP:389" \
-        -D 'cn=admin,dc=cae,dc=local' -w admin
+      CMD_ID=$(aws ssm send-command --document-name "AWS-RunShellScript" \
+        --targets "Key=InstanceIds,Values=$REPLICA_ID" \
+        --parameters '{"commands":["LDAPTLS_REQCERT=never /opt/symas/bin/ldapwhoami -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin"]}' \
+        --query 'Command.CommandId' --output text)
+      aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$REPLICA_ID"
+      aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$REPLICA_ID" \
+        --query 'StandardOutputContent' --output text
     - |
       echo "=== Replica list entries ==="
-      LDAPTLS_REQCERT=never ldapsearch -LLL -x -ZZ \
-        -H "ldap://$REPLICA_IP:389" \
-        -D 'cn=admin,dc=cae,dc=local' -w admin \
-        -b 'dc=cae,dc=local' -s one dn
+      CMD_ID=$(aws ssm send-command --document-name "AWS-RunShellScript" \
+        --targets "Key=InstanceIds,Values=$REPLICA_ID" \
+        --parameters '{"commands":["LDAPTLS_REQCERT=never /opt/symas/bin/ldapsearch -LLL -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -b dc=cae,dc=local -s one dn"]}' \
+        --query 'Command.CommandId' --output text)
+      aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$REPLICA_ID"
+      aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$REPLICA_ID" \
+        --query 'StandardOutputContent' --output text
     - |
       echo "=== Replica write rejection ==="
-      LDAPTLS_REQCERT=never ldapadd -x -ZZ \
-        -H "ldap://$REPLICA_IP:389" \
-        -D 'cn=admin,dc=cae,dc=local' -w admin >/dev/null 2>&1 <<LDIF || true
-      dn: cn=ci-test,dc=cae,dc=local
-      objectClass: top
-      objectClass: organizationalRole
-      cn: ci-test
-      LDIF
+      CMD_ID=$(aws ssm send-command --document-name "AWS-RunShellScript" \
+        --targets "Key=InstanceIds,Values=$REPLICA_ID" \
+        --parameters '{"commands":["LDAPTLS_REQCERT=never /opt/symas/bin/ldapadd -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin <<LDIF\ndn: cn=ci-test,dc=cae,dc=local\nobjectClass: top\nobjectClass: organizationalRole\ncn: ci-test\nLDIF"]}' \
+        --query 'Command.CommandId' --output text)
+      aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$REPLICA_ID"
+      aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$REPLICA_ID" \
+        --query '{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}' --output json
 
 test-sync:
   stage: test
-  image: alpine:3.21
+  image:
+    name: amazon/aws-cli:latest
+    entrypoint: [""]
   needs: [deploy]
-  when: manual
-  allow_failure: true
   before_script:
-    - apk add --no-cache openldap-clients jq
-    - MASTER_IP=$(jq -r '.master_public_ip.value' $TF_ROOT/outputs.json)
-    - REPLICA_IP=$(jq -r '.replica_public_ip.value' $TF_ROOT/outputs.json)
-    - BASE_DN=$(jq -r '.ldap_admin_dn.value' $TF_ROOT/outputs.json | sed 's/cn=admin,//')
-    - |
-      echo "Waiting for master LDAP ($MASTER_IP:389)..."
-      for i in $(seq 1 30); do
-        if ldapsearch -x -H "ldap://$MASTER_IP:389" -b '' -s base dn >/dev/null 2>&1; then
-          echo "Master LDAP ready"
-          break
-        fi
-        echo "  attempt $i/30, waiting 10s..."
-        sleep 10
-      done
-    - |
-      echo "Waiting for replica LDAP ($REPLICA_IP:389)..."
-      for i in $(seq 1 30); do
-        if LDAPTLS_REQCERT=never ldapsearch -x -ZZ -H "ldap://$REPLICA_IP:389" -b '' -s base dn >/dev/null 2>&1; then
-          echo "Replica LDAP ready"
-          break
-        fi
-        echo "  attempt $i/30, waiting 10s..."
-        sleep 10
-      done
+    - yum install -y jq >/dev/null 2>&1
+    - MASTER_ID=$(jq -r '.master_instance_id.value' $TF_ROOT/outputs.json)
+    - REPLICA_ID=$(jq -r '.replica_instance_id.value' $TF_ROOT/outputs.json)
   script:
     - TEST_UID="ci-sync-$(date -u +%Y%m%d%H%M%S)"
     - |
       echo "=== Write test user to master ==="
-      ldapadd -x -H "ldap://$MASTER_IP:389" \
-        -D "cn=admin,$BASE_DN" -w admin <<LDIF
-      dn: uid=$TEST_UID,ou=people,$BASE_DN
-      objectClass: inetOrgPerson
-      cn: CI Sync Test
-      sn: Test
-      uid: $TEST_UID
-      LDIF
+      CMD_ID=$(aws ssm send-command --document-name "AWS-RunShellScript" \
+        --targets "Key=InstanceIds,Values=$MASTER_ID" \
+        --parameters "{\"commands\":[\"/opt/symas/bin/ldapadd -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin <<LDIF\ndn: uid=$TEST_UID,ou=people,dc=cae,dc=local\nobjectClass: inetOrgPerson\ncn: CI Sync Test\nsn: Test\nuid: $TEST_UID\nLDIF\"]}" \
+        --query 'Command.CommandId' --output text)
+      aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$MASTER_ID"
+      aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$MASTER_ID" \
+        --query 'StandardOutputContent' --output text
     - |
       echo "=== Wait for replication ==="
       sleep 15
     - |
       echo "=== Verify test user on replica ==="
-      LDAPTLS_REQCERT=never ldapsearch -LLL -x -ZZ \
-        -H "ldap://$REPLICA_IP:389" \
-        -D "cn=admin,$BASE_DN" -w admin \
-        -b "$BASE_DN" "(uid=$TEST_UID)" dn
+      CMD_ID=$(aws ssm send-command --document-name "AWS-RunShellScript" \
+        --targets "Key=InstanceIds,Values=$REPLICA_ID" \
+        --parameters "{\"commands\":[\"LDAPTLS_REQCERT=never /opt/symas/bin/ldapsearch -LLL -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -b dc=cae,dc=local (uid=$TEST_UID) dn\"]}" \
+        --query 'Command.CommandId' --output text)
+      aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$REPLICA_ID"
+      aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$REPLICA_ID" \
+        --query 'StandardOutputContent' --output text
     - |
       echo "=== Cleanup ==="
-      ldapdelete -x -H "ldap://$MASTER_IP:389" \
-        -D "cn=admin,$BASE_DN" -w admin \
-        "uid=$TEST_UID,ou=people,$BASE_DN"
+      CMD_ID=$(aws ssm send-command --document-name "AWS-RunShellScript" \
+        --targets "Key=InstanceIds,Values=$MASTER_ID" \
+        --parameters "{\"commands\":[\"/opt/symas/bin/ldapdelete -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin uid=$TEST_UID,ou=people,dc=cae,dc=local\"]}" \
+        --query 'Command.CommandId' --output text)
+      aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$MASTER_ID"
 
 # ---------------------------------------------------------------------------
 # Stage 4 — Destroy (S3 backend, always runs)

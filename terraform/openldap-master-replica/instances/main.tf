@@ -46,6 +46,36 @@ locals {
 }
 
 # ---------------------------------------------------------------------------
+# IAM — SSM managed instance role (needed for CI test jobs)
+# ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "ssm_trust" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "ssm" {
+  name               = "${var.project_name}-ssm-role"
+  assume_role_policy = data.aws_iam_policy_document.ssm_trust.json
+  tags               = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_core" {
+  role       = aws_iam_role.ssm.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "ssm" {
+  name = "${var.project_name}-ssm-profile"
+  role = aws_iam_role.ssm.name
+}
+
+# ---------------------------------------------------------------------------
 # EC2 instances — ephemeral, created/destroyed every CI run
 # ---------------------------------------------------------------------------
 
@@ -57,6 +87,7 @@ resource "aws_instance" "master" {
   vpc_security_group_ids      = [var.sg_id]
   associate_public_ip_address = true
   key_name                    = local.ssh_key_name_effective
+  iam_instance_profile        = aws_iam_instance_profile.ssm.name
 
   user_data = base64encode(templatefile("${path.module}/scripts/bootstrap-userdata.sh.tpl", {
     role       = "master"
@@ -84,6 +115,7 @@ resource "aws_instance" "replica" {
   vpc_security_group_ids      = [var.sg_id]
   associate_public_ip_address = true
   key_name                    = local.ssh_key_name_effective
+  iam_instance_profile        = aws_iam_instance_profile.ssm.name
 
   depends_on = [aws_instance.master]
 
