@@ -131,7 +131,24 @@ echo "=== Loading custom bank schema ==="
 bash "${SCRIPT_DIR_OUTER}/12-Create_custom_schema.sh"
 bash "${SCRIPT_DIR_OUTER}/13-Create_custom_schema_attr.sh"
 
-# Restart after schema load
+# Load ppolicy module on replica (required for pwdPolicy objectClass)
+# Without this, syncrepl fails with "objectClass: value #0 invalid per syntax"
+echo ""
+echo "=== Loading ppolicy module ==="
+ppolicy_loaded=$(ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -s sub "(olcModuleLoad=ppolicy.la)" dn 2>/dev/null | grep -c "cn=module" || true)
+if [[ "$ppolicy_loaded" -eq 0 ]]; then
+  ldapmodify -Y EXTERNAL -H ldapi:/// <<'LDIFEOF'
+dn: cn=module{0},cn=config
+changetype: modify
+add: olcModuleLoad
+olcModuleLoad: ppolicy.la
+LDIFEOF
+  echo "[INFO] ppolicy module loaded on replica"
+else
+  echo "[INFO] ppolicy module already loaded"
+fi
+
+# Restart after schema + module load
 systemctl restart symas-openldap-servers 2>/dev/null || systemctl restart slapd 2>/dev/null || true
 sleep 5
 

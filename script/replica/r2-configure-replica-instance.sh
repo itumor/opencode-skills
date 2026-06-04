@@ -113,9 +113,11 @@ syncrepl rid=101
   credentials=${REPL_PW}
   searchbase="${BASE_DN}"
   type=refreshAndPersist
-  retry="5 5 300 5"
+  retry="5 5 300 +"
   timeout=1
-  starttls=no
+  starttls=yes
+  tls_reqcert=never
+  interval=00:00:00:10
 
 updateref ldap://${MASTER_IP}:${LDAP_PORT}
 
