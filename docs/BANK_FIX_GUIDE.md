@@ -2,222 +2,226 @@
 
 ## Summary
 
-Analysis of the slapd logs from `ciamuapplds01.eab.bank.local` (master) covering
-May 24 – Jun 03 2026 revealed that **replication was not working**. The replica
-attempted to sync from the master 14 times and every attempt was rejected.
+Analysis of slapd logs from `ciamuapplds01` (master, May 24–Jun 03 2026) found
+that **replication was not working**. The replica attempted to sync 14 times
+and every attempt was rejected with `err=13 confidentiality required`.
 
-This guide provides the fix scripts and explains the issues found.
-
----
-
-## Issues Found in the Logs
-
-### 1. CRITICAL — Replication Broken (err=13)
-
-**Log evidence:**
-
-```
-Jun 03 09:54:37 ciamuapplds01 slapd[510272]: conn=1049 ACCEPT from IP=172.23.11.237
-Jun 03 09:54:37 ciamuapplds01 slapd[510272]: conn=1049 op=0 BIND dn="cn=replicator,…" method=128
-Jun 03 09:54:37 ciamuapplds01 slapd[510272]: conn=1049 op=0 RESULT err=13 text=confidentiality required
-```
-
-This error repeated **14 times** (conn=1049 through conn=1065, and again after
-the 10:02 restart). Every syncrepl bind from the replica (172.23.11.237) was
-rejected by the master.
-
-**Root cause:** The master was hardened with `olcSecurity: simple_bind=128`
-(which requires TLS for all password-based binds). But the replica's syncrepl
-configuration was set to `starttls=no` — it was sending the replicator password
-in plain text, which the master rejected.
-
-**Fix:** Update the replica's `olcSyncrepl` to use `starttls=yes` with
-`tls_reqcert=never` (trust self-signed certs). The `fix-replica.sh` script
-does this automatically.
-
-### 2. CRITICAL — TLS Negotiation Failure on Port 636
-
-**Log evidence:**
-
-```
-May 24 14:59:07 ciamuapplds01 slapd[510272]: conn=1048 fd=15 closed (TLS negotiation failure)
-```
-
-The replica also tried to sync via LDAPS (port 636) and the TLS handshake failed —
-likely because the replica does not have the master's CA certificate.
-
-**Fix:** The `starttls=yes` fix on port 389 avoids this entirely. Port 636 is
-not required for replication.
-
-### 3. MEDIUM — cn=config Checksum Warning
-
-**Log evidence:**
-
-```
-May 24 14:00:50 ciamuapplds01 slapd[510272]: ldif_read_file: checksum error on
-"/opt/symas/etc/openldap/slapd.d/cn=config/olcDatabase={0>"
-```
-
-This warning appears on every slapd restart. It does not block operation but
-indicates a manually-edited LDIF file whose CRC checksum was not updated.
-The `fix-master.sh` script rebuilds all cn=config checksums.
-
-### 4. LOW — err=49 (Invalid Credentials)
-
-**Log evidence:**
-
-```
-Jun 03 09:54:50 ciamuapplds01 slapd[510272]: conn=1056 op=1 RESULT err=49
-```
-
-Someone on the replica machine attempted an admin bind with the wrong password.
-This is a client-side issue (check the password used in any script or tool on
-the replica that connects as `cn=admin`).
-
-### 5. LOW — err=32 (No Such Object)
-
-**Log evidence:**
-
-```
-May 24 14:00:51 ciamuapplds01 slapd[510272]: conn=1038 op=2 RESULT err=32
-```
-
-A test attempted to ADD an entry under `ou=people` which does not exist in the
-DIT. The correct OU for users is `ou=Users`.
+This guide provides four scripts to fix and verify both servers.
 
 ---
 
-## What's Working
+## Issues Found in Logs
 
-Despite the replication issues, the logs confirm these are healthy:
+### Critical — Replication Broken (err=13 x14)
 
-- **TLS encryption:** TLSv1.3, AES-256-GCM, 256-bit security
-- **LDAPI (Unix socket):** Root access via EXTERNAL SASL always works
-- **Admin StartTLS bind:** Works from localhost
-- **mw service account StartTLS:** Works
-- **User CRUD operations:** Add, delete, search all succeed
-- **Clean shutdowns/restarts:** No crashes
+```
+Jun 03 09:54:37 ciamuapplds01 slapd: conn=1049 op=0 BIND dn="cn=replicator,…"
+Jun 03 09:54:37 ciamuapplds01 slapd: conn=1049 op=0 RESULT err=13 text=confidentiality required
+```
+
+Same error repeated 14 times. The master was hardened to require TLS
+(`olcSecurity: simple_bind=128`) but the replica was still configured to send
+the replicator password in plain text (`starttls=no` in olcSyncrepl).
+
+### Medium — LDAPS 636 TLS Failure
+
+```
+May 24 14:59:07 ciamuapplds01 slapd: conn=1048 fd=15 closed (TLS negotiation failure)
+```
+
+Replica tried direct LDAPS on port 636 — TLS handshake failed.
+
+### Low — cn=config Checksum Warning
+
+```
+May 24 14:00:50 ciamuapplds01 slapd: ldif_read_file: checksum error on
+  "/opt/symas/etc/openldap/slapd.d/cn=config/olcDatabase={0…"
+```
+
+Appears on every slapd restart. A manually-edited config file has a stale CRC.
+
+---
+
+## What's Working (Good)
+
+- TLS encryption: TLSv1.3, AES-256-GCM, ssf=256
+- LDAPI EXTERNAL: all binds work
+- Admin/service-account StartTLS binds: all work
+- User CRUD operations: add/delete/search succeed
+- Clean shutdowns and restarts
 
 ---
 
 ## Fix Instructions
 
+All scripts run directly on the server as root. No external dependencies.
+
 ### On the MASTER server (172.23.11.236 / ciamuapplds01)
 
-1. Copy `fix-master.sh` to the master server:
-   ```
-   scp fix-master.sh root@172.23.11.236:/tmp/
-   ```
+**Step 1 — Copy fix-master.sh to the server:**
+```
+scp fix-master.sh root@172.23.11.236:/tmp/
+```
 
-2. SSH to the master and run:
-   ```
-   ssh root@172.23.11.236
-   sudo bash /tmp/fix-master.sh
-   ```
+**Step 2 — Run the fix:**
+```
+ssh root@172.23.11.236
+sudo bash /tmp/fix-master.sh
+```
 
-3. What `fix-master.sh` does:
-   - **Backs up** `/opt/symas/etc/openldap/slapd.d` (timestamped)
-   - **Rebuilds** cn=config CRC checksums (fixes the checksum warning)
-   - **Adds** `entryUUID` and `entryCSN` database indices (required for sync)
-   - **Restarts** slapd
-   - **Verifies** LDAPI access and checks logs for errors
+What it does:
+- Backs up /opt/symas/etc/openldap/slapd.d
+- Exports cn=config via slapcat, rebuilds checksums via slapadd
+- Adds entryUUID and entryCSN database indices (required for syncrepl)
+- Restarts slapd and self-verifies
 
-4. After the script completes, verify:
-   ```
-   sudo bash /tmp/verify-master.sh
-   ```
+**Step 3 — Verify:**
+```
+sudo ADMIN_PW='TheN1le1' bash /tmp/verify-master.sh
+```
 
 ### On the REPLICA server (172.23.11.237)
 
-1. Copy `fix-replica.sh` to the replica server:
-   ```
-   scp fix-replica.sh root@172.23.11.237:/tmp/
-   ```
+**Step 1 — Copy fix-replica.sh to the server:**
+```
+scp fix-replica.sh root@172.23.11.237:/tmp/
+```
 
-2. SSH to the replica and run:
-   ```
-   ssh root@172.23.11.237
-   sudo bash /tmp/fix-replica.sh
-   ```
+**Step 2 — Run the fix:**
+```
+ssh root@172.23.11.237
+sudo bash /tmp/fix-replica.sh
+```
 
-3. What `fix-replica.sh` does:
-   - **Updates** olcSyncrepl to use `starttls=yes tls_reqcert=never`
-   - **Loads** the `ppolicy` module (needed so the replica understands
-     `pwdPolicy` objects synced from the master)
-   - **Restarts** slapd to activate syncrepl with TLS
-   - **Verifies** the syncrepl config is correct
-   - **Checks logs** for any remaining `err=13` or TLS errors
+What it does:
+- Updates olcSyncrepl to use starttls=yes tls_reqcert=never
+- Loads ppolicy module (pwdPolicy objectClass)
+- Generates self-signed TLS certificates if missing
+- Restarts slapd and verifies config + logs
 
-4. After the script completes, verify:
-   ```
-   sudo bash /tmp/verify-replica.sh
-   ```
-
-### Verification Scripts
-
-After running the fix scripts, use the verification scripts to confirm
-everything is clean:
-
-- **`verify-master.sh`** — Run on master. Checks 16 items:
-  service status, ports, LDAPI, admin+replicator binds, base DN, syncprov
-  overlay, entryUUID/entryCSN indices, and log analysis (err=13, err=49,
-  TLS failures, checksum errors).
-
-- **`verify-replica.sh`** — Run on replica. Checks 17 items:
-  service status, ports, LDAPI, admin+replicator binds, base DN child count,
-  syncrepl starttls=yes, olcUpdateRef, ppolicy module, contextCSN tracking,
-  write rejection, and log analysis.
+**Step 3 — Verify:**
+```
+sudo ADMIN_PW='TheN1le1' bash /tmp/verify-replica.sh
+```
 
 ---
 
-## Expected Result After Fix
+## Verification Script Checks
+
+### verify-master.sh (16 checks)
+
+| Check | What It Verifies |
+|-------|-----------------|
+| Service status | symas-openldap-servers is active |
+| Port 389/636 | Both ports listening |
+| LDAPI EXTERNAL | Root socket access works |
+| Admin StartTLS | Admin password bind via TLS |
+| Replicator StartTLS | Replicator password bind via TLS |
+| Base DN readable | Directory root accessible |
+| Child count | Correct number of OUs |
+| Syncprov overlay | Configured on master |
+| entryUUID index | Present |
+| entryCSN index | Present |
+| No err=13 | Zero confidentiality errors |
+| No err=49 | Zero invalid credentials |
+| No TLS failures | Zero TLS handshake errors |
+| No checksum errors | Zero CRC mismatches |
+| contextCSN | CSN tracking active |
+
+### verify-replica.sh (17 checks)
+
+| Check | What It Verifies |
+|-------|-----------------|
+| Service status | symas-openldap-servers is active |
+| Port 389 | Listening |
+| LDAPI EXTERNAL | Root socket access works |
+| Admin StartTLS | Admin password bind via TLS |
+| Replicator StartTLS | Replicator password bind via TLS |
+| Base DN readable | Directory root accessible |
+| Child count | Matches master child count |
+| DN list | Shows all synced OUs |
+| Syncrepl starttls | starttls=yes in config |
+| olcUpdateRef | Write redirect to master configured |
+| ppolicy module | Loaded |
+| contextCSN | CSN tracking active + matches master |
+| No err=13 | Zero confidentiality errors |
+| No TLS failures | Zero TLS handshake errors |
+| No checksum errors | Zero CRC mismatches |
+| Write rejection | Read-only properly enforced |
+
+---
+
+## Expected Results
 
 After running both fix scripts:
 
-- Master **PASS: all checks** with zero log errors
-- Replica **PASS: all checks**, syncrepl shows `starttls=yes`
-- Within 10 seconds of the replica restart, data from the master syncs to the replica
-- All `err=13` (confidentiality required) errors stop
-- All TLS negotiation failures stop
+| Metric | Master | Replica |
+|--------|--------|---------|
+| Service | active | active |
+| ERR=13 | 0 | 0 |
+| ERR=49 | 0 | 0 |
+| Checksum errors | 0 | 0 |
+| TLS failures | 0 | 0 |
+| Entries | matched | matched |
+| contextCSN | present | matches master |
+| E2E write | creates on master | replicated in <10s |
 
-To confirm replication is live, add a test entry on the master:
+---
 
+## Confirming Replication
+
+Add a test entry on the master and check it appears on the replica:
+
+**On master:**
 ```
 sudo LDAPTLS_REQCERT=never ldapadd -x -ZZ -H ldap://localhost \
-  -D "cn=admin,dc=eab,dc=bank,dc=local" -w "<admin_password>" <<'EOF'
-dn: cn=repl-test,ou=Groups,dc=eab,dc=bank,dc=local
+  -D "cn=admin,dc=eab,dc=bank,dc=local" -w "TheN1le1" <<'EOF'
+dn: cn=test-replication,ou=Groups,dc=eab,dc=bank,dc=local
 objectClass: groupOfNames
-cn: repl-test
+cn: test-replication
 member: cn=admin,dc=eab,dc=bank,dc=local
 EOF
 ```
 
-Then check the replica (wait 10 seconds):
-
+**Wait 10 seconds, then on replica:**
 ```
 sudo LDAPTLS_REQCERT=never ldapsearch -x -ZZ -H ldap://localhost \
-  -D "cn=admin,dc=eab,dc=bank,dc=local" -w "<admin_password>" \
-  -b "cn=repl-test,ou=Groups,dc=eab,dc=bank,dc=local" -s base dn
+  -D "cn=admin,dc=eab,dc=bank,dc=local" -w "TheN1le1" \
+  -b "cn=test-replication,ou=Groups,dc=eab,dc=bank,dc=local" -s base dn
 ```
 
-If the entry appears on the replica, replication is working.
+The entry should appear on the replica.
 
 ---
 
 ## Files Provided
 
-| File | Purpose | Run On |
-|------|---------|--------|
-| `fix-master.sh` | Fix checksums + syncrepl indices | Master |
-| `fix-replica.sh` | Fix syncrepl TLS + load ppolicy module | Replica |
-| `verify-master.sh` | Comprehensive master health check | Master |
-| `verify-replica.sh` | Comprehensive replica sync check | Replica |
-| `BANK_FIX_GUIDE.md` | This document | — |
+| File | Run On | Purpose |
+|------|--------|---------|
+| `fix-master.sh` | Master (172.23.11.236) | Fix checksums + syncrepl indices |
+| `fix-replica.sh` | Replica (172.23.11.237) | Fix syncrepl TLS + ppolicy + TLS certs |
+| `verify-master.sh` | Master (172.23.11.236) | 16-point health check |
+| `verify-replica.sh` | Replica (172.23.11.237) | 17-point sync verification |
+| `BANK_FIX_GUIDE.md` | — | This document |
 
-All scripts require root (`sudo bash <script>.sh`) and have no other dependencies.
+All scripts: `sudo bash <script>.sh`
 
 ---
 
-## Contact
+## Troubleshooting
 
-For questions or issues with these scripts, contact the deployment team.
+**"FATAL: Run as root"** — use `sudo`
+
+**"ldapmodify: command not found"** — source the Symas environment first:
+```
+source /etc/profile.d/symas_env.sh
+```
+Or use the full path: `/opt/symas/bin/ldapmodify`
+
+**Admin password wrong** — pass it explicitly:
+```
+sudo ADMIN_PW='<your_password>' bash verify-master.sh
+```
+
+**Replica contextCSN doesn't match** — run fix-replica.sh again and wait 30
+seconds for syncrepl to complete the initial sync.
