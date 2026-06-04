@@ -152,6 +152,12 @@ fi
 systemctl restart symas-openldap-servers 2>/dev/null || systemctl restart slapd 2>/dev/null || true
 sleep 5
 
+# Ensure openssl is available for TLS cert generation
+if ! command -v openssl >/dev/null 2>&1; then
+  echo "[INFO] Installing openssl for TLS cert generation"
+  dnf -y install openssl >/dev/null 2>&1 || true
+fi
+
 run "r5-configure-replica-tls.sh"
 run "r6-fix-replica-ldapi-acl.sh"
 run "r7-harden-replica.sh"

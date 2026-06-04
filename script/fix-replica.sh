@@ -13,13 +13,16 @@
 #             (pwdPolicy objectClass) is not loaded on the replica.
 #   Issue C — LDAPS port 636 "TLS negotiation failure" — replica
 #             CA cert mismatch when trying direct LDAPS.
+#   Issue D — Missing self-signed TLS certificates — STARTTLS
+#             fails on the replica itself. Generates if missing.
 #
 # What it does:
 #   1. Finds the database with olcSyncrepl
 #   2. Updates olcSyncrepl: starttls=yes tls_reqcert=never
-#   3. Loads ppolicy module if missing
-#   4. Restarts slapd to activate syncrepl with TLS
-#   5. Self-verifies: checks logs for err=13 + TLS failures,
+#   3. Loads ppolicy module if missing (pwdPolicy objectClass)
+#   4. Generates self-signed TLS certs if missing
+#   5. Restarts slapd to activate syncrepl with TLS
+#   6. Self-verifies: checks logs for err=13 + TLS failures,
 #      tests syncrepl config + replicator bind
 #
 # Usage:
@@ -46,6 +49,11 @@ find_service() {
       return 0
     fi
   done
+  # Fallback: check if slapd is running
+  if pgrep -x slapd >/dev/null 2>&1; then
+    echo "slapd"
+    return 0
+  fi
   fatal "Cannot find slapd systemd service"
 }
 
@@ -163,10 +171,125 @@ LDIFEOF
 fi
 
 # ================================================================
-# STEP 5: Restart slapd
+# STEP 5: Ensure self-signed TLS certs exist
 # ================================================================
 echo ""
-echo "--- Step 5: Restart ${SLAPD_SVC} ---"
+echo "--- Step 5: Ensure TLS certificates (self-signed) ---"
+
+TLS_DIR="/opt/symas/etc/openldap/tls"
+TLS_CERT="${TLS_DIR}/ldap.crt"
+TLS_KEY="${TLS_DIR}/ldap.key"
+TLS_CA="${TLS_DIR}/ca.crt"
+TLS_CAKEY="${TLS_DIR}/ca.key"
+
+tls_ok=1
+if [[ -f "$TLS_CERT" && -f "$TLS_KEY" ]]; then
+  ok "TLS cert + key already present"
+  PASS=$((PASS+1))
+else
+  log "TLS certificates missing — generating self-signed..."
+
+  require_cmd openssl
+  mkdir -p "$TLS_DIR"
+
+  if ! [[ -f "$TLS_CA" && -f "$TLS_CAKEY" ]]; then
+    openssl genrsa -out "$TLS_CAKEY" 4096 2>/dev/null
+    openssl req -x509 -new -nodes -key "$TLS_CAKEY" -sha256 -days 3650 \
+      -subj "/C=US/O=Bank/OU=LDAP/CN=LDAP CA" -out "$TLS_CA" 2>/dev/null
+  fi
+
+  host_fqdn="$(hostname -f 2>/dev/null || hostname)"
+  host_short="$(hostname -s 2>/dev/null || hostname)"
+
+  cat > "${TLS_DIR}/san.cnf" <<CNF
+[ req ]
+default_bits       = 4096
+prompt             = no
+default_md         = sha256
+distinguished_name = dn
+req_extensions     = req_ext
+
+[ dn ]
+C=US
+O=Bank
+OU=LDAP
+CN=${host_fqdn}
+
+[ req_ext ]
+subjectAltName = @alt_names
+
+[ alt_names ]
+DNS.1 = ${host_fqdn}
+DNS.2 = ${host_short}
+DNS.3 = localhost
+IP.1  = 127.0.0.1
+CNF
+
+  openssl genrsa -out "$TLS_KEY" 4096 2>/dev/null
+  openssl req -new -key "$TLS_KEY" -out "${TLS_DIR}/ldap.csr" \
+    -config "${TLS_DIR}/san.cnf" 2>/dev/null
+  openssl x509 -req -in "${TLS_DIR}/ldap.csr" -CA "$TLS_CA" -CAkey "$TLS_CAKEY" \
+    -CAcreateserial -out "$TLS_CERT" -days 825 -sha256 \
+    -extensions req_ext -extfile "${TLS_DIR}/san.cnf" 2>/dev/null
+  rm -f "${TLS_DIR}/ldap.csr" "${TLS_DIR}/san.cnf"
+
+  chmod 700 "$TLS_DIR"
+  chmod 600 "$TLS_KEY" "$TLS_CAKEY"
+  chmod 644 "$TLS_CERT" "$TLS_CA"
+
+  if id ldap >/dev/null 2>&1; then
+    chown -R ldap:ldap "$TLS_DIR" 2>/dev/null || true
+  fi
+
+  if [[ -f "$TLS_CERT" && -f "$TLS_KEY" ]]; then
+    ok "Self-signed TLS certs generated"
+    PASS=$((PASS+1))
+    tls_ok=0
+  else
+    warn "TLS cert generation failed — STARTTLS will not be available locally"
+    tls_ok=2
+  fi
+fi
+
+# Apply TLS config to cn=config if certs exist
+if [[ $tls_ok -le 1 ]]; then
+  TLS_CONFIGURED=$(ldapsearch -Y EXTERNAL -H "$LDAPI_URI" -b cn=config \
+    -s base -LLL olcTLSCertificateFile 2>/dev/null | grep -c olcTLSCertificateFile || true)
+  if [[ "$TLS_CONFIGURED" -eq 0 ]]; then
+    log "Applying TLS config to cn=config..."
+    ldapmodify -Y EXTERNAL -H "$LDAPI_URI" <<LDIFTLS
+dn: cn=config
+changetype: modify
+add: olcTLSCertificateFile
+olcTLSCertificateFile: ${TLS_CERT}
+-
+add: olcTLSCertificateKeyFile
+olcTLSCertificateKeyFile: ${TLS_KEY}
+-
+add: olcTLSCACertificateFile
+olcTLSCACertificateFile: ${TLS_CA}
+-
+add: olcTLSProtocolMin
+olcTLSProtocolMin: 3.3
+LDIFTLS
+    ok "TLS config applied to cn=config"
+    PASS=$((PASS+1))
+    
+    # Add ldaps:// to SLAPD_URLS
+    if [[ -f /etc/default/symas-openldap ]]; then
+      sed -i 's|SLAPD_URLS="ldap:///|SLAPD_URLS="ldap:/// ldaps:///|' /etc/default/symas-openldap 2>/dev/null || true
+    fi
+  else
+    ok "TLS config already in cn=config"
+    PASS=$((PASS+1))
+  fi
+fi
+
+# ================================================================
+# STEP 6: Restart slapd
+# ================================================================
+echo ""
+echo "--- Step 6: Restart ${SLAPD_SVC} ---"
 
 systemctl restart "$SLAPD_SVC" || fatal "Failed to restart ${SLAPD_SVC}"
 sleep 3
@@ -180,7 +303,7 @@ else
 fi
 
 # ================================================================
-# STEP 6: Verify syncrepl config is correct
+# STEP 7: Verify syncrepl config is correct
 # ================================================================
 echo ""
 echo "--- Step 6: Verify syncrepl config ---"
@@ -197,7 +320,7 @@ else
 fi
 
 # ================================================================
-# STEP 7: Check logs for previously-seen errors
+# STEP 8: Check logs for previously-seen errors
 # ================================================================
 echo ""
 echo "--- Step 7: Log check (looking for previous errors) ---"

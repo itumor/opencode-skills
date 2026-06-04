@@ -181,16 +181,16 @@ echo ""
 echo "--- Write Rejection ---"
 tmp_uid="replica-verify-$$"
 tmp_dn="uid=${tmp_uid},ou=Users,${BASE_DN}"
-write_out=$(LDAPTLS_REQCERT=never ldapadd -x -ZZ \
+write_rc=0
+LDAPTLS_REQCERT=never ldapadd -x -ZZ \
   -H ldap://localhost -D "$ADMIN_DN" -w "$ADMIN_PW" \
-  <<LDIF 2>&1) && write_rc=0 || write_rc=$?
+  <<LDIF >/dev/null 2>&1 || write_rc=$?
 dn: ${tmp_dn}
 objectClass: inetOrgPerson
 uid: ${tmp_uid}
 cn: Verify Write Test
 sn: Test
 LDIF
-rm -f "$tmp_ldif" 2>/dev/null || true
 if [[ $write_rc -ne 0 ]]; then
   ok "Write correctly rejected (read-only enforced)"
 else

@@ -40,6 +40,10 @@ find_service() {
       return 0
     fi
   done
+  if pgrep -x slapd >/dev/null 2>&1; then
+    echo "slapd"
+    return 0
+  fi
   fatal "Cannot find slapd systemd service"
 }
 
