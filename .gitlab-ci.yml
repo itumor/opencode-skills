@@ -77,8 +77,8 @@ install-master:
       ./.gitlab/ssm-exec.sh "$MASTER_ID"
       "aws s3 cp s3://$S3_SCRIPTS_BUCKET/openldap-scripts.tar.gz /tmp/scripts.tar.gz --region $AWS_DEFAULT_REGION
       && mkdir -p /tmp/script
-      && tar xzf /tmp/scripts.tar.gz -C /tmp/script
-      && bash /tmp/script/script/install-symas-openldap-all-in-one.sh"
+      && tar xzf /tmp/scripts.tar.gz -C /tmp/script --strip-components=1
+      && bash /tmp/script/install-symas-openldap-all-in-one.sh"
   allow_failure: false
 
 install-replica:
@@ -97,9 +97,9 @@ install-replica:
       ./.gitlab/ssm-exec.sh "$REPLICA_ID"
       "aws s3 cp s3://$S3_SCRIPTS_BUCKET/openldap-scripts.tar.gz /tmp/scripts.tar.gz --region $AWS_DEFAULT_REGION
       && mkdir -p /tmp/script
-      && tar xzf /tmp/scripts.tar.gz -C /tmp/script
+      && tar xzf /tmp/scripts.tar.gz -C /tmp/script --strip-components=1
       && MASTER_IP=$MASTER_IP ADMIN_PW=$ADMIN_PW REPL_PW=$REPL_PW LDAPTLS_REQCERT=never
-      bash /tmp/script/script/install-symas-openldap-replica-all-in-one.sh"
+      bash /tmp/script/install-symas-openldap-replica-all-in-one.sh"
   allow_failure: false
 
 # ---- Test: run verification scripts (same as bank) ----
@@ -114,7 +114,7 @@ test-master:
     - yum install -y jq >/dev/null 2>&1
     - MASTER_ID=$(jq -r '.master_instance_id.value' $TF_ROOT/outputs.json)
   script:
-    - ./.gitlab/ssm-exec.sh "$MASTER_ID" "ADMIN_PW=$ADMIN_PW REPL_PW=$REPL_PW bash /tmp/script/script/verify-master.sh"
+    - ./.gitlab/ssm-exec.sh "$MASTER_ID" "ADMIN_PW=$ADMIN_PW REPL_PW=$REPL_PW bash /tmp/script/verify-master.sh"
 
 test-replica:
   stage: test
@@ -128,7 +128,7 @@ test-replica:
     - REPLICA_ID=$(jq -r '.replica_instance_id.value' $TF_ROOT/outputs.json)
     - MASTER_IP=$(jq -r '.master_private_ip.value' $TF_ROOT/outputs.json)
   script:
-    - ./.gitlab/ssm-exec.sh "$REPLICA_ID" "MASTER_IP=$MASTER_IP ADMIN_PW=$ADMIN_PW REPL_PW=$REPL_PW LDAPTLS_REQCERT=never bash /tmp/script/script/verify-replica.sh"
+    - ./.gitlab/ssm-exec.sh "$REPLICA_ID" "MASTER_IP=$MASTER_IP ADMIN_PW=$ADMIN_PW REPL_PW=$REPL_PW LDAPTLS_REQCERT=never bash /tmp/script/verify-replica.sh"
 
 test-sync:
   stage: test
@@ -144,17 +144,10 @@ test-sync:
   script:
     # E2E test: create user on master, verify on replica
     - TEST_UID="ci-e2e-$(date -u +%Y%m%d%H%M%S)"
-    # Write LDIF to file then add (avoids JSON quote escaping in SSM)
+    # Use printf to avoid SSM heredoc issues
     - >
       ./.gitlab/ssm-exec.sh "$MASTER_ID"
-      "cat > /tmp/e2e-user.ldif <<EOF
-      dn: uid=$TEST_UID,ou=Users,$BASE_DN
-      objectClass: inetOrgPerson
-      cn: CI E2E Test
-      sn: Test
-      uid: $TEST_UID
-      EOF
-      LDAPTLS_REQCERT=never /opt/symas/bin/ldapadd -x -ZZ -H ldap://localhost:389 -D $ADMIN_DN -w $ADMIN_PW -f /tmp/e2e-user.ldif"
+      "printf 'dn: uid=$TEST_UID,ou=Users,$BASE_DN\nobjectClass: inetOrgPerson\ncn: CI E2E Test\nsn: Test\nuid: $TEST_UID\n' > /tmp/e2e-user.ldif && LDAPTLS_REQCERT=never /opt/symas/bin/ldapadd -x -ZZ -H ldap://localhost:389 -D $ADMIN_DN -w $ADMIN_PW -f /tmp/e2e-user.ldif"
     - sleep 15
     - >
       ./.gitlab/ssm-exec.sh "$REPLICA_ID"
