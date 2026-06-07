@@ -481,9 +481,13 @@ else
   bad "Admin bind failed — wrong password or slapd issue"; FAIL=$((FAIL+1))
 fi
 
-# Base DN
-ENTRIES=$(( LDAPTLS_REQCERT=never ldapsearch -x -ZZ -H ldap://localhost -D "$ADMIN_DN" -w "$ADMIN_PW" -b "$BASE_DN" -s one -LLL dn 2>/dev/null || ldapsearch -x -H ldap://localhost -D "$ADMIN_DN" -w "$ADMIN_PW" -b "$BASE_DN" -s one -LLL dn 2>/dev/null ) | grep -c "^dn:" || true)
-ENTRIES=$(echo "$ENTRIES" | tr -d '[:space:]')
+# Base DN — try STARTTLS first, fall back to plain
+RAW_ENTRIES=$( ( LDAPTLS_REQCERT=never ldapsearch -x -ZZ \
+  -H ldap://localhost -D "$ADMIN_DN" -w "$ADMIN_PW" \
+  -b "$BASE_DN" -s one -LLL dn 2>/dev/null || \
+  ldapsearch -x -H ldap://localhost -D "$ADMIN_DN" -w "$ADMIN_PW" \
+  -b "$BASE_DN" -s one -LLL dn 2>/dev/null ) | grep -c "^dn:" || true )
+ENTRIES=$(echo "$RAW_ENTRIES" | tr -d '[:space:]')
 if [[ -n "$ENTRIES" && "$ENTRIES" -gt 0 ]]; then
   ok "Base DN readable — $ENTRIES children"; PASS=$((PASS+1))
 else
