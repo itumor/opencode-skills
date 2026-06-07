@@ -144,9 +144,17 @@ test-sync:
   script:
     # E2E test: create user on master, verify on replica
     - TEST_UID="ci-e2e-$(date -u +%Y%m%d%H%M%S)"
+    # Write LDIF to file then add (avoids JSON quote escaping in SSM)
     - >
       ./.gitlab/ssm-exec.sh "$MASTER_ID"
-      "bash -c \"echo -e 'dn: uid=$TEST_UID,ou=Users,$BASE_DN\nobjectClass: inetOrgPerson\ncn: CI E2E Test\nsn: Test\nuid: $TEST_UID' | LDAPTLS_REQCERT=never /opt/symas/bin/ldapadd -x -ZZ -H ldap://localhost:389 -D $ADMIN_DN -w $ADMIN_PW\""
+      "cat > /tmp/e2e-user.ldif <<EOF
+      dn: uid=$TEST_UID,ou=Users,$BASE_DN
+      objectClass: inetOrgPerson
+      cn: CI E2E Test
+      sn: Test
+      uid: $TEST_UID
+      EOF
+      LDAPTLS_REQCERT=never /opt/symas/bin/ldapadd -x -ZZ -H ldap://localhost:389 -D $ADMIN_DN -w $ADMIN_PW -f /tmp/e2e-user.ldif"
     - sleep 15
     - >
       ./.gitlab/ssm-exec.sh "$REPLICA_ID"
