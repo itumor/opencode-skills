@@ -108,7 +108,7 @@ test-master:
   image:
     name: amazon/aws-cli:latest
     entrypoint: [""]
-  needs: [install-master]
+  needs: [deploy, install-master]
   allow_failure: true
   before_script:
     - yum install -y jq >/dev/null 2>&1
@@ -121,7 +121,7 @@ test-replica:
   image:
     name: amazon/aws-cli:latest
     entrypoint: [""]
-  needs: [install-replica]
+  needs: [deploy, install-replica]
   allow_failure: true
   before_script:
     - yum install -y jq >/dev/null 2>&1
@@ -135,7 +135,7 @@ test-sync:
   image:
     name: amazon/aws-cli:latest
     entrypoint: [""]
-  needs: [install-master, install-replica]
+  needs: [deploy, install-master, install-replica]
   allow_failure: true
   before_script:
     - yum install -y jq >/dev/null 2>&1
