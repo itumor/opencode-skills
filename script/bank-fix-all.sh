@@ -231,6 +231,34 @@ olcRootPW: ${NEW_HASH}
 LDIF
 ) && { ok "Admin password reset"; PASS=$((PASS+1)); } || { bad "Password reset failed"; FAIL=$((FAIL+1)); }
 
+  # ---- Fix 7: Fix replicator user ----
+  banner "Master Fix 7: Replicator user"
+  log "Ensuring replicator user exists with password: $REPL_PW"
+  REPL_HASH=$(ssha_hash "$REPL_PW")
+  REPL_EXISTS=$(LDAPTLS_REQCERT=never /opt/symas/bin/ldapsearch -x -ZZ -H ldap://localhost \
+    -D "$ADMIN_DN" -w "$ADMIN_PW" -b "$REPL_DN" -s base dn 2>/dev/null | grep -c "^dn:" || true)
+  if [[ "$REPL_EXISTS" -gt 0 ]]; then
+    LDAPTLS_REQCERT=never /opt/symas/bin/ldapmodify -x -ZZ -H ldap://localhost \
+      -D "$ADMIN_DN" -w "$ADMIN_PW" >/dev/null 2>&1 <<LDIF
+dn: ${REPL_DN}
+changetype: modify
+replace: userPassword
+userPassword: ${REPL_HASH}
+LDIF
+    ok "Replicator password reset"; PASS=$((PASS+1))
+  else
+    LDAPTLS_REQCERT=never /opt/symas/bin/ldapadd -x -ZZ -H ldap://localhost \
+      -D "$ADMIN_DN" -w "$ADMIN_PW" >/dev/null 2>&1 <<LDIF
+dn: ${REPL_DN}
+objectClass: simpleSecurityObject
+objectClass: organizationalRole
+cn: replicator
+userPassword: ${REPL_HASH}
+description: Replication bind user
+LDIF
+    ok "Replicator user created"; PASS=$((PASS+1))
+  fi
+
   # ---- Restart ----
   systemctl restart "$SLAPD_SVC"
   sleep 3
@@ -381,6 +409,42 @@ replace: olcReadOnly
 olcReadOnly: TRUE
 LDIF
 ) 2>/dev/null && ok "ReadOnly=TRUE" || warn "ReadOnly already set"
+
+  # ---- Fix 7: Seed replica from master if empty ----
+  banner "Replica Fix 7: Seed database from master"
+  DATA_COUNT=$(ldapsearch -x -H ldap://localhost -D "$ADMIN_DN" -w "$ADMIN_PW" \
+    -b "$BASE_DN" -s one -LLL dn 2>/dev/null | grep -c "^dn:" || true)
+  DATA_COUNT=$(echo "$DATA_COUNT" | tr -d '[:space:]')
+  
+  if [[ -z "$DATA_COUNT" || "$DATA_COUNT" -eq 0 ]]; then
+    log "Replica has 0 entries — pulling full dataset from master"
+    PROVIDER_IP=$(ldapi_search -b "$DB_DN" -s base -LLL olcSyncrepl 2>/dev/null | grep -oP 'provider=ldap://\K[^: ]+' | head -1 || echo "172.23.11.236")
+    
+    log "Pulling data from ${PROVIDER_IP}..."
+    /opt/symas/bin/ldapsearch -x \
+      -H "ldap://${PROVIDER_IP}:389" \
+      -D "$REPL_DN" -w "$REPL_PW" \
+      -b "$BASE_DN" -s sub "(objectClass=*)" -LLL > /tmp/replica-seed.ldif 2>/dev/null
+    
+    SEED_COUNT=$(grep -c "^dn:" /tmp/replica-seed.ldif 2>/dev/null || echo "0")
+    log "Pulled ${SEED_COUNT} entries from master"
+    
+    if [[ "$SEED_COUNT" -gt 0 ]]; then
+      systemctl stop "$SLAPD_SVC"
+      sleep 2
+      rm -f /var/symas/openldap-data/example/data.mdb /var/symas/openldap-data/example/lock.mdb
+      slapadd -n 1 -l /tmp/replica-seed.ldif 2>/dev/null
+      chown -R ldap:ldap /var/symas/openldap-data 2>/dev/null || true
+      systemctl start "$SLAPD_SVC"
+      sleep 3
+      rm -f /tmp/replica-seed.ldif
+      ok "Seeded ${SEED_COUNT} entries from master"; PASS=$((PASS+1))
+    else
+      warn "Could not pull data from master — check replicator bind/password"
+    fi
+  else
+    ok "Replica already has ${DATA_COUNT} children — skipping seed"; PASS=$((PASS+1))
+  fi
 
   # ---- Restart ----
   systemctl restart "$SLAPD_SVC"
