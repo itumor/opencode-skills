@@ -40,3 +40,5 @@ terraform/openldap/tools/load/runs/20260212T105929Z/state
 .env
 .DS_Store
 .DS_Store
+.gitlab-ci-local-variables.yml
+.gitlab-ci-local/

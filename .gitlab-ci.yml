@@ -7,7 +7,7 @@ stages:
 
 variables:
   TF_IN_AUTOMATION: "true"
-  TF_ROOT: terraform/openldap-master-replica/instances
+  TF_ROOT: terraform/openldap-master-replica
   AWS_DEFAULT_REGION: us-west-2
   S3_SCRIPTS_BUCKET: "nextgenopen-ci-scripts"
   # Bank deployment credentials
@@ -49,7 +49,7 @@ deploy:
   script:
     - cd $TF_ROOT
     - terraform init
-    - terraform apply -auto-approve -var-file=../ci.tfvars
+    - terraform apply -auto-approve -var-file=ci.tfvars
     - terraform output -json > outputs.json
   artifacts:
     paths:
@@ -175,4 +175,4 @@ destroy:
   script:
     - cd $TF_ROOT
     - terraform init
-    - terraform destroy -auto-approve -var-file=../ci.tfvars
+    - terraform destroy -auto-approve -var-file=ci.tfvars

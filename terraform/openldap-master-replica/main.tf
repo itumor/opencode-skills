@@ -150,6 +150,7 @@ locals {
 
 resource "aws_iam_role" "ssm" {
   name               = "${var.project_name}-ssm-role"
+  force_detach_policies = true
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{

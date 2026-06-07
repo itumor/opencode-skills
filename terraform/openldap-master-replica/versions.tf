@@ -11,6 +11,13 @@ terraform {
       version = "~> 3.0"
     }
   }
+
+  backend "s3" {
+    bucket         = "openldap-tfstate-083792476705"
+    key            = "openldap-mr/terraform.tfstate"
+    region         = "us-west-2"
+    dynamodb_table = "openldap-tfstate-lock"
+  }
 }
 
 provider "aws" {
