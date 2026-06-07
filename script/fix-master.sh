@@ -8,13 +8,17 @@
 #             (Caused by manually-edited LDIF without CRC update.)
 #   Issue B — Missing entryUUID/entryCSN indices causing syncrepl
 #             refreshDelete+detaching loop on the replica.
+#   Issue C — Missing syncprov overlay — master cannot serve
+#             replication to consumers (OID 1.3.6.1.4.1.4203.1.9.1.1
+#             unrecognized control).
 #
 # What it does:
 #   1. Backs up /opt/symas/etc/openldap/slapd.d
 #   2. Exports cn=config via slapcat, rebuilds checksums via slapadd
 #   3. Adds olcDbIndex: entryUUID eq + entryCSN eq (if missing)
-#   4. Restarts slapd
-#   5. Self-verifies: checks logs for errors, tests LDAPI + admin bind
+#   4. Ensures syncprov overlay (required for syncrepl provider)
+#   5. Restarts slapd
+#   6. Self-verifies: checks logs for errors, tests LDAPI + admin bind
 #
 # Usage:
 #   sudo bash fix-master.sh
@@ -196,10 +200,36 @@ LDIF
 fi
 
 # ================================================================
-# STEP 4: Verify connectivity
+# STEP 4: Ensure syncprov overlay
 # ================================================================
 echo ""
-echo "--- Step 4: Verification ---"
+echo "--- Step 4: Syncprov overlay ---"
+
+HAS_SYNCPROV=$(ldapsearch -Y EXTERNAL -H "$LDAPI_URI" -b cn=config \
+  -s sub "(olcOverlay=syncprov)" dn 2>/dev/null | grep -ci "^dn:" || true)
+HAS_SYNCPROV=$(echo "$HAS_SYNCPROV" | tr -d '[:space:]')
+
+if [[ -n "$HAS_SYNCPROV" && "$HAS_SYNCPROV" -gt 0 ]]; then
+  ok "Syncprov overlay already present"
+  PASS=$((PASS+1))
+else
+  log "Adding syncprov overlay — required for replication to consumers"
+  ldapmodify -Y EXTERNAL -H "$LDAPI_URI" -f <(cat <<LDIF
+dn: olcOverlay=syncprov,${DB_DN}
+objectClass: olcOverlayConfig
+objectClass: olcSyncProvConfig
+olcOverlay: syncprov
+olcSpCheckpoint: 100 10
+olcSpSessionLog: 100
+LDIF
+) && { ok "Syncprov overlay added"; PASS=$((PASS+1)); } || { bad "Syncprov add failed"; FAIL=$((FAIL+1)); }
+fi
+
+# ================================================================
+# STEP 5: Verify connectivity
+# ================================================================
+echo ""
+echo "--- Step 5: Verification ---"
 
 if ldapwhoami -Y EXTERNAL -H "$LDAPI_URI" >/dev/null 2>&1; then
   ok "LDAPI EXTERNAL bind works"
@@ -210,7 +240,7 @@ else
 fi
 
 # ================================================================
-# STEP 5: Summary
+# STEP 6: Summary
 # ================================================================
 echo ""
 echo "============================================================"
