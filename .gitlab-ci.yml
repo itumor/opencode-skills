@@ -1,6 +1,7 @@
 stages:
   - validate
   - deploy
+  - install
   - test
   - destroy
 
@@ -8,6 +9,13 @@ variables:
   TF_IN_AUTOMATION: "true"
   TF_ROOT: terraform/openldap-master-replica/instances
   AWS_DEFAULT_REGION: us-west-2
+  S3_SCRIPTS_BUCKET: "nextgenopen-ci-scripts"
+  # Bank deployment credentials
+  BASE_DN: "dc=eab,dc=bank,dc=local"
+  ADMIN_DN: "cn=admin,dc=eab,dc=bank,dc=local"
+  ADMIN_PW: "TheN1le1"
+  REPL_DN: "cn=replicator,dc=eab,dc=bank,dc=local"
+  REPL_PW: "replpass"
 
 shellcheck:
   stage: validate
@@ -27,6 +35,7 @@ terraform-validate:
     - terraform init -backend=false
     - terraform validate
 
+# ---- Deploy infrastructure (bank config) ----
 deploy:
   stage: deploy
   image:
@@ -40,83 +49,114 @@ deploy:
   script:
     - cd $TF_ROOT
     - terraform init
-    - terraform apply -auto-approve
+    - terraform apply -auto-approve -var-file=../ci.tfvars
     - terraform output -json > outputs.json
   artifacts:
     paths:
       - $TF_ROOT/outputs.json
     expire_in: 1h
 
-# ---------------------------------------------------------------------------
-# Stage 3 — Test (SSM Run Command)
-# ---------------------------------------------------------------------------
+# ---- Push scripts to S3, then SSM install ----
+install-master:
+  stage: install
+  image:
+    name: amazon/aws-cli:latest
+    entrypoint: [""]
+  needs: [deploy]
+  before_script:
+    - yum install -y jq tar gzip >/dev/null 2>&1
+    - MASTER_ID=$(jq -r '.master_instance_id.value' $TF_ROOT/outputs.json)
+    - aws s3api head-bucket --bucket "$S3_SCRIPTS_BUCKET" 2>/dev/null || aws s3 mb "s3://$S3_SCRIPTS_BUCKET" --region "$AWS_DEFAULT_REGION"
+  script:
+    # Package scripts and upload
+    - tar czf /tmp/openldap-scripts.tar.gz script/
+    - aws s3 cp /tmp/openldap-scripts.tar.gz "s3://$S3_SCRIPTS_BUCKET/openldap-scripts.tar.gz"
+    # Wait for SSM, then run master installer
+    - ./.gitlab/ssm-wait.sh "$MASTER_ID"
+    - >
+      ./.gitlab/ssm-exec.sh "$MASTER_ID"
+      "aws s3 cp s3://$S3_SCRIPTS_BUCKET/openldap-scripts.tar.gz /tmp/scripts.tar.gz --region $AWS_DEFAULT_REGION
+      && mkdir -p /tmp/script
+      && tar xzf /tmp/scripts.tar.gz -C /tmp/script
+      && bash /tmp/script/script/install-symas-openldap-all-in-one.sh"
+  allow_failure: false
 
+install-replica:
+  stage: install
+  image:
+    name: amazon/aws-cli:latest
+    entrypoint: [""]
+  needs: [deploy]
+  before_script:
+    - yum install -y jq >/dev/null 2>&1
+    - REPLICA_ID=$(jq -r '.replica_instance_id.value' $TF_ROOT/outputs.json)
+    - MASTER_IP=$(jq -r '.master_private_ip.value' $TF_ROOT/outputs.json)
+  script:
+    - ./.gitlab/ssm-wait.sh "$REPLICA_ID"
+    - >
+      ./.gitlab/ssm-exec.sh "$REPLICA_ID"
+      "aws s3 cp s3://$S3_SCRIPTS_BUCKET/openldap-scripts.tar.gz /tmp/scripts.tar.gz --region $AWS_DEFAULT_REGION
+      && mkdir -p /tmp/script
+      && tar xzf /tmp/scripts.tar.gz -C /tmp/script
+      && MASTER_IP=$MASTER_IP ADMIN_PW=$ADMIN_PW REPL_PW=$REPL_PW LDAPTLS_REQCERT=never
+      bash /tmp/script/script/install-symas-openldap-replica-all-in-one.sh"
+  allow_failure: false
+
+# ---- Test: run verification scripts (same as bank) ----
 test-master:
   stage: test
   image:
     name: amazon/aws-cli:latest
     entrypoint: [""]
-  needs: [deploy]
+  needs: [install-master]
   allow_failure: true
   before_script:
     - yum install -y jq >/dev/null 2>&1
     - MASTER_ID=$(jq -r '.master_instance_id.value' $TF_ROOT/outputs.json)
-    - ./.gitlab/ssm-wait.sh "$MASTER_ID"
   script:
-    - ./.gitlab/ssm-exec.sh "$MASTER_ID" '/opt/symas/bin/ldapwhoami -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin'
-    - ./.gitlab/ssm-exec.sh "$MASTER_ID" '/opt/symas/bin/ldapsearch -LLL -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -b dc=cae,dc=local -s one dn'
-    - ./.gitlab/ssm-exec.sh "$MASTER_ID" '/opt/symas/bin/ldapsearch -LLL -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -b dc=cae,dc=local (cn=replicator) dn'
+    - ./.gitlab/ssm-exec.sh "$MASTER_ID" "ADMIN_PW=$ADMIN_PW REPL_PW=$REPL_PW bash /tmp/script/script/verify-master.sh"
 
 test-replica:
   stage: test
   image:
     name: amazon/aws-cli:latest
     entrypoint: [""]
-  needs: [deploy]
+  needs: [install-replica]
   allow_failure: true
   before_script:
     - yum install -y jq >/dev/null 2>&1
     - REPLICA_ID=$(jq -r '.replica_instance_id.value' $TF_ROOT/outputs.json)
-    - ./.gitlab/ssm-wait.sh "$REPLICA_ID"
+    - MASTER_IP=$(jq -r '.master_private_ip.value' $TF_ROOT/outputs.json)
   script:
-    - ./.gitlab/ssm-exec.sh "$REPLICA_ID" 'LDAPTLS_REQCERT=never /opt/symas/bin/ldapwhoami -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin'
-    - ./.gitlab/ssm-exec.sh "$REPLICA_ID" 'LDAPTLS_REQCERT=never /opt/symas/bin/ldapsearch -LLL -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -b dc=cae,dc=local -s one dn'
+    - ./.gitlab/ssm-exec.sh "$REPLICA_ID" "MASTER_IP=$MASTER_IP ADMIN_PW=$ADMIN_PW REPL_PW=$REPL_PW LDAPTLS_REQCERT=never bash /tmp/script/script/verify-replica.sh"
 
 test-sync:
   stage: test
   image:
     name: amazon/aws-cli:latest
     entrypoint: [""]
-  needs: [deploy]
+  needs: [install-master, install-replica]
   allow_failure: true
   before_script:
     - yum install -y jq >/dev/null 2>&1
     - MASTER_ID=$(jq -r '.master_instance_id.value' $TF_ROOT/outputs.json)
     - REPLICA_ID=$(jq -r '.replica_instance_id.value' $TF_ROOT/outputs.json)
-    - ./.gitlab/ssm-wait.sh "$MASTER_ID"
-    - ./.gitlab/ssm-wait.sh "$REPLICA_ID"
   script:
-    - TEST_UID="ci-sync-$(date -u +%Y%m%d%H%M%S)"
-    - |
-      CMD="echo -e 'dn: uid=$TEST_UID,ou=people,dc=cae,dc=local\nobjectClass: inetOrgPerson\ncn: CI Sync Test\nsn: Test\nuid: $TEST_UID' | /opt/symas/bin/ldapadd -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin"
-      echo "=== Write test user to master ==="
-      ./.gitlab/ssm-exec.sh "$MASTER_ID" "$CMD"
-    - |
-      echo "=== Wait for replication ==="
-      sleep 15
-    - |
-      echo "=== Verify test user on replica ==="
-      ./.gitlab/ssm-exec.sh "$REPLICA_ID" \
-        "LDAPTLS_REQCERT=never /opt/symas/bin/ldapsearch -LLL -x -ZZ -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin -b dc=cae,dc=local '(uid=$TEST_UID)' dn"
-    - |
-      echo "=== Cleanup ==="
-      ./.gitlab/ssm-exec.sh "$MASTER_ID" \
-        "/opt/symas/bin/ldapdelete -x -H ldap://localhost:389 -D cn=admin,dc=cae,dc=local -w admin uid=$TEST_UID,ou=people,dc=cae,dc=local"
+    # E2E test: create user on master, verify on replica
+    - TEST_UID="ci-e2e-$(date -u +%Y%m%d%H%M%S)"
+    - >
+      ./.gitlab/ssm-exec.sh "$MASTER_ID"
+      "bash -c \"echo -e 'dn: uid=$TEST_UID,ou=Users,$BASE_DN\nobjectClass: inetOrgPerson\ncn: CI E2E Test\nsn: Test\nuid: $TEST_UID' | LDAPTLS_REQCERT=never /opt/symas/bin/ldapadd -x -ZZ -H ldap://localhost:389 -D $ADMIN_DN -w $ADMIN_PW\""
+    - sleep 15
+    - >
+      ./.gitlab/ssm-exec.sh "$REPLICA_ID"
+      "LDAPTLS_REQCERT=never /opt/symas/bin/ldapsearch -LLL -x -ZZ -H ldap://localhost:389 -D $ADMIN_DN -w $ADMIN_PW -b $BASE_DN \"(uid=$TEST_UID)\" dn"
+    # Cleanup
+    - >
+      ./.gitlab/ssm-exec.sh "$MASTER_ID"
+      "/opt/symas/bin/ldapdelete -x -H ldap://localhost:389 -D $ADMIN_DN -w $ADMIN_PW \"uid=$TEST_UID,ou=Users,$BASE_DN\""
 
-# ---------------------------------------------------------------------------
-# Stage 4 — Destroy (S3 backend, always runs)
-# ---------------------------------------------------------------------------
-
+# ---- Destroy ----
 destroy:
   stage: destroy
   image:
@@ -132,4 +172,4 @@ destroy:
   script:
     - cd $TF_ROOT
     - terraform init
-    - terraform destroy -auto-approve
+    - terraform destroy -auto-approve -var-file=../ci.tfvars

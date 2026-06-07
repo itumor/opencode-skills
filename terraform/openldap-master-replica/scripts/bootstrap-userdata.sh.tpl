@@ -20,7 +20,7 @@ log "installing Symas OpenLDAP packages"
 dnf -y install curl dnf-plugins-core >/dev/null 2>&1 || true
 curl -fsSL https://repo.symas.com/configs/SOLDAP/rhel9/release26.repo -o /etc/yum.repos.d/soldap-release26.repo
 dnf clean all >/dev/null 2>&1 || true
-dnf -y install symas-openldap-servers symas-openldap-clients
+dnf -y install symas-openldap-servers symas-openldap-clients openssl
 
 log "adding PATH"
 cat >/etc/profile.d/symas_env.sh <<'PROFILE'
@@ -32,6 +32,7 @@ source /etc/profile.d/symas_env.sh
 
 if systemctl is-active --quiet firewalld 2>/dev/null; then
   firewall-cmd --permanent --add-port=389/tcp 2>/dev/null || true
+  firewall-cmd --permanent --add-port=636/tcp 2>/dev/null || true
   firewall-cmd --reload 2>/dev/null || true
 fi
 
