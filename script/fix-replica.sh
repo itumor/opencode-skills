@@ -107,8 +107,8 @@ ok "Found replica database: $DB_DN"
 echo ""
 echo "--- Step 3: Update syncrepl (starttls=yes) ---"
 
-CURRENT=$(ldapsearch -Y EXTERNAL -H "$LDAPI_URI" -b "$DB_DN" -s base \
-  -LLL olcSyncrepl 2>/dev/null | grep -v "^$" || true)
+CURRENT=$(ldapsearch -o ldif-wrap=no -Y EXTERNAL -H "$LDAPI_URI" -b "$DB_DN" -s base \
+  -LLL olcSyncrepl 2>/dev/null | grep -v "^$" | tr -d '\n' || true)
 
 if [[ -z "$CURRENT" ]]; then
   fatal "olcSyncrepl attribute is empty"
@@ -120,13 +120,13 @@ if echo "$CURRENT" | grep -qi "starttls=yes"; then
 else
   log "Current syncrepl has starttls=no — fixing..."
 
-  # Extract current config fields
+  # Extract current config fields (use ldif-wrap=no to avoid line breaks)
   PROVIDER=$(echo "$CURRENT" | grep -oP 'provider=\K[^ ]+' | head -1 || echo "ldap://master:389")
   BINDDN=$(echo "$CURRENT"   | grep -oP 'binddn="\K[^"]+'   | head -1 || echo "cn=replicator")
   CREDS=$(echo "$CURRENT"    | grep -oP 'credentials="?\K[^" ]+' | head -1 || echo "replpass")
   BASE=$(echo "$CURRENT"     | grep -oP 'searchbase="\K[^"]+' | head -1 || echo "dc=eab,dc=bank,dc=local")
   RID=$(echo "$CURRENT"      | grep -oP 'rid=\K[0-9]+' | head -1 || echo "101")
-  MODE=$(echo "$CURRENT"     | grep -oP 'type=\K[a-zA-Z]+' | head -1 || echo "refreshAndPersist")
+  MODE="refreshAndPersist"
 
   PROVIDER=$(echo "$PROVIDER" | sed 's/^ldaps:/ldap:/')
 
