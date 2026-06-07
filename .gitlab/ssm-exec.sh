@@ -23,11 +23,17 @@ for i in $(seq 1 60); do
     --query '{S:Status,SO:StandardOutputContent,SE:StandardErrorContent}' --output json 2>/dev/null)
   status=$(echo "$result" | jq -r '.S // "InProgress"')
   case "$status" in
-    Success|Failed|Cancelled|TimedOut)
+    Success)
       echo "SSM result: $status"
       echo "$result" | jq -r '.SO // ""'
       echo "$result" | jq -r '.SE // ""' >&2
       exit 0
+      ;;
+    Failed|Cancelled|TimedOut)
+      echo "SSM result: $status"
+      echo "$result" | jq -r '.SO // ""'
+      echo "$result" | jq -r '.SE // ""' >&2
+      exit 1
       ;;
   esac
   sleep 2

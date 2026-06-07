@@ -95,3 +95,9 @@ variable "tags" {
   description = "Tags applied to all resources."
   default     = {}
 }
+
+variable "s3_scripts_bucket" {
+  type        = string
+  description = "S3 bucket name for CI scripts."
+  default     = "nextgenopen-ci-scripts"
+}

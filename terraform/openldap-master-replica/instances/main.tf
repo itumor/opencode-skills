@@ -70,6 +70,22 @@ resource "aws_iam_role_policy_attachment" "ssm_core" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+resource "aws_iam_role_policy" "s3_scripts" {
+  name = "${var.project_name}-s3-scripts"
+  role = aws_iam_role.ssm.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:ListBucket"]
+        Resource = ["arn:aws:s3:::${var.s3_scripts_bucket}", "arn:aws:s3:::${var.s3_scripts_bucket}/*"]
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "ssm" {
   name = "${var.project_name}-ssm-profile"
   role = aws_iam_role.ssm.name

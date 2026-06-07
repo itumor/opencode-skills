@@ -148,6 +148,42 @@ locals {
   ssh_key_name_effective = var.ssh_key_name != "" ? var.ssh_key_name : aws_key_pair.auto[0].key_name
 }
 
+resource "aws_iam_role" "ssm" {
+  name               = "${var.project_name}-ssm-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_core" {
+  role       = aws_iam_role.ssm.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_role_policy" "s3_scripts" {
+  name = "${var.project_name}-s3-scripts"
+  role = aws_iam_role.ssm.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["s3:GetObject", "s3:ListBucket"]
+      Resource = ["arn:aws:s3:::${var.s3_scripts_bucket}", "arn:aws:s3:::${var.s3_scripts_bucket}/*"]
+    }]
+  })
+}
+
+resource "aws_iam_instance_profile" "ssm" {
+  name = "${var.project_name}-ssm-profile"
+  role = aws_iam_role.ssm.name
+}
+
 resource "aws_instance" "master" {
   ami                         = local.ami_id
   instance_type               = var.instance_type
@@ -156,6 +192,7 @@ resource "aws_instance" "master" {
   vpc_security_group_ids      = [aws_security_group.ldap.id]
   associate_public_ip_address = true
   key_name                    = local.ssh_key_name_effective
+  iam_instance_profile        = aws_iam_instance_profile.ssm.name
 
   user_data = base64encode(templatefile("${path.module}/scripts/bootstrap-userdata.sh.tpl", {
     role          = "master"
@@ -183,6 +220,7 @@ resource "aws_instance" "replica" {
   vpc_security_group_ids      = [aws_security_group.ldap.id]
   associate_public_ip_address = true
   key_name                    = local.ssh_key_name_effective
+  iam_instance_profile        = aws_iam_instance_profile.ssm.name
 
   depends_on = [aws_instance.master]
 

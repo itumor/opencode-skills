@@ -42,6 +42,15 @@ curl -fsSL https://repo.symas.com/configs/SOLDAP/rhel9/release26.repo -o /etc/yu
 dnf clean all >/dev/null 2>&1 || true
 dnf -y install symas-openldap-servers symas-openldap-clients
 
+# Install AWS CLI v2 (needed for SSM commands to download scripts from S3)
+log "installing AWS CLI v2"
+if ! command -v aws >/dev/null 2>&1; then
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+  unzip -qo /tmp/awscliv2.zip -d /tmp/
+  /tmp/aws/install >/dev/null 2>&1 || true
+  rm -rf /tmp/aws /tmp/awscliv2.zip
+fi
+
 # Install SSM Agent (needed for CI test jobs)
 log "installing SSM Agent"
 if ! systemctl is-active --quiet amazon-ssm-agent 2>/dev/null; then

@@ -17,10 +17,25 @@ if ! swapon --show | grep -q '^/swapfile'; then
 fi
 
 log "installing Symas OpenLDAP packages"
-dnf -y install curl dnf-plugins-core >/dev/null 2>&1 || true
+dnf -y install curl dnf-plugins-core unzip >/dev/null 2>&1 || true
 curl -fsSL https://repo.symas.com/configs/SOLDAP/rhel9/release26.repo -o /etc/yum.repos.d/soldap-release26.repo
 dnf clean all >/dev/null 2>&1 || true
 dnf -y install symas-openldap-servers symas-openldap-clients openssl
+
+log "installing AWS CLI v2"
+if ! command -v aws >/dev/null 2>&1; then
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+  unzip -qo /tmp/awscliv2.zip -d /tmp/
+  /tmp/aws/install >/dev/null 2>&1 || true
+  rm -rf /tmp/aws /tmp/awscliv2.zip
+fi
+
+log "installing SSM Agent"
+if ! systemctl is-active --quiet amazon-ssm-agent 2>/dev/null; then
+  dnf install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm >/dev/null 2>&1 || true
+  systemctl enable amazon-ssm-agent 2>/dev/null || true
+  systemctl start amazon-ssm-agent 2>/dev/null || true
+fi
 
 log "adding PATH"
 cat >/etc/profile.d/symas_env.sh <<'PROFILE'

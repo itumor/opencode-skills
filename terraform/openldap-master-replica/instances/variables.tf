@@ -91,6 +91,12 @@ variable "replication_password" {
   default   = "replpass"
 }
 
+variable "s3_scripts_bucket" {
+  type        = string
+  description = "S3 bucket name for CI scripts."
+  default     = "nextgenopen-ci-scripts"
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
