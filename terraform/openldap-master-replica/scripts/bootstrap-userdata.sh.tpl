@@ -17,7 +17,7 @@ if ! swapon --show | grep -q '^/swapfile'; then
 fi
 
 log "installing Symas OpenLDAP packages"
-dnf -y install curl dnf-plugins-core unzip >/dev/null 2>&1 || true
+dnf -y install curl dnf-plugins-core >/dev/null 2>&1 || true
 curl -fsSL https://repo.symas.com/configs/SOLDAP/rhel9/release26.repo -o /etc/yum.repos.d/soldap-release26.repo
 dnf clean all >/dev/null 2>&1 || true
 dnf -y install symas-openldap-servers symas-openldap-clients openssl

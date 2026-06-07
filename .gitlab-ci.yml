@@ -68,14 +68,15 @@ install-master:
     - MASTER_ID=$(jq -r '.master_instance_id.value' $TF_ROOT/outputs.json)
     - aws s3api head-bucket --bucket "$S3_SCRIPTS_BUCKET" 2>/dev/null || aws s3 mb "s3://$S3_SCRIPTS_BUCKET" --region "$AWS_DEFAULT_REGION"
   script:
-    # Package scripts and upload
+    # Package scripts, upload to S3, generate pre-signed URL for curl download
     - tar czf /tmp/openldap-scripts.tar.gz script/
     - aws s3 cp /tmp/openldap-scripts.tar.gz "s3://$S3_SCRIPTS_BUCKET/openldap-scripts.tar.gz"
+    - S3_URL=$(aws s3 presign "s3://$S3_SCRIPTS_BUCKET/openldap-scripts.tar.gz" --expires-in 3600)
     # Wait for SSM, then run master installer
     - ./.gitlab/ssm-wait.sh "$MASTER_ID"
     - >
       ./.gitlab/ssm-exec.sh "$MASTER_ID"
-      "aws s3 cp s3://$S3_SCRIPTS_BUCKET/openldap-scripts.tar.gz /tmp/scripts.tar.gz --region $AWS_DEFAULT_REGION
+      "curl -fsSL '${S3_URL}' -o /tmp/scripts.tar.gz
       && mkdir -p /tmp/script
       && tar xzf /tmp/scripts.tar.gz -C /tmp/script --strip-components=1
       && bash /tmp/script/install-symas-openldap-all-in-one.sh"
@@ -93,9 +94,10 @@ install-replica:
     - MASTER_IP=$(jq -r '.master_private_ip.value' $TF_ROOT/outputs.json)
   script:
     - ./.gitlab/ssm-wait.sh "$REPLICA_ID"
+    - S3_URL=$(aws s3 presign "s3://$S3_SCRIPTS_BUCKET/openldap-scripts.tar.gz" --expires-in 3600)
     - >
       ./.gitlab/ssm-exec.sh "$REPLICA_ID"
-      "aws s3 cp s3://$S3_SCRIPTS_BUCKET/openldap-scripts.tar.gz /tmp/scripts.tar.gz --region $AWS_DEFAULT_REGION
+      "curl -fsSL '${S3_URL}' -o /tmp/scripts.tar.gz
       && mkdir -p /tmp/script
       && tar xzf /tmp/scripts.tar.gz -C /tmp/script --strip-components=1
       && MASTER_IP=$MASTER_IP ADMIN_PW=$ADMIN_PW REPL_PW=$REPL_PW LDAPTLS_REQCERT=never
