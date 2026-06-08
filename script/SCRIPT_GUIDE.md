@@ -2,15 +2,18 @@
 
 Complete reference for the `script/` directory: what each script does, the order to run them, environment variables, and how to execute them on a remote VM over SSH.
 
-> **Test Status — Verified on RHEL 9.7 + Symas OpenLDAP 2.6.13 — 2026-05-20**
+> **Test Status — Verified on RHEL 9.8 + Symas OpenLDAP 2.6.13 — 2026-06-08**
 >
-> | Suite | PASS | WARN | FAIL |
-> |-------|------|------|------|
-> | Smoke (syntax + orchestrator) | 95 | 0 | 0 |
-> | LDAP Integration — master (full install + all tests) | All PASS | 0 | 0 |
-> | Connection tests | 26/26 | 0 | 0 |
+> | Suite | Result |
+> |-------|--------|
+> | Smoke (syntax + orchestrator) | PASS=95 WARN=0 FAIL=0 |
+> | Master install (TLS) | All PASS (2026-05-20) |
+> | Master install (no-TLS) | All PASS (2026-06-08) |
+> | Replica install (TLS) | All PASS (2026-05-20) |
+> | Replica install (no-TLS) | Live sync verified (2026-06-08) |
+> | Connection tests | 26/26 (TLS), plain LDAP verified (no-TLS) |
 >
-> Tested on: AWS EC2 `t3.medium`, RHEL 9.7/9.8, us-west-2 (`i-06ac02deae4c09011`)
+> Tested on: AWS EC2 `t3.medium`, RHEL 9.8, us-west-2
 
 ---
 
@@ -39,9 +42,12 @@ Complete reference for the `script/` directory: what each script does, the order
 # 1. Copy scripts to master VM
 scp -r ./script ec2-user@<MASTER_IP>:/tmp/script
 
-# 2. Run master all-in-one installer
+# 2. Run master all-in-one installer (with TLS - default)
 ssh -i ~/.ssh/your-key.pem ec2-user@<MASTER_IP>
 sudo bash /tmp/script/install-symas-openldap-all-in-one.sh
+
+# 2a. Run without TLS
+sudo TLS_MODE=no ADMIN_PW=<password> bash /tmp/script/install-symas-openldap-all-in-one.sh
 ```
 
 ---
@@ -52,16 +58,19 @@ sudo bash /tmp/script/install-symas-openldap-all-in-one.sh
 # Prerequisites:
 #   - Master is running (install-symas-openldap-all-in-one.sh complete)
 #   - Master has run 26-configure-bindings.sh (cn=replicator + syncprov)
-#   - SSH access from replica to master (for CA cert copy)
+#   - No SSH/SCP from replica to master needed (self-signed TLS or no-TLS)
 
 # 1. Copy scripts to replica VM
 scp -r ./script ec2-user@<REPLICA_IP>:/tmp/script
 
-# 2. Run replica all-in-one installer
+# 2. Run replica all-in-one installer (with TLS - default)
 ssh -i ~/.ssh/your-key.pem ec2-user@<REPLICA_IP>
 sudo MASTER_IP=<MASTER_IP> \
      ADMIN_PW=<admin-password> \
-     SSH_KEY=~/.ssh/your-key.pem \
+     bash /tmp/script/install-symas-openldap-replica-all-in-one.sh
+
+# 2a. Run without TLS
+sudo MASTER_IP=<MASTER_IP> ADMIN_PW=<admin-password> TLS_MODE=no \
      bash /tmp/script/install-symas-openldap-replica-all-in-one.sh
 ```
 
@@ -76,7 +85,7 @@ sudo MASTER_IP=<MASTER_IP> \
 | **Repo** | Symas SOLDAP repo enabled via Red Hat Satellite |
 | **OpenLDAP** | Symas OpenLDAP 2.6.x (installed by script 1 / r1) |
 | **Packages** | `openssl`, `ldap-utils` auto-installed |
-| **Replica extra** | SSH access from replica to master (for CA cert copy) |
+| **Replica extra** | No SSH/SCP needed — TLS is self-signed by default (`COPY_FROM_MASTER=0`). No-TLS mode available via `TLS_MODE=no`. |
 
 ---
 
@@ -87,6 +96,7 @@ sudo MASTER_IP=<MASTER_IP> \
 | `BASE_DN` | `dc=eab,dc=bank,dc=local` | LDAP base distinguished name |
 | `BIND_DN` | `cn=admin,<BASE_DN>` | Admin bind DN |
 | `BIND_PW` | *(auto-read from exampledb)* | Admin bind password |
+| `TLS_MODE` | `yes` | `yes` = run TLS + hardening; `no` = skip TLS, plain LDAP |
 | `MW_PASSWORD` | `ChangeMe123!` | Middleware service account password |
 | `MW_BIND_DN` | `uid=mw,ou=ServiceAccounts,ou=Systems,<BASE_DN>` | MW user DN |
 | `MW_BIND_PW` | `ChangeMe123!` | MW user bind password |
@@ -99,6 +109,7 @@ sudo MASTER_IP=<MASTER_IP> \
 ```bash
 export BASE_DN="dc=example,dc=com"
 export BIND_PW="MyAdminPass123"
+export TLS_MODE=no
 sudo -E bash install-symas-openldap-all-in-one.sh
 ```
 
@@ -113,16 +124,22 @@ sudo -E bash install-symas-openldap-all-in-one.sh
 | `REPL_PW` | no | `replpass` | Replication bind password (must match master) |
 | `BASE_DN` | no | `dc=eab,dc=bank,dc=local` | LDAP base DN (must match master) |
 | `SERVER_ID` | no | `2` | `olcServerID` — must differ from master (`1`) |
-| `SSH_KEY` | no | — | SSH private key path to copy CA cert from master |
-| `SSH_USER` | no | `ec2-user` | SSH user on master |
-| `COPY_FROM_MASTER` | no | `1` | `1` = copy CA from master; `0` = self-signed |
+| `TLS_MODE` | no | `yes` | `yes` = full TLS; `no` = plain LDAP, no certs |
+| `COPY_FROM_MASTER` | no | `0` | `1` = copy CA from master; `0` = self-signed |
+| `STAGED_CA_CERT` | no | — | Path to pre-staged CA cert (when `COPY_FROM_MASTER=1`) |
+| `STAGED_CA_KEY` | no | — | Path to pre-staged CA key (when `COPY_FROM_MASTER=1`) |
 | `LDAPTLS_REQCERT` | no | `never` | TLS cert verify mode for tests |
 
 ```bash
 sudo MASTER_IP=10.0.0.1 \
      ADMIN_PW=MyAdminPass123 \
      REPL_PW=ReplPass456 \
-     SSH_KEY=~/.ssh/key.pem \
+     bash install-symas-openldap-replica-all-in-one.sh
+
+# No-TLS mode
+sudo MASTER_IP=10.0.0.1 \
+     ADMIN_PW=MyAdminPass123 \
+     TLS_MODE=no \
      bash install-symas-openldap-replica-all-in-one.sh
 ```
 
@@ -145,7 +162,8 @@ Execution order:
 
 ```
 1 → 3 → 4 → 5 → 6 → 11 → 7 → 8.0 → 8 → 26 → 9 → 9.0 → 10 → 10.0
-→ 12 → 13 → 7(re-verify) → 16 → 17 → 27 → 18 → 19 → 20 → 24 → 21
+→ 12 → 13 → 7(re-verify) → 16 → 17 → 27 → 18 → 19 → 20
+→ (24-TLS → 21-hardening [with TLS])  or  (21-hardening [no TLS])   [controlled by TLS_MODE]
 → 22 → 23 → 25 → tests
 ```
 
@@ -167,10 +185,13 @@ Execution order:
 
 ```
 r1(install) → r2(configure syncrepl) → r3(start daemon)
-→ r4(fix env) → r5(TLS) → r6(fix ldapi ACL)
-→ r7(harden) → r8(tune) → r9(verify)
+→ r4(fix env)
+→ (r5-TLS → r6-fix ldapi → r7-harden)  or  (r6-fix ldapi → r7-harden[no TLS])  [controlled by TLS_MODE]
+→ r8(tune) → r9(verify)
 → tests(connections + readonly + sync)
 ```
+
+When `TLS_MODE=no`: r2 configures syncrepl without `starttls=yes`. r5 is skipped. r7 runs without TLS enforcement (anonymous bind still disabled).
 
 ---
 
@@ -201,8 +222,15 @@ ssh -i ~/.ssh/key.pem ec2-user@<MASTER_IP> \
 ### Run replica installer remotely (stream logs)
 
 ```bash
+# With TLS (default)
 ssh -i ~/.ssh/key.pem ec2-user@<REPLICA_IP> \
-  "sudo MASTER_IP=<MASTER_IP> ADMIN_PW=<password> SSH_KEY=~/.ssh/key.pem \
+  "sudo MASTER_IP=<MASTER_IP> ADMIN_PW=<password> \
+   bash /tmp/script/install-symas-openldap-replica-all-in-one.sh 2>&1" \
+  | tee replica-install-$(date +%Y%m%d).log
+
+# Without TLS
+ssh -i ~/.ssh/key.pem ec2-user@<REPLICA_IP> \
+  "sudo MASTER_IP=<MASTER_IP> ADMIN_PW=<password> TLS_MODE=no \
    bash /tmp/script/install-symas-openldap-replica-all-in-one.sh 2>&1" \
   | tee replica-install-$(date +%Y%m%d).log
 ```
@@ -312,14 +340,14 @@ All replica scripts live under `script/replica/`. Run via `install-symas-openlda
 | Script | Root | What it does |
 |--------|:----:|-------------|
 | `r1-install-symas-openldap-replica.sh` | yes | Installs `symas-openldap-clients` + `symas-openldap-servers` via Satellite repo. Same packages as master. |
-| `r2-configure-replica-instance.sh` | yes | Initialises `cn=config` with `SERVER_ID`, `olcSyncRepl` (provider=master, `refreshAndPersist`, StartTLS), `olcUpdateRef`. No `syncprov`. Requires `MASTER_IP`, `ADMIN_PW`, `REPL_PW`. |
+| `r2-configure-replica-instance.sh` | yes | Initialises `cn=config` with `SERVER_ID`, `olcSyncrepl` (provider=master, `refreshAndPersist`, conditional StartTLS via `TLS_MODE`), `olcUpdateRef`. No `syncprov`. Requires `MASTER_IP`, `ADMIN_PW`, `REPL_PW`. |
 | `r3-start-replica-daemon.sh` | yes | Enables + starts `symas-openldap-servers`, waits for `ldapi://` reachable. |
 | `r4-fix-replica-env.sh` | yes | Creates `/etc/profile.d/symas_env.sh`, creates `slapd` symlink. Mirrors master `5-fix_all_symas_warns.sh`. |
-| `r5-configure-replica-tls.sh` | yes | TLS setup. Mode 1 (`COPY_FROM_MASTER=1`): copies CA cert+key from master over SSH, signs new server cert for replica. Mode 0 (`COPY_FROM_MASTER=0`): generates standalone self-signed CA + cert. |
+| `r5-configure-replica-tls.sh` | yes | **Skipped when `TLS_MODE=no`.** TLS setup. Mode 1 (`COPY_FROM_MASTER=1`): copies CA cert+key from master via pre-staged files, signs new server cert for replica. Mode 0 (`COPY_FROM_MASTER=0`, default): generates standalone self-signed CA + cert. |
 | `r6-fix-replica-ldapi-acl.sh` | yes | Ensures SASL/EXTERNAL has `manage` on `cn=config`. Does NOT reset `olcRootPW` (data syncs from master). |
-| `r7-harden-replica.sh` | yes | Disables anon bind, requires TLS for simple binds, hardens fs permissions. Preserves `olcUpdateRef` (write redirect must stay). |
+| `r7-harden-replica.sh` | yes | Disables anon bind, requires TLS for simple binds (skipped if `TLS_MODE=no`), hardens fs permissions. Preserves `olcUpdateRef`. |
 | `r8-tune-replica.sh` | yes | `LimitNOFILE=524288` drop-in, `SLAPD_URLS`, restarts service. Same as master `22-tuning.sh`. |
-| `r9-verify-replica.sh` | yes | Full replica health check: service, ports, `olcSyncRepl` present, `olcUpdateRef` set, admin bind, data synced, `contextCSN` vs master, write rejection confirmed. |
+| `r9-verify-replica.sh` | yes | Full replica health check: service, ports, `olcSyncrepl` present, `olcUpdateRef` set, admin bind, data synced, `contextCSN` vs master, write rejection confirmed. |
 
 ### Usage — individual replica scripts over SSH
 
@@ -499,18 +527,25 @@ sudo MASTER_IP=<ip> ADMIN_PW=<pw> SSH_KEY=~/.ssh/key.pem \
 ## Full SSH Example — Master + Replica (EC2, RHEL 9)
 
 ```bash
-MASTER_IP=52.43.173.218
-REPLICA_IP=<replica-public-ip>
-KEY=~/.ssh/ldap-key.pem
+MASTER_IP=54.185.183.18       # public
+REPLICA_IP=54.191.26.211      # public
+MASTER_PRIV=10.50.1.10        # private (for syncrepl)
+KEY=terraform/openldap-master-replica/.local-ssh/openldap_master_replica
 ADMIN_PW=TheN1le1
 
 # --- MASTER ---
 # 1. Copy scripts
 scp -i $KEY -r ./script ec2-user@$MASTER_IP:/tmp/script
 
-# 2. Install master (stream logs)
+# 2. Install master with TLS
 ssh -i $KEY ec2-user@$MASTER_IP \
   "sudo bash /tmp/script/install-symas-openldap-all-in-one.sh 2>&1" \
+  | tee master-$(date +%Y%m%d).log
+
+# 2a. Install master without TLS
+ssh -i $KEY ec2-user@$MASTER_IP \
+  "sudo TLS_MODE=no ADMIN_PW=$ADMIN_PW \
+   bash /tmp/script/install-symas-openldap-all-in-one.sh 2>&1" \
   | tee master-$(date +%Y%m%d).log
 
 # 3. Run master integration tests
@@ -522,17 +557,28 @@ ssh -i $KEY ec2-user@$MASTER_IP \
 # 4. Copy scripts to replica
 scp -i $KEY -r ./script ec2-user@$REPLICA_IP:/tmp/script
 
-# 5. Copy SSH key to replica (needed for CA cert fetch from master)
-scp -i $KEY $KEY ec2-user@$REPLICA_IP:/tmp/ldap-key.pem
-
-# 6. Install replica (stream logs)
+# 5. Install replica with TLS (no SSH key copy needed)
 ssh -i $KEY ec2-user@$REPLICA_IP \
-  "sudo MASTER_IP=$MASTER_IP ADMIN_PW=$ADMIN_PW \
-       SSH_KEY=/tmp/ldap-key.pem \
+  "sudo MASTER_IP=$MASTER_PRIV ADMIN_PW=$ADMIN_PW \
    bash /tmp/script/install-symas-openldap-replica-all-in-one.sh 2>&1" \
   | tee replica-$(date +%Y%m%d).log
 
-# 7. Run connection tests on replica
+# 5a. Install replica without TLS
 ssh -i $KEY ec2-user@$REPLICA_IP \
-  "sudo LDAPTLS_REQCERT=never bash /tmp/script/test-openldap-connections.sh --no-color"
+  "sudo MASTER_IP=$MASTER_PRIV ADMIN_PW=$ADMIN_PW TLS_MODE=no \
+   bash /tmp/script/install-symas-openldap-replica-all-in-one.sh 2>&1" \
+  | tee replica-$(date +%Y%m%d).log
+
+# 6. Test replication — add entry on master, read from replica
+ldapadd -x -H ldap://$MASTER_IP:389 \
+  -D "cn=admin,dc=eab,dc=bank,dc=local" -w $ADMIN_PW <<EOF
+dn: cn=repltest,dc=eab,dc=bank,dc=local
+objectClass: organizationalRole
+cn: repltest
+EOF
+
+sleep 3
+ldapsearch -x -o ldif-wrap=no -H ldap://$REPLICA_IP:389 \
+  -D "cn=admin,dc=eab,dc=bank,dc=local" -w $ADMIN_PW \
+  -b "cn=repltest,dc=eab,dc=bank,dc=local" -s base dn
 ```

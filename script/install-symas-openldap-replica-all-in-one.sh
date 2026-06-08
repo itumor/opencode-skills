@@ -21,6 +21,7 @@
 #   STAGED_CA_CERT   - path to pre-staged CA cert (if COPY_FROM_MASTER=1)
 #   STAGED_CA_KEY    - path to pre-staged CA key  (if COPY_FROM_MASTER=1)
 #   LDAPTLS_REQCERT  - TLS verify mode for tests (default: never)
+#   TLS_MODE         - yes (default) or no — when 'no', skips TLS + TLS hardening
 #
 # Note: No SSH/SCP from replica to master. TLS is self-signed by default.
 #       To use master's CA, manually copy ca.crt+ca.key from master and set
@@ -65,6 +66,7 @@ export COPY_FROM_MASTER="${COPY_FROM_MASTER:-0}"
 export STAGED_CA_CERT="${STAGED_CA_CERT:-}"
 export STAGED_CA_KEY="${STAGED_CA_KEY:-}"
 export LDAPTLS_REQCERT="${LDAPTLS_REQCERT:-never}"
+export TLS_MODE="${TLS_MODE:-yes}"
 
 echo ""
 echo "============================================================"
@@ -74,7 +76,7 @@ echo "  Master IP:   ${MASTER_IP}"
 echo "  Base DN:     ${BASE_DN}"
 echo "  Server ID:   ${SERVER_ID}"
 echo "  Repl DN:     cn=replicator,${BASE_DN}"
-echo "  TLS mode:    $([ "$COPY_FROM_MASTER" = "1" ] && echo "copy CA from master" || echo "self-signed")"
+echo "  TLS mode:    $([ "$TLS_MODE" = "no" ] && echo "disabled (no-TLS)" || echo "$([ "$COPY_FROM_MASTER" = "1" ] && echo "copy CA from master" || echo "self-signed")")"
 echo "============================================================"
 echo ""
 
@@ -158,9 +160,17 @@ if ! command -v openssl >/dev/null 2>&1; then
   dnf -y install openssl >/dev/null 2>&1 || true
 fi
 
-run "r5-configure-replica-tls.sh"
-run "r6-fix-replica-ldapi-acl.sh"
-run "r7-harden-replica.sh"
+if [[ "$TLS_MODE" == "no" ]]; then
+  echo ""
+  echo "=== TLS_MODE=no: Skipping TLS cert configuration ==="
+  echo "=== Running hardening (TLS enforcement disabled) ==="
+  run "r6-fix-replica-ldapi-acl.sh"
+  DISALLOW_ANON_BIND=1 REQUIRE_TLS_SIMPLE_BINDS=0 bash "${REPLICA_DIR}/r7-harden-replica.sh"
+else
+  run "r5-configure-replica-tls.sh"
+  run "r6-fix-replica-ldapi-acl.sh"
+  run "r7-harden-replica.sh"
+fi
 run "r8-tune-replica.sh"
 run "r9-verify-replica.sh"
 
@@ -183,13 +193,20 @@ echo "  Replica installation complete"
 echo "  Master:   ${MASTER_IP}"
 echo "  Replica:  $(hostname -f 2>/dev/null || hostname)"
 echo "  Base DN:  ${BASE_DN}"
+echo "  TLS mode: $TLS_MODE"
 echo "============================================================"
 echo ""
 echo "Connect from CLI:"
-echo "  LDAPTLS_REQCERT=never ldapsearch -x -ZZ \\"
-echo "    -H ldap://$(hostname -I | awk '{print $1}') \\"
-echo "    -D 'cn=admin,${BASE_DN}' -w '\${ADMIN_PW}' \\"
-echo "    -b '${BASE_DN}' -s one '(objectClass=*)' dn"
+if [[ "$TLS_MODE" == "no" ]]; then
+  echo "  ldapsearch -x -H ldap://$(hostname -I | awk '{print $1}') \\"
+  echo "    -D 'cn=admin,${BASE_DN}' -w '\${ADMIN_PW}' \\"
+  echo "    -b '${BASE_DN}' -s one '(objectClass=*)' dn"
+else
+  echo "  LDAPTLS_REQCERT=never ldapsearch -x -ZZ \\"
+  echo "    -H ldap://$(hostname -I | awk '{print $1}') \\"
+  echo "    -D 'cn=admin,${BASE_DN}' -w '\${ADMIN_PW}' \\"
+  echo "    -b '${BASE_DN}' -s one '(objectClass=*)' dn"
+fi
 echo ""
 echo "  To re-run verification:"
 echo "  sudo MASTER_IP=${MASTER_IP} ADMIN_PW=\$ADMIN_PW bash replica/r9-verify-replica.sh"

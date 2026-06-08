@@ -29,11 +29,22 @@ nextgenopen = Symas OpenLDAP 2.6.13 on RHEL 9, master/replica. Satellite-managed
 
 ## AWS Lab (us-west-2)
 
+### Current: No-TLS Deployment (2026-06-08)
+
+Master: 54.185.183.18 / 10.50.1.10 (i-0693bef1c65ce8825)
+Replica: 54.191.26.211 / 10.50.2.10 (i-0dabec022a85f6ecd)
+VPC: 10.50.0.0/16, project: openldap-nontls
+SSH: `ssh -i terraform/openldap-master-replica/.local-ssh/openldap_master_replica ec2-user@<IP>`
+Admin: cn=admin,dc=eab,dc=bank,dc=local / TheN1le1
+Replicator: cn=replicator,dc=eab,dc=bank,dc=local / replpass
+Mode: No TLS (plain LDAP, TLS_MODE=no). Master: t3.medium, Replica: t3.medium.
+
+### Previous: TLS Lab (2026-05-25 — terminated)
+
 Master: 54.245.18.142 / 10.30.1.10 (i-04841898308d21989)
 Replica: 35.165.218.77 / 10.30.2.10 (i-0993dc2b08a5ed74f)
-SSH: `ssh -i terraform/openldap-master-replica/.local-ssh/openldap_master_replica ec2-user@<IP>`
 Admin: cn=admin,dc=cae,dc=local / admin
-Replicator: cn=replicator,dc=cae,dc=local / replpass
+Mode: Self-signed TLS
 
 ## Bank Deployment
 

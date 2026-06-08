@@ -14,6 +14,7 @@
 #   ADMIN_PW    - Admin password (must match master)
 #   REPL_PW     - Replication bind password (must match master cn=replicator)
 #   LDAP_PORT   - Master LDAP port (default: 389)
+#   TLS_MODE    - yes (default) or no — when 'no', syncrepl uses plain ldap (no starttls)
 #
 # Usage:
 #   sudo MASTER_IP=10.0.0.1 ADMIN_PW=secret REPL_PW=replpass bash r2-configure-replica-instance.sh
@@ -46,6 +47,7 @@ ADMIN_PW="${ADMIN_PW:?ADMIN_PW is required}"
 REPL_PW="${REPL_PW:-replpass}"
 REPL_DN="${REPL_DN:-cn=replicator,${BASE_DN}}"
 LDAP_PORT="${LDAP_PORT:-389}"
+TLS_MODE="${TLS_MODE:-yes}"
 
 SLAPD_D="/opt/symas/etc/openldap/slapd.d"
 SLAPD_CONF="/opt/symas/etc/openldap/slapd.conf"
@@ -80,7 +82,15 @@ schema_include() {
 }
 
 # Write slapd.conf with schema includes
-log "Writing slapd.conf with schema includes"
+# Build syncrepl section
+SYNCREPL_TLS_LINES=""
+SYNCREPL_TLS_COMMENT="# (TLS disabled — using plain LDAP)"
+if [[ "$TLS_MODE" != "no" ]]; then
+  SYNCREPL_TLS_LINES=$'  starttls=yes\n  tls_reqcert=never'
+  SYNCREPL_TLS_COMMENT=""
+fi
+
+log "Writing slapd.conf with schema includes (TLS_MODE=${TLS_MODE})"
 cat > "$SLAPD_CONF" << SLAPDEOF
 $(schema_include core)
 $(schema_include cosine)
@@ -114,10 +124,9 @@ syncrepl rid=101
   searchbase="${BASE_DN}"
   type=refreshAndPersist
   retry="5 5 300 +"
-  timeout=1
-  starttls=yes
-  tls_reqcert=never
+  timeout=1${SYNCREPL_TLS_LINES}
   interval=00:00:00:10
+${SYNCREPL_TLS_COMMENT}
 
 updateref ldap://${MASTER_IP}:${LDAP_PORT}
 

@@ -8,6 +8,8 @@ if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
   exit 1
 fi
 
+TLS_MODE="${TLS_MODE:-yes}"
+
 run() {
   local script_name="$1"
   local path="$SCRIPT_DIR/$script_name"
@@ -45,8 +47,17 @@ run "27-configure-mw-acl.sh"
 run "18-service-account-password-policy-never-expire.sh"
 run "19-create-user-using-mw-user.sh"
 run "20-migration.sh"
-run "24-configure-ssl-tls.sh"
-run "21-hardening.sh"
+
+if [[ "$TLS_MODE" == "yes" ]]; then
+  run "24-configure-ssl-tls.sh"
+  run "21-hardening.sh"
+else
+  echo
+  echo "=== TLS_MODE=no: Skipping TLS cert configuration ==="
+  echo "=== Running hardening (TLS enforcement disabled) ==="
+  REQUIRE_TLS_SIMPLE_BINDS=0 bash "$SCRIPT_DIR/21-hardening.sh"
+fi
+
 run "22-tuning.sh"
 run "23-ensure-installation-not-under-root.sh"
 run "25-configure-accesslog-audit.sh"

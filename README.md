@@ -250,6 +250,7 @@ The goal of the scripts is to make a Symas OpenLDAP (RHEL9) lab reproducible: in
 Secure transport defaults:
 - Listener mode defaults to `starttls_and_ldaps` (`389` for StartTLS, `636` for LDAPS).
 - TLS for simple binds is expected; plain simple bind on `389` is rejected when hardening is enabled.
+- **`TLS_MODE=no`** on the orchestrator scripts skips TLS cert generation and TLS hardening. Syncrepl uses plain `ldap://` instead of `starttls=yes`. Plain LDAP binds work on port 389.
 - `script/24-configure-ssl-tls.sh` cert modes:
   - `TLS_CERT_MODE=external_or_self_signed` (default)
   - `TLS_CERT_MODE=self_signed`
@@ -285,7 +286,8 @@ Secure transport defaults:
 | `script/23-ensure-installation-not-under-root.sh` | Verifies Symas install paths are not under `/root` | Avoids bad filesystem layout | Mostly a compliance/guardrail check |
 | `script/24-configure-ssl-tls.sh` | Configures TLS in `cn=config` + updates `ldap.conf`; supports external PEM or self-signed certs | Enables StartTLS/LDAPS correctly | Keeps serverID-safe listener defaults |
 | `script/25-configure-accesslog-audit.sh` | Configures `accesslog` module, DB, and overlay for audit logging | Adds write/read/session audit trails | Requires `cn=config` access |
-| `script/install-symas-openldap-all-in-one.sh` | Runs the full sequence (install through hardening + tests) | One-command lab bring-up | Applies TLS (`24`) before hardening (`21`) |
+| `script/install-symas-openldap-all-in-one.sh` | Runs the full sequence (install through hardening + tests) | One-command lab bring-up | Supports `TLS_MODE=yes` (default) or `TLS_MODE=no` |
+| `script/install-symas-openldap-replica-all-in-one.sh` | Runs full replica sequence (r1–r9 + tests) | One-command replica bring-up | Requires `MASTER_IP`, `ADMIN_PW`; supports `TLS_MODE=no` |
 | `script/Exampledb/exampledb.sh` | Customized Symas `exampledb.sh` (base DN/suffix/etc.) | Standardizes lab naming/passwords | Consumed by `3-install-example.sh` |
 | `script/audio-test.sh` | Plays an audible confirmation sound | Operator feedback / CI hooks | Used by agent workflow |
 
