@@ -206,15 +206,17 @@ else
 fi
 rm -f "$LDIF"
 
-# Update SLAPD_URLS
-if [[ -f "$SLAPD_DEFAULTS" ]]; then
-  if grep -q '^SLAPD_URLS=' "$SLAPD_DEFAULTS"; then
-    sed -i 's|^SLAPD_URLS=.*|SLAPD_URLS="ldap:/// ldaps:/// ldapi:///"|' "$SLAPD_DEFAULTS"
-  else
-    echo 'SLAPD_URLS="ldap:/// ldaps:/// ldapi:///"' >> "$SLAPD_DEFAULTS"
-  fi
-  log "SLAPD_URLS updated in ${SLAPD_DEFAULTS}"
+# Update SLAPD_URLS — ensure file exists and includes ldaps:///
+if [[ ! -f "$SLAPD_DEFAULTS" ]]; then
+  mkdir -p "$(dirname "$SLAPD_DEFAULTS")"
+  touch "$SLAPD_DEFAULTS"
 fi
+if grep -q '^SLAPD_URLS=' "$SLAPD_DEFAULTS"; then
+  sed -i 's|^SLAPD_URLS=.*|SLAPD_URLS="ldap:/// ldaps:/// ldapi:///"|' "$SLAPD_DEFAULTS"
+else
+  echo 'SLAPD_URLS="ldap:/// ldaps:/// ldapi:///"' >> "$SLAPD_DEFAULTS"
+fi
+log "SLAPD_URLS updated in ${SLAPD_DEFAULTS}"
 
 systemctl daemon-reload
 systemctl restart symas-openldap-servers 2>/dev/null || systemctl restart slapd 2>/dev/null || true

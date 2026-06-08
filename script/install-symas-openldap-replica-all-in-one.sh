@@ -137,6 +137,9 @@ bash "${SCRIPT_DIR_OUTER}/13-Create_custom_schema_attr.sh"
 # Without this, syncrepl fails with "objectClass: value #0 invalid per syntax"
 echo ""
 echo "=== Loading ppolicy module ==="
+# Ensure PATH is set for ldap tools
+export PATH="/opt/symas/bin:/opt/symas/sbin:${PATH:-/usr/bin}"
+[[ -f /etc/profile.d/symas_env.sh ]] && source /etc/profile.d/symas_env.sh 2>/dev/null || true
 ppolicy_loaded=$(ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -s sub "(olcModuleLoad=ppolicy.la)" dn 2>/dev/null | grep -c "cn=module" || true)
 if [[ "$ppolicy_loaded" -eq 0 ]]; then
   ldapmodify -Y EXTERNAL -H ldapi:/// <<'LDIFEOF'

@@ -124,50 +124,51 @@ update_defaults_urls() {
     serverid_url="$(awk '/^olcServerID:/ {for (i=1;i<=NF;i++) if ($i ~ /^ldap:\/\//) {print $i; exit}}' "${CONFIG_LDIF}" 2>/dev/null || true)"
   fi
 
-  if [[ -f "$defaults_file" ]]; then
-    # Preserve any existing ldapi:// socket URL (it may be an encoded-path ldapi://%2F... form).
-    ldapi_urls="$(awk -F= '/^SLAPD_URLS=/ {gsub(/"/,"",$2); print $2}' "$defaults_file" 2>/dev/null | tr ' ' '\n' | awk '/^ldapi:\/\// {print}' | xargs || true)"
+  if [[ ! -f "$defaults_file" ]]; then
+    mkdir -p "$(dirname "$defaults_file")"
+    touch "$defaults_file"
+  fi
 
-    # Preserve explicit ldap:// URL(s) if present; otherwise fall back to olcServerID URL if available.
-    ldap_urls="$(awk -F= '/^SLAPD_URLS=/ {gsub(/"/,"",$2); print $2}' "$defaults_file" 2>/dev/null | tr ' ' '\n' | awk '/^ldap:\/\// {print}' | xargs || true)"
-    if [[ -z "$ldap_urls" && -n "$serverid_url" ]]; then
-      ldap_urls="$serverid_url"
-    fi
-    if [[ -z "$ldap_urls" ]]; then
-      ldap_urls="ldap:///"
-    fi
+  # Preserve any existing ldapi:// socket URL (it may be an encoded-path ldapi://%2F... form).
+  ldapi_urls="$(awk -F= '/^SLAPD_URLS=/ {gsub(/"/,"",$2); print $2}' "$defaults_file" 2>/dev/null | tr ' ' '\n' | awk '/^ldapi:\/\// {print}' | xargs || true)"
 
-    # Derive LDAPS URL(s) from the LDAP URL(s).
-    ldaps_urls=""
-    for u in $ldap_urls; do
-      if [[ "$u" == "ldap:///" ]]; then
-        ldaps_urls="${ldaps_urls} ldaps:///"
-      else
-        # Keep host the same as the ldap:// URL and swap scheme+port.
-        ldaps_urls="${ldaps_urls} $(to_ldaps_url "$u")"
-      fi
-    done
-    ldaps_urls="$(echo "$ldaps_urls" | xargs)"
+  # Preserve explicit ldap:// URL(s) if present; otherwise fall back to olcServerID URL if available.
+  ldap_urls="$(awk -F= '/^SLAPD_URLS=/ {gsub(/"/,"",$2); print $2}' "$defaults_file" 2>/dev/null | tr ' ' '\n' | awk '/^ldap:\/\// {print}' | xargs || true)"
+  if [[ -z "$ldap_urls" && -n "$serverid_url" ]]; then
+    ldap_urls="$serverid_url"
+  fi
+  if [[ -z "$ldap_urls" ]]; then
+    ldap_urls="ldap:///"
+  fi
 
-    # If serverID is explicitly ldap://... and caller requested ldaps_only, refuse because it bricks slapd.
-    if [[ "$listener_mode" == "ldaps_only" && -n "$serverid_url" ]]; then
-      echo "[FATAL] LDAP_LISTENER_MODE=ldaps_only is incompatible with olcServerID URL ${serverid_url}. Use starttls_and_ldaps." >&2
-      exit 1
-    fi
-
-    if [[ "$listener_mode" == "ldaps_only" ]]; then
-      urls="$(echo "${ldaps_urls} ${ldapi_urls:-ldapi:///}" | xargs)"
+  # Derive LDAPS URL(s) from the LDAP URL(s).
+  ldaps_urls=""
+  for u in $ldap_urls; do
+    if [[ "$u" == "ldap:///" ]]; then
+      ldaps_urls="${ldaps_urls} ldaps:///"
     else
-      urls="$(echo "${ldap_urls} ${ldaps_urls} ${ldapi_urls:-ldapi:///}" | xargs)"
+      # Keep host the same as the ldap:// URL and swap scheme+port.
+      ldaps_urls="${ldaps_urls} $(to_ldaps_url "$u")"
     fi
+  done
+  ldaps_urls="$(echo "$ldaps_urls" | xargs)"
 
-    if grep -q '^SLAPD_URLS=' "$defaults_file"; then
-      sed -i "s|^SLAPD_URLS=.*|SLAPD_URLS=\"${urls}\"|" "$defaults_file"
-    else
-      echo "SLAPD_URLS=\"${urls}\"" >>"$defaults_file"
-    fi
+  # If serverID is explicitly ldap://... and caller requested ldaps_only, refuse because it bricks slapd.
+  if [[ "$listener_mode" == "ldaps_only" && -n "$serverid_url" ]]; then
+    echo "[FATAL] LDAP_LISTENER_MODE=ldaps_only is incompatible with olcServerID URL ${serverid_url}. Use starttls_and_ldaps." >&2
+    exit 1
+  fi
+
+  if [[ "$listener_mode" == "ldaps_only" ]]; then
+    urls="$(echo "${ldaps_urls} ${ldapi_urls:-ldapi:///}" | xargs)"
   else
-    echo "[WARN] $defaults_file not found; skipping SLAPD_URLS update"
+    urls="$(echo "${ldap_urls} ${ldaps_urls} ${ldapi_urls:-ldapi:///}" | xargs)"
+  fi
+
+  if grep -q '^SLAPD_URLS=' "$defaults_file"; then
+    sed -i "s|^SLAPD_URLS=.*|SLAPD_URLS=\"${urls}\"|" "$defaults_file"
+  else
+    echo "SLAPD_URLS=\"${urls}\"" >>"$defaults_file"
   fi
 }
 
