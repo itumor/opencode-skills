@@ -31,7 +31,7 @@ SYNC_WAIT="${SYNC_WAIT:-10}"
 TLS_MODE="${TLS_MODE:-yes}"
 
 TEST_UID="repl-sync-test-$(date +%Y%m%d%H%M%S)"
-TEST_DN="uid=${TEST_UID},ou=people,${BASE_DN}"
+TEST_DN="uid=${TEST_UID},ou=Users,${BASE_DN}"
 
 # Build LDAP args based on TLS mode
 if [[ "$TLS_MODE" == "no" ]]; then
@@ -89,7 +89,7 @@ sleep "$SYNC_WAIT"
 echo "[INFO] Searching for test user on replica (localhost)"
 result=$(LDAPTLS_REQCERT=never ldapsearch "${LOCAL_LDAP_ARGS[@]}" \
   -D "$ADMIN_DN" -w "$ADMIN_PW" \
-  -b "ou=people,${BASE_DN}" \
+  -b "ou=Users,${BASE_DN}" \
   "(uid=${TEST_UID})" dn 2>/dev/null | grep "^dn:" || true)
 
 if [[ -n "$result" ]]; then
