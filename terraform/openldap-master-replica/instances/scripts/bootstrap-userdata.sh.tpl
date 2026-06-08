@@ -21,6 +21,22 @@ log() { printf '[openldap-bootstrap] %s\n' "$*"; }
 
 log "Bootstrapping OpenLDAP $ROLE (SERVER_ID=$SERVER_ID)"
 
+# --- SSM Agent first (needed for CI SSM commands) ---
+log "installing SSM Agent"
+dnf install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm >/dev/null 2>&1 || true
+systemctl enable amazon-ssm-agent 2>/dev/null || true
+systemctl start amazon-ssm-agent 2>/dev/null || true
+
+# --- AWS CLI ---
+log "installing AWS CLI v2"
+dnf -y install unzip >/dev/null 2>&1 || true
+if ! command -v aws >/dev/null 2>&1; then
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+  unzip -qo /tmp/awscliv2.zip -d /tmp/
+  /tmp/aws/install >/dev/null 2>&1 || true
+  rm -rf /tmp/aws /tmp/awscliv2.zip
+fi
+
 # Swap for small instances
 if ! swapon --show | awk '{print $1}' | grep -q '^/swapfile$'; then
   log "creating 2G swapfile"
@@ -41,23 +57,6 @@ dnf -y install curl dnf-plugins-core >/dev/null 2>&1 || true
 curl -fsSL https://repo.symas.com/configs/SOLDAP/rhel9/release26.repo -o /etc/yum.repos.d/soldap-release26.repo
 dnf clean all >/dev/null 2>&1 || true
 dnf -y install symas-openldap-servers symas-openldap-clients
-
-# Install AWS CLI v2 (needed for SSM commands to download scripts from S3)
-log "installing AWS CLI v2"
-if ! command -v aws >/dev/null 2>&1; then
-  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
-  unzip -qo /tmp/awscliv2.zip -d /tmp/
-  /tmp/aws/install >/dev/null 2>&1 || true
-  rm -rf /tmp/aws /tmp/awscliv2.zip
-fi
-
-# Install SSM Agent (needed for CI test jobs)
-log "installing SSM Agent"
-if ! systemctl is-active --quiet amazon-ssm-agent 2>/dev/null; then
-  dnf install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm >/dev/null 2>&1 || true
-  systemctl enable amazon-ssm-agent 2>/dev/null || true
-  systemctl start amazon-ssm-agent 2>/dev/null || true
-fi
 
 # Generate slapd.conf then convert to cn=config via slaptest.
 # The direct cn=config LDIF path (slapadd -n 0) fails on newer Symas

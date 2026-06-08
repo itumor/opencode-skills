@@ -6,7 +6,7 @@ set -euo pipefail
 INSTANCE_ID="${1:?instance ID required}"
 
 echo "Waiting for SSM agent on $INSTANCE_ID..."
-for i in $(seq 1 30); do
+for i in $(seq 1 90); do
   status=$(aws ssm describe-instance-information \
     --filters "Key=InstanceIds,Values=$INSTANCE_ID" \
     --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null) || true
@@ -14,8 +14,8 @@ for i in $(seq 1 30); do
     echo "SSM online (attempt $i)"
     exit 0
   fi
-  echo "  attempt $i/30, waiting 10s..."
+  echo "  attempt $i/90, waiting 10s..."
   sleep 10
 done
-echo "SSM agent did not come online within 5 minutes"
+echo "SSM agent did not come online within 15 minutes"
 exit 1
