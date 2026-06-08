@@ -2,23 +2,16 @@
 # r9-verify-replica.sh
 #
 # Verifies the replica is healthy and syncing from master.
-# Checks:
-#   1. Service active
-#   2. Ports 389/636 listening
-#   3. ldapi EXTERNAL access
-#   4. Replication config present (olcSyncRepl)
-#   5. olcUpdateRef set (write redirect to master)
-#   6. Sync status (contextCSN matches master or lag is acceptable)
-#   7. Admin bind via StartTLS
-#   8. Base DN readable (data synced)
-#   9. Test user write rejected (read-only enforcement)
+# TLS-mode-aware: adapts checks to TLS_MODE (yes=StartTLS/LDAPS, no=plain LDAP).
 #
 # Required env:
 #   MASTER_IP   - master hostname/IP
 #   ADMIN_PW    - admin password
 #   REPL_PW     - replication bind password
 #
-# Usage: sudo MASTER_IP=10.0.0.1 ADMIN_PW=secret bash r9-verify-replica.sh
+# Optional: TLS_MODE=yes|no (default yes)
+#
+# Usage: sudo MASTER_IP=10.0.0.1 ADMIN_PW=secret TLS_MODE=no bash r9-verify-replica.sh
 set -uo pipefail
 
 ok()   { echo "[ OK ] $*"; PASS=$((PASS+1)); }
@@ -45,12 +38,23 @@ ADMIN_PW="${ADMIN_PW:-}"
 REPL_DN="${REPL_DN:-cn=replicator,${BASE_DN}}"
 REPL_PW="${REPL_PW:-replpass}"
 LDAPI_URI="ldapi:///"
+TLS_MODE="${TLS_MODE:-yes}"
+
+# Build LDAP search args based on TLS mode
+if [[ "$TLS_MODE" == "no" ]]; then
+  LDAP_ARGS=( -x -H ldap://localhost )
+  MASTER_ARGS=( -x -H "ldap://${MASTER_IP}" )
+else
+  LDAP_ARGS=( -x -ZZ -H ldap://localhost )
+  MASTER_ARGS=( -x -ZZ -H "ldap://${MASTER_IP}" )
+fi
 
 echo ""
 echo "============================================================"
 echo "  Replica Verification"
 echo "  BASE_DN: ${BASE_DN}"
 echo "  MASTER:  ${MASTER_IP:-<not set>}"
+echo "  TLS mode: ${TLS_MODE}"
 echo "============================================================"
 
 # 1. Service
@@ -74,13 +78,22 @@ fi
 # 2. Ports
 echo ""
 echo "--- Ports ---"
-for port in 389 636; do
+for port in 389; do
   if bash -c "echo >/dev/tcp/localhost/${port}" 2>/dev/null; then
     ok "Port ${port} listening"
   else
     bad "Port ${port} not reachable"
   fi
 done
+if [[ "$TLS_MODE" != "no" ]]; then
+  if bash -c "echo >/dev/tcp/localhost/636" 2>/dev/null; then
+    ok "Port 636 listening (LDAPS)"
+  else
+    bad "Port 636 not reachable"
+  fi
+else
+  ok "Port 636 check skipped (TLS_MODE=no)"
+fi
 
 # 3. ldapi
 echo ""
@@ -92,7 +105,7 @@ if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
     bad "ldapi SASL EXTERNAL failed"
   fi
 else
-  warn "Not root — skipping ldapi EXTERNAL checks"
+  warn "Not root - skipping ldapi EXTERNAL checks"
 fi
 
 # 4. Replication config
@@ -114,51 +127,55 @@ if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
     ok "olcUpdateRef set (writes redirect to master)"
     info "$updateref"
   else
-    bad "olcUpdateRef not set — replica may accept writes locally"
+    bad "olcUpdateRef not set - replica may accept writes locally"
   fi
 fi
 
 # 5. Admin bind
 echo ""
 echo "--- Admin Bind ---"
+bind_label="$([[ "$TLS_MODE" == "no" ]] && echo "plain LDAP" || echo "StartTLS")"
 if [[ -n "$ADMIN_PW" ]]; then
-  if LDAPTLS_REQCERT=never ldapwhoami -x -ZZ \
-      -H ldap://localhost -D "$ADMIN_DN" -w "$ADMIN_PW" >/dev/null 2>&1; then
-    ok "Admin bind via StartTLS"
+  if LDAPTLS_REQCERT=never ldapwhoami "${LDAP_ARGS[@]}" \
+      -D "$ADMIN_DN" -w "$ADMIN_PW" >/dev/null 2>&1; then
+    ok "Admin bind via ${bind_label}"
   else
-    bad "Admin bind via StartTLS failed"
+    bad "Admin bind via ${bind_label} failed"
+    if [[ "$TLS_MODE" == "no" ]]; then
+      warn "Try plain LDAP: ldapwhoami -x -H ldap://localhost -D '$ADMIN_DN' -w <pw>"
+    fi
   fi
 else
-  warn "ADMIN_PW not set — skipping admin bind"
+  warn "ADMIN_PW not set - skipping admin bind"
 fi
 
 # 6. Base DN readable (data synced)
 echo ""
 echo "--- Data Sync ---"
 if [[ -n "$ADMIN_PW" ]]; then
-  result=$(LDAPTLS_REQCERT=never ldapsearch -x -ZZ \
-    -H ldap://localhost -D "$ADMIN_DN" -w "$ADMIN_PW" \
+  result=$(LDAPTLS_REQCERT=never ldapsearch "${LDAP_ARGS[@]}" \
+    -D "$ADMIN_DN" -w "$ADMIN_PW" \
     -b "$BASE_DN" -s one -LLL dn 2>/dev/null | grep "^dn:" || true)
   if [[ -n "$result" ]]; then
     ou_count=$(echo "$result" | wc -l)
-    ok "Base DN readable — ${ou_count} child entries found (data synced)"
+    ok "Base DN readable - ${ou_count} child entries found (data synced)"
   else
-    warn "Base DN readable but no children found — sync may still be in progress"
+    warn "Base DN readable but no children found - sync may still be in progress"
   fi
 
   # Check contextCSN vs master
   if [[ -n "$MASTER_IP" ]]; then
-    replica_csn=$(LDAPTLS_REQCERT=never ldapsearch -x -ZZ \
-      -H ldap://localhost -D "$ADMIN_DN" -w "$ADMIN_PW" \
+    replica_csn=$(LDAPTLS_REQCERT=never ldapsearch "${LDAP_ARGS[@]}" \
+      -D "$ADMIN_DN" -w "$ADMIN_PW" \
       -b "$BASE_DN" -s base -LLL contextCSN 2>/dev/null | awk '/^contextCSN:/{print $2; exit}' || true)
-    master_csn=$(LDAPTLS_REQCERT=never ldapsearch -x -ZZ \
-      -H "ldap://${MASTER_IP}" -D "$ADMIN_DN" -w "$ADMIN_PW" \
+    master_csn=$(LDAPTLS_REQCERT=never ldapsearch "${MASTER_ARGS[@]}" \
+      -D "$ADMIN_DN" -w "$ADMIN_PW" \
       -b "$BASE_DN" -s base -LLL contextCSN 2>/dev/null | awk '/^contextCSN:/{print $2; exit}' || true)
     if [[ -n "$replica_csn" && -n "$master_csn" ]]; then
       if [[ "$replica_csn" == "$master_csn" ]]; then
-        ok "contextCSN matches master — fully in sync"
+        ok "contextCSN matches master - fully in sync"
       else
-        warn "contextCSN differs from master — replica may be lagging"
+        warn "contextCSN differs from master - replica may be lagging"
         info "  Replica CSN: ${replica_csn}"
         info "  Master  CSN: ${master_csn}"
       fi
@@ -166,7 +183,7 @@ if [[ -n "$ADMIN_PW" ]]; then
       warn "Could not compare contextCSN (master unreachable or no data yet)"
     fi
   else
-    warn "MASTER_IP not set — skipping contextCSN comparison"
+    warn "MASTER_IP not set - skipping contextCSN comparison"
   fi
 fi
 
@@ -184,8 +201,8 @@ uid: ${tmp_uid}
 cn: Write Test
 sn: WriteTest
 LDIF
-  write_out=$(LDAPTLS_REQCERT=never ldapadd -x -ZZ \
-    -H ldap://localhost -D "$ADMIN_DN" -w "$ADMIN_PW" \
+  write_out=$(LDAPTLS_REQCERT=never ldapadd "${LDAP_ARGS[@]}" \
+    -D "$ADMIN_DN" -w "$ADMIN_PW" \
     -f "$tmp_ldif" 2>&1) && write_rc=0 || write_rc=$?
   rm -f "$tmp_ldif"
   if [[ $write_rc -ne 0 ]]; then
@@ -195,10 +212,9 @@ LDIF
       ok "Write rejected (rc=${write_rc})"
     fi
   else
-    bad "Write succeeded on replica — olcUpdateRef or read-only mode not enforced"
-    # Cleanup if accidentally created
-    LDAPTLS_REQCERT=never ldapdelete -x -ZZ \
-      -H ldap://localhost -D "$ADMIN_DN" -w "$ADMIN_PW" "$tmp_dn" >/dev/null 2>&1 || true
+    bad "Write succeeded on replica - olcUpdateRef or read-only mode not enforced"
+    LDAPTLS_REQCERT=never ldapdelete "${LDAP_ARGS[@]}" \
+      -D "$ADMIN_DN" -w "$ADMIN_PW" "$tmp_dn" >/dev/null 2>&1 || true
   fi
 fi
 

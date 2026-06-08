@@ -2,11 +2,9 @@
 # test/test_replica_readonly.sh
 #
 # Verifies replica correctly rejects or refers writes back to master.
-# A write attempt on the replica should return:
-#   - referral (ldap_modify: Referral) pointing to master, OR
-#   - unwillingToPerform / read-only error
+# TLS-mode-aware: uses plain LDAP or StartTLS based on TLS_MODE.
 #
-# Usage: sudo ADMIN_PW=secret bash test_replica_readonly.sh
+# Usage: sudo ADMIN_PW=secret TLS_MODE=yes bash test_replica_readonly.sh
 set -uo pipefail
 
 export LDAPTLS_REQCERT="${LDAPTLS_REQCERT:-never}"
@@ -21,13 +19,21 @@ ensure_symas_env
 BASE_DN="${BASE_DN:-dc=eab,dc=bank,dc=local}"
 ADMIN_DN="${ADMIN_DN:-cn=admin,${BASE_DN}}"
 ADMIN_PW="${ADMIN_PW:?ADMIN_PW is required}"
+TLS_MODE="${TLS_MODE:-yes}"
 
 TEST_UID="repl-ro-test-$(date +%Y%m%d%H%M%S)"
 TEST_DN="uid=${TEST_UID},ou=Users,${BASE_DN}"
 
+if [[ "$TLS_MODE" == "no" ]]; then
+  LDAP_ARGS=( -x -H ldap://localhost )
+else
+  LDAP_ARGS=( -x -ZZ -H ldap://localhost )
+fi
+
 echo "======================================"
 echo "Test: Replica Read-Only Enforcement"
 echo "  Replica:  localhost"
+echo "  TLS mode: ${TLS_MODE}"
 echo "  BASE_DN:  ${BASE_DN}"
 echo "======================================"
 
@@ -45,8 +51,7 @@ cn: RO Test
 sn: ROTest
 LDIF
 
-write_out=$(LDAPTLS_REQCERT=never ldapadd -x -ZZ \
-  -H ldap://localhost \
+write_out=$(LDAPTLS_REQCERT=never ldapadd "${LDAP_ARGS[@]}" \
   -D "$ADMIN_DN" -w "$ADMIN_PW" \
   -f "$tmp_ldif" 2>&1) && write_rc=0 || write_rc=$?
 rm -f "$tmp_ldif"
@@ -60,15 +65,13 @@ if [[ $write_rc -ne 0 ]]; then
     pass "Write rejected on replica (rc=${write_rc})"
   fi
 else
-  fail "Write succeeded on replica — olcUpdateRef not configured or syncrepl not active"
-  # Cleanup if write accidentally went through
-  LDAPTLS_REQCERT=never ldapdelete -x -ZZ \
-    -H ldap://localhost -D "$ADMIN_DN" -w "$ADMIN_PW" "$TEST_DN" >/dev/null 2>&1 || true
+  fail "Write succeeded on replica - olcUpdateRef not configured or syncrepl not active"
+  LDAPTLS_REQCERT=never ldapdelete "${LDAP_ARGS[@]}" \
+    -D "$ADMIN_DN" -w "$ADMIN_PW" "$TEST_DN" >/dev/null 2>&1 || true
 fi
 
 # Attempt modify on replica
-mod_out=$(LDAPTLS_REQCERT=never ldapmodify -x -ZZ \
-  -H ldap://localhost \
+mod_out=$(LDAPTLS_REQCERT=never ldapmodify "${LDAP_ARGS[@]}" \
   -D "$ADMIN_DN" -w "$ADMIN_PW" 2>&1 <<LDIF || true
 dn: ${BASE_DN}
 changetype: modify

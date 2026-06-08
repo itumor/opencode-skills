@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Ensure Symas tools are on PATH so ldapadd is found.
 if [[ ":${PATH}:" != *":/opt/symas/bin:"* ]]; then
 	PATH="/opt/symas/bin:${PATH}"
 fi
@@ -14,13 +13,26 @@ if [[ -z "$LDAPADD" ]]; then
 	exit 1
 fi
 
-#add the overlay to the database
-cat > /tmp/pw_default.ldif << 'EOF'
-dn: olcOverlay={0}ppolicy,olcDatabase={1}mdb,cn=config
+BASE_DN="${BASE_DN:-dc=eab,dc=bank,dc=local}"
+
+# Dynamically find the ppolicy overlay DN (index may vary if syncprov loaded first)
+ppolicy_dn=$(ldapsearch -Y EXTERNAL -H ldapi:/// \
+  -b cn=config -s sub "(objectClass=olcPPolicyConfig)" dn 2>/dev/null \
+  | awk '/^dn:/{print $2; exit}')
+
+if [[ -z "$ppolicy_dn" ]]; then
+  echo "[FATAL] ppolicy overlay not found in cn=config — run 9.0-password_policy_load_module.sh first"
+  exit 1
+fi
+
+echo "[INFO] Setting pwdPolicyDefault on ${ppolicy_dn}"
+
+cat > /tmp/pw_default.ldif <<EOF
+dn: ${ppolicy_dn}
 changetype: modify
 add: olcPPolicyDefault
-olcPPolicyDefault: cn=default,ou=Policies,dc=eab,dc=bank,dc=local
+olcPPolicyDefault: cn=default,ou=Policies,${BASE_DN}
 EOF
 
 ldapmodify -Y EXTERNAL -H ldapi:/// -f /tmp/pw_default.ldif
-#"$LDAPADD" -x -D "cn=config" -W -H ldap:/// -f /tmp/pw_load_module_db.ldif
+rm -f /tmp/pw_default.ldif
