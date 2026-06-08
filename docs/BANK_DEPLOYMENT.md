@@ -2,11 +2,11 @@
 
 ## Node IPs
 
-| Role | IP |
-|------|-----|
-| **Master** | `172.23.11.236` |
-| **Replica** | `172.23.11.237` |
-| **Jump Station** | `172.23.10.32` |
+| Role | Internal IP | Public IP | Hostname |
+|------|-------------|-----------|----------|
+| **Master** | `172.23.11.236` | `52.43.173.218` | `ciamuapplds01` |
+| **Replica** | `172.23.11.237` | `35.91.98.69` | — |
+| **Jump Station** | `172.23.10.32` | — | — |
 
 > Contact: Salama Hamdy
 
@@ -30,7 +30,7 @@ All nodes reached through the jump station. No direct SSH to master or replica.
 | SSH user | `root` |
 | LDAP Base DN | `dc=eab,dc=bank,dc=local` |
 | LDAP Admin DN | `cn=admin,dc=eab,dc=bank,dc=local` |
-| Admin password | `admin` |
+| Admin password | `TheN1le1` |
 | Replication password | `replpass` |
 
 ---
@@ -49,24 +49,24 @@ ssh root@172.23.11.236 'systemctl is-active symas-openldap-servers'
 ```bash
 # Check
 ssh root@172.23.11.236 \
-  '/opt/symas/bin/ldapsearch -LLL -x -H ldap://localhost:389 \
-   -D "cn=admin,dc=eab,dc=bank,dc=local" -w admin \
-   -b "dc=eab,dc=bank,dc=local" "(cn=replicator)" dn'
+  "LDAPTLS_REQCERT=never /opt/symas/bin/ldapsearch -LLL -x -ZZ -H ldap://localhost:389 \
+   -D 'cn=admin,dc=eab,dc=bank,dc=local' -w TheN1le1 \
+   -b 'dc=eab,dc=bank,dc=local' '(cn=replicator)' dn"
 # Expected: dn: cn=replicator,dc=eab,dc=bank,dc=local
 
 # If NOT found — create it (run on master):
-ssh root@172.23.11.236 '
-  REPL_HASH=$(/opt/symas/bin/slappasswd -s replpass)
-  /opt/symas/bin/ldapadd -x -H ldap://localhost:389 \
-   -D "cn=admin,dc=eab,dc=bank,dc=local" -w admin <<LDIF
+# NOTE: slappasswd may be missing. Use pre-generated SSHA hash instead.
+ssh root@172.23.11.236 "
+  LDAPTLS_REQCERT=never /opt/symas/bin/ldapadd -x -ZZ -H ldap://localhost:389 \
+   -D 'cn=admin,dc=eab,dc=bank,dc=local' -w TheN1le1 <<'LDIF'
 dn: cn=replicator,dc=eab,dc=bank,dc=local
 objectClass: simpleSecurityObject
 objectClass: organizationalRole
 cn: replicator
-userPassword: $REPL_HASH
+userPassword: {SSHA}vDJL5DOYxkOOv62uR/0boOhJItyq51qwdcORIA==
 description: Replication bind user
 LDIF
-'
+"
 ```
 
 ### 3. Port 389 reachable from replica to master
@@ -120,7 +120,7 @@ Replica generates its own CA + server certificate. No master dependency.
 cd /opt/scripts
 
 MASTER_IP=172.23.11.236 \
-ADMIN_PW=admin \
+ADMIN_PW=TheN1le1 \
 REPL_PW=replpass \
 BASE_DN=dc=eab,dc=bank,dc=local \
 LDAPTLS_REQCERT=never \
@@ -169,7 +169,7 @@ ls -la /tmp/ca.crt /tmp/ca.key    # verify files exist
 cd /opt/scripts
 
 MASTER_IP=172.23.11.236 \
-ADMIN_PW=admin \
+ADMIN_PW=TheN1le1 \
 REPL_PW=replpass \
 BASE_DN=dc=eab,dc=bank,dc=local \
 COPY_FROM_MASTER=1 \
@@ -189,22 +189,25 @@ bash install-symas-openldap-replica-all-in-one.sh
 ## Verify Replica
 
 ```bash
+# Source environment first
+source /etc/profile.d/symas_env.sh
+
 # Admin bind
 sudo LDAPTLS_REQCERT=never /opt/symas/bin/ldapwhoami -x -ZZ \
   -H ldap://localhost:389 \
-  -D 'cn=admin,dc=eab,dc=bank,dc=local' -w admin
+  -D 'cn=admin,dc=eab,dc=bank,dc=local' -w TheN1le1
 # Expected: dn:cn=admin,dc=eab,dc=bank,dc=local
 
 # List entries (must match master)
 sudo LDAPTLS_REQCERT=never /opt/symas/bin/ldapsearch -LLL -x -ZZ \
   -H ldap://localhost:389 \
-  -D 'cn=admin,dc=eab,dc=bank,dc=local' -w admin \
+  -D 'cn=admin,dc=eab,dc=bank,dc=local' -w TheN1le1 \
   -b 'dc=eab,dc=bank,dc=local' -s one dn
 
 # Write rejected (read-only enforcement)
 sudo LDAPTLS_REQCERT=never /opt/symas/bin/ldapadd -x -ZZ \
   -H ldap://localhost:389 \
-  -D 'cn=admin,dc=eab,dc=bank,dc=local' -w admin <<LDIF
+  -D 'cn=admin,dc=eab,dc=bank,dc=local' -w TheN1le1 <<LDIF
 dn: cn=test-write,dc=eab,dc=bank,dc=local
 objectClass: top
 objectClass: organizationalRole
@@ -213,16 +216,16 @@ LDIF
 # Expected: ldap_add: Referral (10) → ldap://172.23.11.236:389
 
 # Full test suite
-sudo MASTER_IP=172.23.11.236 ADMIN_PW=admin REPL_PW=replpass LDAPTLS_REQCERT=never \
+sudo MASTER_IP=172.23.11.236 ADMIN_PW=TheN1le1 REPL_PW=replpass LDAPTLS_REQCERT=never \
   bash /opt/scripts/replica/r9-verify-replica.sh
 
-sudo ADMIN_PW=admin REPL_PW=replpass LDAPTLS_REQCERT=never \
+sudo ADMIN_PW=TheN1le1 REPL_PW=replpass LDAPTLS_REQCERT=never \
   bash /opt/scripts/replica/test/test_replica_connections.sh
 
-sudo ADMIN_PW=admin LDAPTLS_REQCERT=never \
+sudo ADMIN_PW=TheN1le1 LDAPTLS_REQCERT=never \
   bash /opt/scripts/replica/test/test_replica_readonly.sh
 
-sudo MASTER_IP=172.23.11.236 ADMIN_PW=admin LDAPTLS_REQCERT=never \
+sudo MASTER_IP=172.23.11.236 ADMIN_PW=TheN1le1 LDAPTLS_REQCERT=never \
   bash /opt/scripts/replica/test/test_replica_sync.sh
 ```
 
@@ -245,14 +248,33 @@ sudo MASTER_IP=172.23.11.236 ADMIN_PW=admin LDAPTLS_REQCERT=never \
 # Check service
 sudo systemctl status symas-openldap-servers
 
+# View logs
+sudo journalctl -u slapd --no-pager | tail -100
+sudo journalctl -u symas-openldap-servers --no-pager | tail -100
+sudo journalctl -u slapd -f  # follow live
+
+# Syslog fallback
+sudo tail -100 /var/log/messages | grep -i slapd
+
+# Find exact service name
+systemctl list-units --type=service | grep -i ldap
+
 # Check replication config
 sudo /opt/symas/bin/ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config \
-  '(objectClass=olcMdbConfig)' olcSyncRepl olcUpdateRef
+  '(objectClass=olcMdbConfig)' olcSyncrepl olcUpdateRef
 
 # Check sync logs
 sudo journalctl -u symas-openldap-servers -n 50 --no-pager | grep -i sync
 
 # Test connectivity from replica to master
-sudo /opt/symas/bin/ldapwhoami -x -H ldap://172.23.11.236:389 \
+sudo LDAPTLS_REQCERT=never /opt/symas/bin/ldapwhoami -x -ZZ \
+  -H ldap://172.23.11.236:389 \
   -D 'cn=replicator,dc=eab,dc=bank,dc=local' -w replpass
 ```
+
+## Gotchas
+
+- **`slappasswd` may be missing**: On bank server, `/opt/symas/bin/slappasswd` may not exist. Use a pre-generated SSHA hash inline instead. Generate locally: `python3 -c "import hashlib,base64,os; s=os.urandom(8); h=hashlib.sha1(b'replpass'); h.update(s); print('{SSHA}'+base64.b64encode(h.digest()+s).decode())"`.
+- **TLS enforced**: All password binds need `LDAPTLS_REQCERT=never -ZZ` due to self-signed certs and `olcSecurity: simple_bind=128`.
+- **`source /etc/profile.d/symas_env.sh`** before running `ldapsearch`/`ldapadd` locally, or use `/opt/symas/bin/ldapsearch` full path.
+- **`olcSyncrepl`** (lowercase `r`) not `olcSyncRepl` — grep with `-i` to be safe.

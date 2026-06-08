@@ -1,25 +1,25 @@
 # Bank Deployment — Session Learnings
 
-Session date: 2026-06-03
+2026-06-03
 
-## Updated IPs & Credentials
+## IPs & Credentials
 
-| Item | Old Value | New Value (this session) |
-|------|-----------|--------------------------|
+| Item | Old | New |
+|------|-----|-----|
 | Master IP | 172.23.11.236 | **52.43.173.218** (public) |
 | Replica IP | 172.23.11.237 | **35.91.98.69** (public) |
 | Admin password | `admin` | **`TheN1le1`** |
-| Replication password | `replpass` | `replpass` (unchanged) |
+| Replication password | `replpass` | unchanged |
 | Base DN | `dc=eab,dc=bank,dc=local` | unchanged |
 | Server hostname | — | `ciamuapplds01` (master) |
 
-## Key Findings
+## Findings
 
-### 1. `slappasswd` is missing on bank server
+### 1. `slappasswd` missing on bank server
 
-`/opt/symas/bin/slappasswd` does **not** exist on `ciamuapplds01`, though `ldapadd` and other Symas tools are present at `/opt/symas/bin/`.
+`/opt/symas/bin/slappasswd` absent on `ciamuapplds01`. `ldapadd` and other Symas tools present at `/opt/symas/bin/`.
 
-**Workaround A** — Generate hash locally and embed it:
+**Workaround A** — Generate SSHA hash locally, embed inline:
 
 ```bash
 python3 -c "
@@ -33,32 +33,32 @@ print('{SSHA}' + digest)
 # Output: {SSHA}vDJL5DOYxkOOv62uR/0boOhJItyq51qwdcORIA==
 ```
 
-Then use the hash inline in the LDIF (no `$REPL_HASH` variable needed).
+Use hash inline in LDIF. No `$REPL_HASH` variable needed.
 
-**Workaround B** — Install the clients package (may not be possible if repo not configured):
+**Workaround B** — Install clients package (if repo configured):
 
 ```bash
 dnf install -y symas-openldap-clients
 # then: /opt/symas/sbin/slappasswd -s replpass
 ```
 
-### 2. TLS is enforced (self-signed cert)
+### 2. TLS enforced (self-signed cert)
 
-The bank server requires TLS for binds. Self-signed certs cause:
+Bank server requires TLS for binds. Self-signed certs cause:
 
 ```
 ldap_bind: Confidentiality required (13)
 ldap_start_tls: Connect error (-11) — certificate verify failed (self-signed certificate)
 ```
 
-**Fix**: Always prefix commands with `LDAPTLS_REQCERT=never` and use `-ZZ`:
+**Fix**: Prefix all commands with `LDAPTLS_REQCERT=never`, use `-ZZ`:
 
 ```bash
 LDAPTLS_REQCERT=never /opt/symas/bin/ldapadd -x -H ldap://localhost:389 -ZZ \
   -D "cn=admin,dc=eab,dc=bank,dc=local" -w "TheN1le1" ...
 ```
 
-### 3. Working command patterns
+### 3. Command patterns
 
 **Bind test (both nodes):**
 
@@ -88,7 +88,7 @@ description: Replication bind user
 LDIF
 ```
 
-**Verify replication (query replica for an entry just added on master):**
+**Verify replication (query replica for entry added on master):**
 
 ```bash
 LDAPTLS_REQCERT=never ldapsearch -x -ZZ \
@@ -117,12 +117,12 @@ LDAPTLS_REQCERT=never ldapsearch -x \
   -b "dc=eab,dc=bank,dc=local" -s base dn
 ```
 
-### 4. Working local commands (on server via SSH)
+### 4. Local commands (on server via SSH)
 
-On the master server (`ciamuapplds01`):
+On master (`ciamuapplds01`):
 
 ```bash
-# Source Symas environment first
+# Source Symas env first
 source /etc/profile.d/symas_env.sh
 
 # Bind test (localhost)
@@ -140,15 +140,15 @@ sudo ldapsearch -Y EXTERNAL -H ldapi:/// \
   -b "dc=eab,dc=bank,dc=local" -LLL dn
 ```
 
-### 5. Logs location
+### 5. Logs
 
-OpenLDAP logs to systemd journal by default:
+OpenLDAP logs → systemd journal by default.
 
 ```bash
-# View recent slapd logs
+# Recent slapd logs
 journalctl -u slapd --no-pager | tail -100
 
-# Or if service name differs
+# If service name differs
 journalctl -u symas-openldap-servers --no-pager | tail -100
 
 # Follow live
@@ -158,14 +158,14 @@ journalctl -u slapd -f
 tail -100 /var/log/messages | grep -i slapd
 ```
 
-Find correct service name:
+Find service name:
 ```bash
 systemctl list-units --type=service | grep -i ldap
 ```
 
-## Checklist for `BANK_DEPLOYMENT.md` updates needed
+## BANK_DEPLOYMENT.md updates needed
 
-- [ ] Update admin password from `admin` → `TheN1le1`
+- [ ] Admin password `admin` → `TheN1le1`
 - [ ] Add public IPs (52.43.173.218, 35.91.98.69)
 - [ ] Document `slappasswd` missing → SSHA hash workaround
 - [ ] Add `LDAPTLS_REQCERT=never` to all command examples

@@ -161,3 +161,30 @@ sudo MASTER_IP=<MASTER_IP> ADMIN_PW=<ADMIN_PW> LDAPTLS_REQCERT=never \
 | `ldapadd` on replica | `Referral (10)` → master |
 | Write on master, read on replica | Entry appears within seconds |
 | `r9-verify-replica.sh` | PASS for service, syncrepl, updateRef, read-only, sync |
+
+---
+
+## Connection Details Request Email (to Bank/Environment Team)
+
+```
+Subject: Jump Station Ready — Request for Environment Connection Details
+
+Hi Team,
+
+The jump station has now been prepared and should be connected to the environment.
+
+Could you please send us the admin password?
+
+Also, could you confirm the required connection details for each environment/component, including:
+
+* Hostname / IP
+* Port
+* TLS requirement
+* Admin user
+* Any certificates or files that need to be imported
+* Where exactly those files should be imported
+
+I believe we may need to import something, but I am not sure where it should be done. Please confirm the correct location and steps.
+
+Thank you.
+```

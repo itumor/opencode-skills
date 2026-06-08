@@ -95,8 +95,7 @@ if [[ "$COPY_FROM_MASTER" == "1" ]]; then
   # Auto-detect IPs for SAN
   local private_ip public_ip
   private_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-  public_ip=$(curl -s --connect-timeout 2 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || \
-              curl -s --connect-timeout 2 https://checkip.amazonaws.com 2>/dev/null || true)
+  public_ip=$(curl -s --connect-timeout 2 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || true)
 
   cat > "$SAN_CFG" <<EOF
 [ req ]
@@ -150,8 +149,7 @@ else
 
   # Auto-detect IPs for SAN
   private_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-  public_ip=$(curl -s --connect-timeout 2 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || \
-              curl -s --connect-timeout 2 https://checkip.amazonaws.com 2>/dev/null || true)
+  public_ip=$(curl -s --connect-timeout 2 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || true)
 
   cat > "$SAN_CFG" <<EOF
 [ req ]
