@@ -438,6 +438,14 @@ if [[ "$have_external_bundle" -ne 1 && ("$FORCE_REGEN_SERVER" -eq 1 || ! -f "$SE
   need_server_cert=1
 fi
 
+# If ldap.crt exists but ca.crt doesn't (from script 6 minimal cert), force regeneration
+if [[ ! -f "$CA_CERT" && -f "$SERVER_CERT" ]]; then
+  echo "[INFO] No CA cert found — forcing regeneration (existing cert is minimal/incomplete)"
+  FORCE_REGEN_CA=1
+  FORCE_REGEN_SERVER=1
+  need_server_cert=1
+fi
+
 if [[ -f "$SERVER_CERT" && ! -f "$SERVER_KEY" && "$FORCE_REGEN_SERVER" -ne 1 ]]; then
   echo "[FATAL] Server cert exists but server key is missing. Provide SERVER_KEY or set FORCE_REGEN_SERVER=1." >&2
   exit 1
@@ -490,7 +498,20 @@ if [[ "$have_external_bundle" -ne 1 && ("$FORCE_REGEN_SERVER" -eq 1 || ! -f "$SE
 
   host_fqdn="$(hostname -f 2>/dev/null || hostname)"
   host_short="$(hostname -s 2>/dev/null || hostname)"
-  write_san_config "$SAN_CONFIG" "$host_fqdn" "$host_short" "$EXTRA_DNS" "$EXTRA_IPS"
+
+  # Auto-detect private + public IPs for SAN
+  local extra_ips_san="${EXTRA_IPS:-}"
+  local private_ip
+  private_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  [[ -n "$private_ip" ]] && extra_ips_san="${extra_ips_san:+${extra_ips_san},}${private_ip}"
+
+  # Try to detect public IP (AWS metadata or checkip)
+  local public_ip
+  public_ip=$(curl -s --connect-timeout 2 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || \
+              curl -s --connect-timeout 2 https://checkip.amazonaws.com 2>/dev/null || true)
+  [[ -n "$public_ip" ]] && extra_ips_san="${extra_ips_san:+${extra_ips_san},}${public_ip}"
+
+  write_san_config "$SAN_CONFIG" "$host_fqdn" "$host_short" "$EXTRA_DNS" "$extra_ips_san"
 
   echo "[INFO] Generating server certificate"
   openssl req -new -key "$SERVER_KEY" -out "$SERVER_CSR" -config "$SAN_CONFIG"

@@ -6,6 +6,12 @@ if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
   exit 1
 fi
 
+# If TLS_MODE=no, skip this test (no certs expected)
+if [[ "${TLS_MODE:-yes}" == "no" ]]; then
+  echo "[SKIP] TLS_MODE=no — TLS certs not expected, skipping test"
+  exit 0
+fi
+
 # Ensure Symas tools are on PATH so ldapsearch is found.
 if [[ ":${PATH}:" != *":/opt/symas/bin:"* ]]; then
   PATH="/opt/symas/bin:${PATH}"

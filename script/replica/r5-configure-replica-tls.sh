@@ -92,6 +92,12 @@ if [[ "$COPY_FROM_MASTER" == "1" ]]; then
   host_fqdn="$(hostname -f 2>/dev/null || hostname)"
   host_short="$(hostname -s 2>/dev/null || hostname)"
 
+  # Auto-detect IPs for SAN
+  local private_ip public_ip
+  private_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  public_ip=$(curl -s --connect-timeout 2 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || \
+              curl -s --connect-timeout 2 https://checkip.amazonaws.com 2>/dev/null || true)
+
   cat > "$SAN_CFG" <<EOF
 [ req ]
 default_bits       = 4096
@@ -115,6 +121,10 @@ DNS.2 = ${host_short}
 DNS.3 = localhost
 IP.1  = 127.0.0.1
 EOF
+  # Append detected IPs to SAN
+  local ip_idx=2
+  [[ -n "$private_ip" ]] && echo "IP.${ip_idx}  = ${private_ip}" >> "$SAN_CFG" && ip_idx=$((ip_idx+1))
+  [[ -n "$public_ip" ]] && echo "IP.${ip_idx}  = ${public_ip}" >> "$SAN_CFG" && ip_idx=$((ip_idx+1))
 
   log "Generating replica server key and certificate (signed by master CA)"
   openssl genrsa -out "$SERVER_KEY" 4096
@@ -138,6 +148,11 @@ else
   host_fqdn="$(hostname -f 2>/dev/null || hostname)"
   host_short="$(hostname -s 2>/dev/null || hostname)"
 
+  # Auto-detect IPs for SAN
+  private_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  public_ip=$(curl -s --connect-timeout 2 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || \
+              curl -s --connect-timeout 2 https://checkip.amazonaws.com 2>/dev/null || true)
+
   cat > "$SAN_CFG" <<EOF
 [ req ]
 default_bits       = 4096
@@ -161,6 +176,10 @@ DNS.2 = ${host_short}
 DNS.3 = localhost
 IP.1  = 127.0.0.1
 EOF
+  # Append detected IPs to SAN
+  ip_idx=2
+  [[ -n "$private_ip" ]] && echo "IP.${ip_idx}  = ${private_ip}" >> "$SAN_CFG" && ip_idx=$((ip_idx+1))
+  [[ -n "$public_ip" ]] && echo "IP.${ip_idx}  = ${public_ip}" >> "$SAN_CFG" && ip_idx=$((ip_idx+1))
 
   openssl genrsa -out "$SERVER_KEY" 4096
   openssl req -new -key "$SERVER_KEY" -out "$SERVER_CSR" -config "$SAN_CFG"

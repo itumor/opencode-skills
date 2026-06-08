@@ -41,14 +41,18 @@ KEY="$TLS_DIR/ldap.key"
 mkdir -p "$TLS_DIR"
 chmod 700 "$TLS_DIR"
 
-if [[ ! -f "$CERT" || ! -f "$KEY" ]]; then
-  echo "[INFO] Generating self-signed TLS cert"
-  openssl req -x509 -nodes -newkey rsa:4096 \
-    -keyout "$KEY" \
-    -out "$CERT" \
-    -days 3650 \
-    -subj "/CN=$(hostname)"
-  chmod 600 "$KEY"
+if [[ "${TLS_MODE:-yes}" != "no" ]]; then
+  if [[ ! -f "$CERT" || ! -f "$KEY" ]]; then
+    echo "[INFO] Generating self-signed TLS cert"
+    openssl req -x509 -nodes -newkey rsa:4096 \
+      -keyout "$KEY" \
+      -out "$CERT" \
+      -days 3650 \
+      -subj "/CN=$(hostname)"
+    chmod 600 "$KEY"
+  fi
+else
+  echo "[INFO] TLS_MODE=no — skipping TLS cert generation"
 fi
 
 ### 4. Ensure slapd listens on ldaps:// + ldapi://
@@ -58,6 +62,7 @@ if [[ -f "$DEFAULTS" ]]; then
 fi
 
 ### 5. Enable TLS + LDAPS in cn=config (online first, fallback to offline edit)
+if [[ "${TLS_MODE:-yes}" != "no" ]]; then
 set +e
 ldapmodify_out="$(
   cat <<EOF | ldapmodify -Y EXTERNAL -H ldapi:/// 2>&1
@@ -97,6 +102,10 @@ if [[ $ldapmodify_rc -ne 0 ]]; then
   else
     sed -i "/^dn: cn=config$/a olcTLSCertificateKeyFile: $KEY" "$CONFIG_LDIF"
   fi
+fi
+
+else
+  echo "[INFO] TLS_MODE=no — skipping TLS cn=config update"
 fi
 
 ### 6. Restart cleanly
