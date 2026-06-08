@@ -500,13 +500,11 @@ if [[ "$have_external_bundle" -ne 1 && ("$FORCE_REGEN_SERVER" -eq 1 || ! -f "$SE
   host_short="$(hostname -s 2>/dev/null || hostname)"
 
   # Auto-detect private + public IPs for SAN
-  local extra_ips_san="${EXTRA_IPS:-}"
-  local private_ip
+  extra_ips_san="${EXTRA_IPS:-}"
   private_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
   [[ -n "$private_ip" ]] && extra_ips_san="${extra_ips_san:+${extra_ips_san},}${private_ip}"
 
   # Try to detect public IP from AWS metadata only (non-AWS → empty, correct for bank)
-  local public_ip
   public_ip=$(curl -s --connect-timeout 2 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || true)
   [[ -n "$public_ip" ]] && extra_ips_san="${extra_ips_san:+${extra_ips_san},}${public_ip}"
 

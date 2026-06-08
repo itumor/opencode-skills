@@ -93,7 +93,6 @@ if [[ "$COPY_FROM_MASTER" == "1" ]]; then
   host_short="$(hostname -s 2>/dev/null || hostname)"
 
   # Auto-detect IPs for SAN
-  local private_ip public_ip
   private_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
   public_ip=$(curl -s --connect-timeout 2 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || true)
 
@@ -121,7 +120,7 @@ DNS.3 = localhost
 IP.1  = 127.0.0.1
 EOF
   # Append detected IPs to SAN
-  local ip_idx=2
+  ip_idx=2
   [[ -n "$private_ip" ]] && echo "IP.${ip_idx}  = ${private_ip}" >> "$SAN_CFG" && ip_idx=$((ip_idx+1))
   [[ -n "$public_ip" ]] && echo "IP.${ip_idx}  = ${public_ip}" >> "$SAN_CFG" && ip_idx=$((ip_idx+1))
 
