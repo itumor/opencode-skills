@@ -23,7 +23,10 @@ log "Bootstrapping OpenLDAP $ROLE (SERVER_ID=$SERVER_ID)"
 
 # --- SSM Agent first (needed for CI SSM commands) ---
 log "installing SSM Agent"
-dnf install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm >/dev/null 2>&1 || true
+until dnf install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm; do
+  log "SSM agent install failed, retrying in 10s..."
+  sleep 10
+done
 systemctl enable amazon-ssm-agent 2>/dev/null || true
 systemctl start amazon-ssm-agent 2>/dev/null || true
 
