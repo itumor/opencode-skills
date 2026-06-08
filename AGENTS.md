@@ -19,9 +19,20 @@ nextgenopen = Symas OpenLDAP 2.6.13 on RHEL 9, master/replica. Satellite-managed
 | `script/replica/test/test_replica_*.sh` | Replica tests |
 | `terraform/openldap-master-replica/` | AWS infra (VPC + EC2) |
 | `terraform/openldap-master-replica/.local-ssh/` | SSH key |
+| `deploy-tls-lab.sh` | Full TLS deploy + verify (one-command) |
 | `docs/BANK_DEPLOYMENT.md` | Bank runbook |
 | `docs/BANK_RUNBOOK.md` | Generic runbook |
 | `docs/REPLICA_SETUP_EMAIL.md` | Email template |
+
+## Pre-Merge Verification Rule
+
+**Before any merge or after any change to `script/` files**, run the full deploy to verify nothing broke:
+
+```bash
+bash deploy-tls-lab.sh
+```
+
+This clean-installs master+replica on the AWS lab, tests TLS binds, and verifies replication. If it fails, the change is not safe to merge. Takes ~5-7 minutes.
 
 ## Branch
 
@@ -29,7 +40,7 @@ nextgenopen = Symas OpenLDAP 2.6.13 on RHEL 9, master/replica. Satellite-managed
 
 ## AWS Lab (us-west-2)
 
-### Current: No-TLS Deployment (2026-06-08)
+### Current: TLS Deployment (2026-06-08)
 
 Master: 54.185.183.18 / 10.50.1.10 (i-0693bef1c65ce8825)
 Replica: 54.191.26.211 / 10.50.2.10 (i-0dabec022a85f6ecd)
@@ -37,7 +48,8 @@ VPC: 10.50.0.0/16, project: openldap-nontls
 SSH: `ssh -i terraform/openldap-master-replica/.local-ssh/openldap_master_replica ec2-user@<IP>`
 Admin: cn=admin,dc=eab,dc=bank,dc=local / TheN1le1
 Replicator: cn=replicator,dc=eab,dc=bank,dc=local / replpass
-Mode: No TLS (plain LDAP, TLS_MODE=no). Master: t3.medium, Replica: t3.medium.
+Mode: TLS (TLS_MODE=yes). Master: t3.medium, Replica: t3.medium.
+CA cert: `/tmp/master-ca.crt` (extracted from master via ssh+sudo cat)
 
 ### Previous: TLS Lab (2026-05-25 — terminated)
 
