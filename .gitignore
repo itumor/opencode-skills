@@ -30,6 +30,13 @@ config.toml
 .curator_state
 .curator_backups/
 
+# Python cache
+__pycache__/
+*.pyc
+
+# Node modules
+node_modules/
+
 # Lock files (no value)
 *.lock
 

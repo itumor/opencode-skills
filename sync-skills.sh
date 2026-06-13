@@ -25,13 +25,21 @@ sync_dir() {
   log "SYNC $name: $src → $dst"
 }
 
-sync_dir claude-skills        "$HOME/.claude/skills"
-sync_dir agents-skills         "$HOME/.agents/skills"
-sync_dir opencode-skills       "$HOME/.config/opencode/skills"
-sync_dir superpowers-skills    "$HOME/.codex/superpowers/skills"
-sync_dir cursor-skills         "$HOME/.cursor/skills-cursor"
-sync_dir hermes-skills         "$HOME/.hermes/skills"
-sync_dir hermes-memories       "$HOME/.hermes/memories"
+# ── Skills ──────────────────────────────────────────────────────
+sync_dir claude-skills                "$HOME/.claude/skills"
+sync_dir agents-skills                "$HOME/.agents/skills"
+sync_dir opencode-skills              "$HOME/.config/opencode/skills"
+sync_dir superpowers-skills           "$HOME/.codex/superpowers/skills"
+sync_dir codex-skills                 "$HOME/.codex/skills"
+sync_dir codex-rules                  "$HOME/.codex/rules"
+sync_dir cursor-skills                "$HOME/.cursor/skills"
+sync_dir cursor-agent-skills          "$HOME/.cursor/skills-cursor"
+sync_dir hermes-agent-skills          "$HOME/.hermes/hermes-agent/skills"
+sync_dir hermes-agent-optional        "$HOME/.hermes/hermes-agent/optional-skills"
+sync_dir agent-devops-skills          "$HOME/.agent/skills"
+
+# ── Memory ───────────────────────────────────────────────────────
+sync_dir hermes-memories              "$HOME/.hermes/memories"
 
 # ── Git commit + push ───────────────────────────────────────────
 cd "$REPO_DIR"
