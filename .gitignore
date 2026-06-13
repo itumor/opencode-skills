@@ -1,0 +1,35 @@
+# Skills containing credentials/bank IPs — never commit to public repo
+**/nextgenopen-ldap/
+
+# Original/backup files that may contain secrets
+**/SKILL.original*
+**/*.backup
+**/*.bak
+
+# Credential files
+.env
+*.token
+token.json
+credentials.json
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Secrets manager files
+secrets/
+vault/
+
+# Runtime artifacts (logs, session data)
+sync.log
+logs/
+.remember/
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# Editor
+*.swp
+*.swo
+*~
