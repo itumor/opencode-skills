@@ -42,9 +42,9 @@ This clean-installs master+replica on the AWS lab, tests TLS binds, and verifies
 
 ### Current: TLS Deployment (2026-06-08)
 
-Master: 54.185.183.18 / 10.50.1.10 (i-0693bef1c65ce8825)
-Replica: 54.191.26.211 / 10.50.2.10 (i-0dabec022a85f6ecd)
-VPC: 10.50.0.0/16, project: openldap-nontls
+Master: 54.186.123.12 / 10.30.1.10 (i-07105527154403a7f)
+Replica: 44.243.198.216 / 10.30.2.10 (i-0c6b02568872b0bdc)
+VPC: 10.30.0.0/16, project: openldap-mr
 SSH: `ssh -i terraform/openldap-master-replica/.local-ssh/openldap_master_replica ec2-user@<IP>`
 Admin: cn=admin,dc=eab,dc=bank,dc=local / TheN1le1
 Replicator: cn=replicator,dc=eab,dc=bank,dc=local / replpass
