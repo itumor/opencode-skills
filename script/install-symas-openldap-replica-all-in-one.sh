@@ -132,6 +132,7 @@ echo ""
 echo "=== Loading custom bank schema ==="
 bash "${SCRIPT_DIR_OUTER}/12-Create_custom_schema.sh"
 bash "${SCRIPT_DIR_OUTER}/13-Create_custom_schema_attr.sh"
+bash "${SCRIPT_DIR_OUTER}/bank-add-orclisenabled.sh" --force
 
 # Load ppolicy module on replica (required for pwdPolicy objectClass)
 # Without this, syncrepl fails with "objectClass: value #0 invalid per syntax"

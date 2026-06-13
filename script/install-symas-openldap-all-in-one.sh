@@ -40,6 +40,8 @@ run "10-ppolicy-container.sh"
 run "10.0-password_policy_make_default.sh"
 run "12-Create_custom_schema.sh"
 run "13-Create_custom_schema_attr.sh"
+echo; echo "=== Running bank-add-orclisenabled.sh ==="
+bash "$SCRIPT_DIR/bank-add-orclisenabled.sh" --force
 run "7-verify_symas_openldap.sh"
 run "16-add-strong-password-quality-checker-PPM.sh"
 run "17-create_mw_user.sh"
