@@ -157,6 +157,55 @@ fi
 systemctl restart symas-openldap-servers 2>/dev/null || systemctl restart slapd 2>/dev/null || true
 sleep 5
 
+# Load PPM module on replica (for password quality checking if available)
+# Without PPM, advanced complexity checks (maxLength, minUpper, specialChars etc.)
+# are not enforced on the replica side, but LDAP-level policy (pwdMaxAge,
+# pwdMinLength, etc.) still works.
+echo ""
+echo "=== Loading PPM module ==="
+MODULE_PATH="/opt/symas/lib/openldap"
+PPM_CONF="${PPM_CONF:-/opt/symas/etc/openldap/ppm.conf}"
+if [[ -f "${MODULE_PATH}/ppm.so" ]] || [[ -f "${MODULE_PATH}/ppm.la" ]]; then
+  PPM_VAL="ppm.so"
+  [[ -f "${MODULE_PATH}/ppm.la" ]] && PPM_VAL="ppm.la"
+  ppm_loaded=$(ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -s sub "(olcModuleLoad=ppm)" dn 2>/dev/null | grep -c "cn=module" || true)
+  if [[ "$ppm_loaded" -eq 0 ]]; then
+    ldapmodify -Y EXTERNAL -H ldapi:/// <<LDIFEOF
+dn: cn=module{0},cn=config
+changetype: modify
+add: olcModuleLoad
+olcModuleLoad: ${PPM_VAL}
+LDIFEOF
+    echo "[INFO] PPM module loaded on replica"
+  else
+    echo "[INFO] PPM module already loaded on replica"
+  fi
+  # Write a minimal ppm.conf on replica (full config replicates from master via syncrepl policy data)
+  if [[ ! -f "$PPM_CONF" ]]; then
+    mkdir -p "$(dirname "$PPM_CONF")"
+    cat > "$PPM_CONF" << 'PPMEOF'
+# PPM Configuration — bank password policy
+# Full enforcement is on the master. Replica uses this for local pre-checks.
+minLength 8
+maxLength 12
+minUpper 1
+minLower 1
+minDigit 1
+minSpecial 0
+specialChars _
+historySize 5
+maxRepeat 2
+rejectUsername true
+forbiddenChars ' " ( ) { } [ ] / \ = @ # $ % ! . -
+PPMEOF
+    chmod 600 "$PPM_CONF"
+    if id ldap >/dev/null 2>&1; then chown ldap:ldap "$PPM_CONF"; fi
+    echo "[INFO] PPM config written on replica"
+  fi
+else
+  echo "[INFO] PPM module not found — skipping (advanced complexity checks require licensed Symas)"
+fi
+
 # Ensure openssl is available for TLS cert generation
 if ! command -v openssl >/dev/null 2>&1; then
   echo "[INFO] Installing openssl for TLS cert generation"
