@@ -21,7 +21,18 @@ sync_dir() {
   fi
 
   mkdir -p "$dst"
-  rsync -a --delete --copy-links --exclude='.git' --exclude='node_modules' "$src/" "$dst/"
+  rsync -a --delete --copy-links \
+    --exclude='.git' --exclude='node_modules' --exclude='__pycache__' \
+    --exclude='nextgenopen-ldap' \
+    --exclude='SKILL.original*' \
+    --exclude='*.backup' --exclude='*.bak' \
+    --exclude='.bundled_manifest' --exclude='.curator_state' --exclude='.curator_backups' \
+    --exclude='.usage.json' --exclude='.usage.json.lock' --exclude='.sync-manifest.json' \
+    --exclude='auth.json' --exclude='config.yaml' --exclude='config.toml' \
+    --exclude='token.json' --exclude='credentials.json' \
+    --exclude='*.key' --exclude='*.pem' --exclude='*.p12' --exclude='*.pfx' \
+    --exclude='.env' \
+    "$src/" "$dst/"
   log "SYNC $name: $src → $dst"
 }
 
