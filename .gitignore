@@ -11,19 +11,38 @@
 *.token
 token.json
 credentials.json
+auth.json
 *.key
 *.pem
 *.p12
 *.pfx
 
+# Config files that may contain API keys
+config.yaml
+config.yaml.bak.*
+config.toml
+.skills_prompt_snapshot.json
+
+# Lock files (no value)
+*.lock
+
 # Secrets manager files
 secrets/
 vault/
 
-# Runtime artifacts (logs, session data)
+# Runtime artifacts (logs, session data, caches, databases)
 sync.log
+sync-cron.log
 logs/
 .remember/
+sessions/
+cache/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # macOS
 .DS_Store

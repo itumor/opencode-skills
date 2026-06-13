@@ -25,10 +25,13 @@ sync_dir() {
   log "SYNC $name: $src → $dst"
 }
 
-sync_dir claude-skills      "$HOME/.claude/skills"
-sync_dir agents-skills       "$HOME/.agents/skills"
-sync_dir opencode-skills     "$HOME/.config/opencode/skills"
-sync_dir superpowers-skills  "$HOME/.codex/superpowers/skills"
+sync_dir claude-skills        "$HOME/.claude/skills"
+sync_dir agents-skills         "$HOME/.agents/skills"
+sync_dir opencode-skills       "$HOME/.config/opencode/skills"
+sync_dir superpowers-skills    "$HOME/.codex/superpowers/skills"
+sync_dir cursor-skills         "$HOME/.cursor/skills-cursor"
+sync_dir hermes-skills         "$HOME/.hermes/skills"
+sync_dir hermes-memories       "$HOME/.hermes/memories"
 
 # ── Git commit + push ───────────────────────────────────────────
 cd "$REPO_DIR"

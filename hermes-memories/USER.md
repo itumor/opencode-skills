@@ -1,0 +1,1 @@
+User wants a live URL as output for web app building tasks. They prefer parallel/subagent execution and want fast results, specifically using Cursor Composer 2 Fast model via the CLI in automations.
