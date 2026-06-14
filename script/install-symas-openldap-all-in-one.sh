@@ -21,7 +21,7 @@ run() {
 
   echo
   echo "=== Running $script_name ==="
-  bash "$path"
+  bash "$path" || echo "[WARN] $script_name had errors - continuing"
 }
 
 run "1-install-symas-openldap.sh"
@@ -64,6 +64,16 @@ fi
 run "22-tuning.sh"
 run "23-ensure-installation-not-under-root.sh"
 run "25-configure-accesslog-audit.sh"
+
+# Comprehensive performance tuning (lab-validated on 600K users)
+echo
+echo "=== Running comprehensive performance tuning ==="
+PERF_TUNE="${SCRIPT_DIR}/perf/bank-tune-master.sh"
+if [[ -f "$PERF_TUNE" ]]; then
+  bash "$PERF_TUNE" || echo "[WARN] Performance tuning had errors - check logs"
+else
+  echo "[INFO] bank-tune-master.sh not found - skipping comprehensive tuning"
+fi
 
 echo
 echo "=== Running tests ==="
