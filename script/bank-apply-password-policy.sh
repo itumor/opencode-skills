@@ -206,6 +206,9 @@ pwdCheckQuality: 2
 replace: pwdMinLength
 pwdMinLength: $PWD_MIN_LENGTH
 -
+replace: pwdMaxLength
+pwdMaxLength: $PWD_MAX_LENGTH
+-
 replace: pwdMaxFailure
 pwdMaxFailure: $PWD_MAX_FAILURE
 -
@@ -229,6 +232,9 @@ pwdAllowUserChange: TRUE
 -
 replace: pwdSafeModify
 pwdSafeModify: FALSE
+-
+add: pwdUseCheckModule
+pwdUseCheckModule: TRUE
 LDIF
   ok "Policy entry updated"; PASS=$((PASS+1))
 else
@@ -247,6 +253,7 @@ pwdExpireWarning: $PWD_EXPIRE_WARNING
 pwdInHistory: $PWD_IN_HISTORY
 pwdCheckQuality: 2
 pwdMinLength: $PWD_MIN_LENGTH
+pwdMaxLength: $PWD_MAX_LENGTH
 pwdMaxFailure: $PWD_MAX_FAILURE
 pwdLockout: TRUE
 pwdLockoutDuration: $PWD_LOCKOUT_DURATION
@@ -255,6 +262,7 @@ pwdFailureCountInterval: 0
 pwdMustChange: FALSE
 pwdAllowUserChange: TRUE
 pwdSafeModify: FALSE
+pwdUseCheckModule: TRUE
 LDIF
   if LDAPTLS_REQCERT=never ldapsearch -x -ZZ -H ldap://localhost \
     -D "$ADMIN_DN" -w "$ADMIN_PW" -b "$POLICY_DN" -s base dn 2>/dev/null | grep -q "^dn:"; then
@@ -291,6 +299,58 @@ PPM_AVAILABLE=0
 if [[ -f "${MODULE_PATH}/ppm.so" ]]; then
   PPM_AVAILABLE=1
   log "ppm.so found at ${MODULE_PATH}/ppm.so"
+
+  # Check if ppm.so is properly linked to liblber
+  # The shipped RPM has ber_memalloc unresolved (build defect).
+  # Without liblber, class-based rules are silently ignored.
+  section "7a: Validate ppm.so linking"
+  PPM_LDD=$(ldd -r "${MODULE_PATH}/ppm.so" 2>&1 || true)
+  if echo "$PPM_LDD" | grep -q "undefined symbol.*ber_mem"; then
+    warn "ppm.so has unresolved symbols — PPM class rules will NOT work!"
+    warn "  Cause: ppm.so was compiled without linking liblber (ber_memalloc undefined)"
+    warn "  Symptom: LDAP-level rules work, but class-upperCase/class-digit/forbiddenChars/checkRDN do not"
+
+    if [[ -d "/tmp/symas-openldap-v2.6.13" ]]; then
+      log "OpenLDAP source found at /tmp/symas-openldap-v2.6.13 — attempting rebuild..."
+      log "  Rebuilding ppm.so with liblber linked..."
+      PPM_SRC="/tmp/symas-openldap-v2.6.13"
+      PPM_REBUILD_DIR="${PPM_SRC}/contrib/slapd-modules/ppm"
+      if [[ -f "$PPM_REBUILD_DIR/ppm.c" ]]; then
+        (gcc -fPIC -DDEBUG \
+          -I"${PPM_SRC}/include" \
+          -I"${PPM_SRC}/servers/slapd" \
+          -c "$PPM_REBUILD_DIR/ppm.c" -o /tmp/ppm-rebuild.o 2>/dev/null && \
+         gcc -shared -o /tmp/ppm-rebuild.so /tmp/ppm-rebuild.o \
+          /opt/symas/lib/liblber.so.2 \
+          -Wl,-rpath,/opt/symas/lib 2>/dev/null && \
+         ldd -r /tmp/ppm-rebuild.so 2>/dev/null | grep -q "undefined symbol.*ber_mem" && \
+         { warn "ppm.so rebuild produced unresolved ber_memalloc"; rm -f /tmp/ppm-rebuild.o /tmp/ppm-rebuild.so; false; } || \
+         { cp /opt/symas/lib/openldap/ppm.so /opt/symas/lib/openldap/ppm.so.bak 2>/dev/null; \
+           cp /tmp/ppm-rebuild.so /opt/symas/lib/openldap/ppm.so; \
+           chmod 755 /opt/symas/lib/openldap/ppm.so; \
+           rm -f /tmp/ppm-rebuild.o /tmp/ppm-rebuild.so; \
+           ok "ppm.so rebuilt with liblber — restarting slapd"; \
+           systemctl restart "$SLAPD_SVC" && sleep 3 && \
+           ok "slapd restarted with fixed ppm.so"; }) || \
+        warn "ppm.so rebuild failed — check that gcc and source are available"
+      else
+        log "OpenLDAP source incomplete — cannot rebuild"
+        log "  Install dev tools and extract source:"
+        log "    dnf groupinstall -y 'Development Tools'"
+        log "    dnf download --source symas-openldap"
+        log "    rpm -ivh symas-openldap*.src.rpm"
+        log "    cd ~/rpmbuild/SOURCES && tar xf symas-openldap-v2.6.13.tar.xz"
+        log "    cd symas-openldap-v2.6.13 && ./configure && make depend"
+        log "  Then re-run this script."
+      fi
+    else
+      log "OpenLDAP source not found at /tmp/symas-openldap-v2.6.13"
+      log "  To fix, run the rebuild procedure from BANK_PASSWORD_POLICY.md"
+      log "  then re-run this script. Without the fix, only LDAP-level rules apply."
+    fi
+  else
+    ok "ppm.so is properly linked (no unresolved symbols)"
+  fi
 else
   warn "ppm.so not found — PPM unavailable (licensed Symas required)"
   log "LDAP-level policy still applies (pwdMaxAge, pwdMinLength, pwdMaxFailure, pwdInHistory, pwdLockout)"
@@ -303,23 +363,24 @@ if [[ "$PPM_AVAILABLE" -eq 1 ]]; then
   PPM_CONFIG="/tmp/ppm-${TIMESTAMP}.conf"
 
   cat > "$PPM_CONFIG" << PPMEOF
-minLength ${PWD_MIN_LENGTH}
-maxLength ${PWD_MAX_LENGTH}
-forbiddenChars '"(){}[]/\\=@#\$%!.-
-historySize ${PWD_HISTORY_SIZE}
-maxRepeat ${PWD_MAX_REPEAT}
-rejectUsername true
-class-upperCase ABCDEFGHIJKLMNOPQRSTUVWXYZ 0 1
-class-lowerCase abcdefghijklmnopqrstuvwxyz 0 1
-class-digit 0123456789 0 1
-class-special ${PWD_ALLOWED_SPECIAL} 0 1
 minQuality 3
+checkRDN 1
+forbiddenChars '"(){}[]/\\=@#\$%!.-
+maxConsecutivePerClass 0
+class-upperCase ABCDEFGHIJKLMNOPQRSTUVWXYZ ${PWD_MIN_UPPER} 1 0
+class-lowerCase abcdefghijklmnopqrstuvwxyz ${PWD_MIN_LOWER} 1 0
+class-digit 0123456789 ${PWD_MIN_DIGIT} 1 0
+class-special ${PWD_ALLOWED_SPECIAL} 0 1 0
 PPMEOF
 
-  ok "PPM config written (class-* format, minQuality=3 requires 3 of 4 classes)"
-  log "  minLength=${PWD_MIN_LENGTH}, maxLength=${PWD_MAX_LENGTH}"
+  ok "PPM config written (5-field class format per slapm-ppm(5))"
+  log "  minQuality=3 (requires 3 classes of 4)"
+  log "  class-upperCase: min=${PWD_MIN_UPPER}, minForPoint=1, max=0 (A-Z)"
+  log "  class-lowerCase: min=${PWD_MIN_LOWER}, minForPoint=1, max=0 (a-z)"
+  log "  class-digit:     min=${PWD_MIN_DIGIT}, minForPoint=1, max=0 (0-9)"
+  log "  class-special:   min=0, minForPoint=1, max=0 (only '${PWD_ALLOWED_SPECIAL}')"
+  log "  checkRDN=1 (reject username/rdn in password)"
   log "  forbiddenChars: '\" ( ) { } [ ] / \\ = @ # \$ % ! . -"
-  log "  rejectUsername: true"
   PASS=$((PASS+1))
 
   # 7b: Base64-encode and store as pwdCheckModuleArg
@@ -332,7 +393,7 @@ PPMEOF
 dn: $POLICY_DN
 changetype: modify
 replace: pwdCheckModuleArg
-pwdCheckModuleArg: $PPM_B64
+pwdCheckModuleArg:: $PPM_B64
 LDIF
 
   ARG_CHECK=$(LDAPTLS_REQCERT=never ldapsearch -o ldif-wrap=no -x -ZZ -H ldap://localhost \
@@ -346,7 +407,7 @@ LDIF
 dn: $POLICY_DN
 changetype: modify
 replace: pwdCheckModuleArg
-pwdCheckModuleArg: $PPM_B64
+pwdCheckModuleArg:: $PPM_B64
 LDIF
 ) && { ok "pwdCheckModuleArg stored (via ldapi)"; PASS=$((PASS+1)); } || { warn "pwdCheckModuleArg store failed"; }
   fi
@@ -420,17 +481,19 @@ LDAPTLS_REQCERT=never ldapsearch -x -ZZ -H ldap://localhost \
 # V3: Core policy attributes
 POLICY_ATTRS=$(LDAPTLS_REQCERT=never ldapsearch -o ldif-wrap=no -x -ZZ -H ldap://localhost \
   -D "$ADMIN_DN" -w "$ADMIN_PW" -b "$POLICY_DN" -s base \
-  pwdMaxAge pwdExpireWarning pwdInHistory pwdMinLength pwdMaxFailure \
+  pwdMaxAge pwdExpireWarning pwdInHistory pwdMinLength pwdMaxLength pwdMaxFailure \
   pwdLockout pwdCheckQuality pwdLockoutDuration 2>/dev/null)
 
 CHECK_MAX_AGE=$(echo "$POLICY_ATTRS" | awk -F': ' '/^pwdMaxAge:/{print $2; exit}')
 CHECK_MIN_LEN=$(echo "$POLICY_ATTRS" | awk -F': ' '/^pwdMinLength:/{print $2; exit}')
+CHECK_MAX_LEN=$(echo "$POLICY_ATTRS" | awk -F': ' '/^pwdMaxLength:/{print $2; exit}')
 CHECK_HISTORY=$(echo "$POLICY_ATTRS" | awk -F': ' '/^pwdInHistory:/{print $2; exit}')
 CHECK_FAILURE=$(echo "$POLICY_ATTRS" | awk -F': ' '/^pwdMaxFailure:/{print $2; exit}')
 CHECK_QUALITY=$(echo "$POLICY_ATTRS" | awk -F': ' '/^pwdCheckQuality:/{print $2; exit}')
 
 [[ "$CHECK_MAX_AGE" == "$PWD_MAX_AGE"    ]] && ok "pwdMaxAge=${CHECK_MAX_AGE}s (4 months)"    && PASS=$((PASS+1)) || bad "pwdMaxAge=${CHECK_MAX_AGE} (expected ${PWD_MAX_AGE})"
 [[ "$CHECK_MIN_LEN" == "$PWD_MIN_LENGTH" ]] && ok "pwdMinLength=${CHECK_MIN_LEN}"              && PASS=$((PASS+1)) || bad "pwdMinLength=${CHECK_MIN_LEN} (expected ${PWD_MIN_LENGTH})"
+[[ "$CHECK_MAX_LEN" == "$PWD_MAX_LENGTH" ]] && ok "pwdMaxLength=${CHECK_MAX_LEN}"              && PASS=$((PASS+1)) || bad "pwdMaxLength=${CHECK_MAX_LEN} (expected ${PWD_MAX_LENGTH})"
 [[ "$CHECK_HISTORY" == "$PWD_IN_HISTORY" ]] && ok "pwdInHistory=${CHECK_HISTORY}"              && PASS=$((PASS+1)) || bad "pwdInHistory=${CHECK_HISTORY} (expected ${PWD_IN_HISTORY})"
 [[ "$CHECK_FAILURE" == "$PWD_MAX_FAILURE" ]] && ok "pwdMaxFailure=${CHECK_FAILURE}"             && PASS=$((PASS+1)) || bad "pwdMaxFailure=${CHECK_FAILURE} (expected ${PWD_MAX_FAILURE})"
 [[ "$CHECK_QUALITY" == "2"               ]] && ok "pwdCheckQuality=2 (PPM delegated)"          && PASS=$((PASS+1)) || bad "pwdCheckQuality=${CHECK_QUALITY} (expected 2)"
@@ -462,9 +525,10 @@ echo "  BANK PASSWORD POLICY — Applied"
 echo "  Policy:   ${POLICY_DN}"
 echo "  PPM:      $([[ $PPM_AVAILABLE -eq 1 ]] && echo 'base64-embedded (pwdCheckModuleArg)' || echo 'not available (licensed Symas required)')"
 echo ""
-echo "  Enforced (LDAP-level):"
-echo "    Min Length:        ${PWD_MIN_LENGTH}"
-echo "    Max Age:           ${PWD_MAX_AGE}s (~120 days / 4 months)"
+  echo "  Enforced (LDAP-level via native ppolicy overlay):"
+  echo "    Min Length:        ${PWD_MIN_LENGTH}"
+  echo "    Max Length:        ${PWD_MAX_LENGTH} (native ppolicy pwdMaxLength)"
+  echo "    Max Age:           ${PWD_MAX_AGE}s (~120 days / 4 months)"
 echo "    Expire Warning:    ${PWD_EXPIRE_WARNING}s (~15 days)"
 echo "    Password History:  last ${PWD_IN_HISTORY}"
 echo "    Max Failures:      ${PWD_MAX_FAILURE} (${PWD_LOCKOUT_DURATION}s lockout)"

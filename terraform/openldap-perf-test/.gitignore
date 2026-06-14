@@ -1,0 +1,5 @@
+.terraform/
+tfplan.*
+terraform.tfstate*
+.local-ssh/*
+!.local-ssh/*.pub
