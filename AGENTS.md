@@ -34,6 +34,36 @@ bash deploy-tls-lab.sh
 
 This clean-installs master+replica on the AWS lab, tests TLS binds, and verifies replication. If it fails, the change is not safe to merge. Takes ~5-7 minutes.
 
+## Gmail Email
+
+Send email via `gmail-send_send_email` tool (params: `to`, `subject`, `body`, optional `cc`, `bcc`, `attachments` — list of file paths). Returns Gmail message ID on success. MCP server at `~/.config/gmail-opencode/server.py` (venv: `~/.config/gmail-opencode/.venv/`). Skill at `gmail-email`.
+
+**Attachment fallback**: If tool hasn't restarted to pick up `attachments` param, use venv Python directly — `Creds.from_authorized_user_file(token.json)` → `build('gmail','v1')` → `msg.make_mixed()` + `attach(text_part)` + `add_attachment(data, ...)`. Never `add_alternative()` after `make_mixed()` — ValueError.
+
+## Zoho Mail
+
+Credentials in `.env` (gitignored). Account: `ibrahim.timor@nxtedgetechnologies.com`, Account ID: `2204359000000008002`. Self Client via https://api-console.zoho.com.
+
+| Path | Purpose |
+|------|---------|
+| `script/zoho-mail.sh` | CLI helper (send, inbox, search, token refresh) |
+| `~/.config/opencode/skills/zoho-mail/SKILL.md` | Skill with API docs + patterns |
+
+**Quick send:**
+```bash
+source .env && bash script/zoho-mail.sh send to@example.com "Subject" "Body"
+```
+
+**Auth flow:** Access token expires 1h → auto-refresh via `ZOHO_REFRESH_TOKEN`. If grant expires, user must regenerate at Zoho API Console (scopes: `ZohoMail.messages.ALL,ZohoMail.accounts.READ`).
+
+## Contacts
+
+| Alias | Name | Email |
+|-------|------|-------|
+| me / Ibrahim | Ibrahim Timor | `ibrahim.timor@nxtedgetechnologies.com` |
+| yo / Youssef | Muhammad Youssef | `muhammad.youssef.89@gmail.com` |
+| mo / Mostafa | Mostafa El Kady | `m.elkady@nxtedgetechnologies.com` |
+
 ## Branch
 
 `feature/replica-no-ssh` (from `feature/replica-setup`). No SSH/SCP replica→master. Self-signed TLS default.
