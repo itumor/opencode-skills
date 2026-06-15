@@ -15,3 +15,6 @@ prefix_rule(pattern=["~/.hermes/hermes-agent/venv/bin/python3.11", "~/.hermes/he
 prefix_rule(pattern=["nc", "-vz"], decision="allow")
 prefix_rule(pattern=["set", "-a"], decision="allow")
 prefix_rule(pattern=["source", ".env"], decision="allow")
+prefix_rule(pattern=["aws", "ec2", "describe-instances"], decision="allow")
+prefix_rule(pattern=["git", "worktree", "add"], decision="allow")
+prefix_rule(pattern=["/bin/zsh", "-lc", "git merge --ff-only Development && git log -1 --oneline --decorate && git status --short && rg --files script | rg 'password-policy|ppm|ppolicy' && ls docs/superpowers/specs docs/superpowers/plans 2>/dev/null || true"], decision="allow")
