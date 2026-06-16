@@ -154,6 +154,27 @@ else
   echo "[INFO] ppolicy module already loaded"
 fi
 
+# Add ppolicy overlay to database (cn=config — not replicated, needed on replica too)
+echo ""
+echo "=== Adding ppolicy overlay to database ==="
+DB_DN=$(/opt/symas/bin/ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -s sub "(objectClass=olcMdbConfig)" dn 2>/dev/null | grep "^dn: " | head -1 | sed 's/^dn: //')
+PP_DN="olcOverlay=ppolicy,${DB_DN}"
+if /opt/symas/bin/ldapsearch -Y EXTERNAL -H ldapi:/// -b "$PP_DN" -s base dn 2>/dev/null | grep -q "^dn:"; then
+  echo "[INFO] ppolicy overlay already on database"
+else
+  /opt/symas/bin/ldapadd -Y EXTERNAL -H ldapi:/// <<LDIFEOFPP
+dn: ${PP_DN}
+objectClass: olcOverlayConfig
+objectClass: olcPPolicyConfig
+olcOverlay: ppolicy
+LDIFEOFPP
+  echo "[INFO] ppolicy overlay added to database (child entry)"
+fi
+
+echo ""
+echo "=== Setting olcPPolicyHashCleartext=TRUE ==="
+bash "${SCRIPT_DIR_OUTER}/bank-add-ppolicy-hash-cleartext.sh" --force 2>&1 || echo "[WARN] ppolicy hash cleartext had issues - continuing"
+
 # Restart after schema + module load
 systemctl restart symas-openldap-servers 2>/dev/null || systemctl restart slapd 2>/dev/null || true
 sleep 5
