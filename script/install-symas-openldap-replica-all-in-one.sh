@@ -157,18 +157,18 @@ fi
 # Add ppolicy overlay to database (cn=config — not replicated, needed on replica too)
 echo ""
 echo "=== Adding ppolicy overlay to database ==="
-DB_DN=$(ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -s sub '(&(objectClass=olcMdbConfig)(olcSuffix=*))' dn 2>/dev/null | grep "^dn: " | head -1 | sed 's/^dn: //')
+DB_DN=$(/opt/symas/bin/ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -s sub "(objectClass=olcMdbConfig)" dn 2>/dev/null | grep "^dn: " | head -1 | sed 's/^dn: //')
 PP_DN="olcOverlay=ppolicy,${DB_DN}"
-if ldapsearch -Y EXTERNAL -H ldapi:/// -b "$PP_DN" -s base dn 2>/dev/null | grep -q "^dn:"; then
+if /opt/symas/bin/ldapsearch -Y EXTERNAL -H ldapi:/// -b "$PP_DN" -s base dn 2>/dev/null | grep -q "^dn:"; then
   echo "[INFO] ppolicy overlay already on database"
 else
-  ldapmodify -Y EXTERNAL -H ldapi:/// <<LDIFEOFPP
-dn: ${DB_DN}
-changetype: modify
-add: olcOverlay
+  /opt/symas/bin/ldapadd -Y EXTERNAL -H ldapi:/// <<LDIFEOFPP
+dn: ${PP_DN}
+objectClass: olcOverlayConfig
+objectClass: olcPPolicyConfig
 olcOverlay: ppolicy
 LDIFEOFPP
-  echo "[INFO] ppolicy overlay added to database"
+  echo "[INFO] ppolicy overlay added to database (child entry)"
 fi
 
 echo ""
