@@ -154,6 +154,41 @@ else
   echo "[INFO] ppolicy module already loaded"
 fi
 
+# Add ppolicy overlay to database (cn=config — not replicated, needed on replica too)
+echo ""
+echo "=== Adding ppolicy overlay to database ==="
+DB_DN_OV=$(/opt/symas/bin/ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -s sub "(objectClass=olcMdbConfig)" dn 2>/dev/null | grep "^dn: " | head -1 | sed 's/^dn: //')
+PP_DN="olcOverlay=ppolicy,${DB_DN_OV}"
+if /opt/symas/bin/ldapsearch -Y EXTERNAL -H ldapi:/// -b "$PP_DN" -s base dn 2>/dev/null | grep -q "^dn:"; then
+  echo "[INFO] ppolicy overlay already on database"
+else
+  /opt/symas/bin/ldapadd -Y EXTERNAL -H ldapi:/// <<LDIFEOFPP
+dn: ${PP_DN}
+objectClass: olcOverlayConfig
+objectClass: olcPPolicyConfig
+olcOverlay: ppolicy
+LDIFEOFPP
+  echo "[INFO] ppolicy overlay added to database (child entry)"
+  PP_DN=$(/opt/symas/bin/ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -s sub "(olcOverlay=ppolicy)" dn 2>/dev/null | awk '/^dn: /{print $2; exit}')
+fi
+
+if [[ -n "${PP_DN:-}" ]]; then
+  /opt/symas/bin/ldapmodify -Y EXTERNAL -H ldapi:/// <<LDIFEOFHC 2>/dev/null
+dn: ${PP_DN}
+changetype: modify
+replace: olcPPolicyHashCleartext
+olcPPolicyHashCleartext: TRUE
+LDIFEOFHC
+  echo "[INFO] ppolicy hash cleartext set to TRUE"
+  /opt/symas/bin/ldapmodify -Y EXTERNAL -H ldapi:/// <<LDIFEOFDF 2>/dev/null
+dn: ${PP_DN}
+changetype: modify
+add: olcPPolicyDefault
+olcPPolicyDefault: cn=default,ou=Policies,${BASE_DN}
+LDIFEOFDF
+  echo "[INFO] Default ppolicy set (or already existed)"
+fi
+
 # Restart after schema + module load
 systemctl restart symas-openldap-servers 2>/dev/null || systemctl restart slapd 2>/dev/null || true
 sleep 5

@@ -14,10 +14,13 @@
 #     2. Missing entryUUID/entryCSN indices → refreshDelete loop
 #     3. cn=config checksum errors → warning on every restart
 #     4. ACL allowing replicator read access
+#     5. Accesslog DB size exhausted (MDB_MAP_FULL) → syncrepl fails
+#     6. Replicator size limits blocking syncrepl refresh
 #
 #   REPLICA:
 #     1. syncrepl starttls=no → all 14 binds rejected (err=13)
 #     2. ppolicy module not loaded → objectClass invalid per syntax
+#     2b. ppolicy overlay missing from cn=config → password policy fails
 #     3. Self-signed TLS certs missing/incomplete → STARTTLS fails
 #     4. Replica ACL missing → admin can't read data
 #     5. cn=config TLS cert paths stale → constraint violation
@@ -259,6 +262,35 @@ LDIF
     ok "Replicator user created"; PASS=$((PASS+1))
   fi
 
+  # ---- Fix 8: Accesslog DB size + replicator limits ----
+  banner "Master Fix 8: Accesslog size + replicator limits"
+  ACCESSLOG_DN=$(ldapi_search -b cn=config -s sub "(olcSuffix=cn=accesslog)" dn 2>/dev/null | awk '/^dn: /{print $2; exit}')
+  if [[ -n "${ACCESSLOG_DN:-}" ]]; then
+    CURRENT_SIZE=$(ldapi_search -b "$ACCESSLOG_DN" -s base -LLL olcDbMaxSize 2>/dev/null | awk '/^olcDbMaxSize:/{print $2; exit}')
+    CURRENT_SIZE="${CURRENT_SIZE:-unknown}"
+    ldapi_modify -f <(cat <<LDIF
+dn: ${ACCESSLOG_DN}
+changetype: modify
+replace: olcDbMaxSize
+olcDbMaxSize: 2147483648
+LDIF
+) && { ok "Accesslog maxsize=2GB (was: ${CURRENT_SIZE})"; PASS=$((PASS+1)); } || { bad "Accesslog size update failed"; FAIL=$((FAIL+1)); }
+  else
+    warn "No accesslog DB found — skipping"
+  fi
+  HAS_LIMITS=$(ldapi_search -b "$DB_DN" -s base -LLL olcLimits 2>/dev/null | grep -c "replicator" || true)
+  if [[ "$HAS_LIMITS" -gt 0 ]]; then
+    ok "Replicator limits already set"; PASS=$((PASS+1))
+  else
+    ldapi_modify -f <(cat <<LDIF
+dn: ${DB_DN}
+changetype: modify
+add: olcLimits
+olcLimits: dn.exact="${REPL_DN}" time.soft=unlimited time.hard=unlimited size.soft=unlimited size.hard=unlimited
+LDIF
+) && { ok "Replicator unlimited limits set"; PASS=$((PASS+1)); } || { bad "Limits update failed"; FAIL=$((FAIL+1)); }
+  fi
+
   # ---- Restart ----
   systemctl restart "$SLAPD_SVC"
   sleep 3
@@ -307,6 +339,40 @@ add: olcModuleLoad
 olcModuleLoad: ppolicy.la
 LDIF
 ) && { ok "ppolicy module loaded"; PASS=$((PASS+1)); } || { bad "ppolicy load failed"; FAIL=$((FAIL+1)); }
+  fi
+
+  # ---- Fix 2b: ppolicy overlay in cn=config ----
+  banner "Replica Fix 2b: ppolicy overlay"
+  PP_DN="olcOverlay=ppolicy,${DB_DN}"
+  OVERLAY_PRESENT=$(ldapi_search -b cn=config -s sub "(olcOverlay=ppolicy)" dn 2>/dev/null | grep -c "^dn:" || true)
+  if [[ "$OVERLAY_PRESENT" -gt 0 ]]; then
+    ok "ppolicy overlay exists"; PASS=$((PASS+1))
+  else
+    ldapadd -Y EXTERNAL -H "$LDAPI_URI" <<LDIFBY 2>/dev/null
+dn: ${PP_DN}
+objectClass: olcOverlayConfig
+objectClass: olcPPolicyConfig
+olcOverlay: ppolicy
+LDIFBY
+    if ldapi_search -b "$PP_DN" -s base dn 2>/dev/null | grep -q "^dn:"; then
+      ok "ppolicy overlay created"; PASS=$((PASS+1))
+      ldapi_modify -f <(cat <<LDIF
+dn: ${PP_DN}
+changetype: modify
+replace: olcPPolicyHashCleartext
+olcPPolicyHashCleartext: TRUE
+LDIF
+) 2>/dev/null && ok "ppolicy hash cleartext = TRUE" || warn "hash cleartext set failed — non-critical"
+      ldapi_modify -f <(cat <<LDIF
+dn: ${PP_DN}
+changetype: modify
+add: olcPPolicyDefault
+olcPPolicyDefault: cn=default,ou=Policies,${BASE_DN}
+LDIF
+) 2>/dev/null && ok "ppolicy default set" || warn "ppolicy default set failed — non-critical"
+    else
+      bad "ppolicy overlay creation failed"; FAIL=$((FAIL+1))
+    fi
   fi
 
   # ---- Fix 3: Self-signed TLS certs ----
