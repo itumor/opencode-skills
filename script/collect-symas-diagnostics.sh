@@ -376,7 +376,7 @@ collect_slapcat() {
     run_shell "slapcat-config-n0" "slapcat -F '${CONFIG_DIR}' -n 0 2>&1 || true"
 
     run_shell "slapcat-data-stats" \
-      "echo 'Entry count:'; slapcat -F '${CONFIG_DIR}' -n 1 2>/dev/null | grep -c '^dn:' || echo '0'; echo; echo 'Top-level DNs (no attributes):'; slapcat -F '${CONFIG_DIR}' -n 1 -s one -a '(objectClass=*)' 2>&1 | grep '^dn:' || true"
+      "echo 'Entry count:'; slapcat -F '${CONFIG_DIR}' -n 1 2>/dev/null | grep -c '^dn:' || echo '0'; echo; echo 'Entry count per level:'; slapcat -F '${CONFIG_DIR}' -n 1 2>/dev/null | grep '^dn:' | awk -F',' '{print NF}' | sort -n | uniq -c | sort -rn || true"
   else
     echo "slapcat not found" > "${OUT_DIR}/errors/slapcat-not-found.txt"
   fi

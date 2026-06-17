@@ -7,7 +7,7 @@ Collects a full diagnostic bundle from a Symas OpenLDAP RHEL 9 host (master or r
 - Systemd service status, journalctl logs, syslog
 - File permissions, SELinux contexts, package versions
 - TLS certificate metadata (subject, expiry, fingerprint)
-- Entry count + top-level DNs only (no user/employee/customer data)
+- Entry count + per-level statistics only (no user/employee/customer data)
 
 ## PRIVACY: No User Data Exported
 - **Does NOT dump LDAP user/employee/customer entries** — no `slapcat -n 1` data dump
