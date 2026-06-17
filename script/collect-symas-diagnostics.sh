@@ -5,17 +5,20 @@ set -Eeuo pipefail
 # Safe diagnostic bundle collector for Symas OpenLDAP on RHEL 9.
 # Gathers config, logs, runtime state, TLS metadata, LDAP diagnostics.
 #
+# PRIVACY: This script does NOT export, dump, or include any LDAP
+# user/employee/customer data. It captures only configuration (cn=config),
+# system state, logs, and metadata. No slapcat -n 1 data dumps.
+#
 # Default behavior:
-# - Redacts passwords, credentials, tokens, userPassword, olcRootPW
+# - Redacts passwords, credentials, tokens, userPassword, olcRootPW, emails
 # - Does NOT copy private keys
 # - Does NOT copy raw LMDB files
-# - Does NOT dump LDAP data unless --include-data-ldif is used
+# - Does NOT dump LDAP user data (entry counts only, no attributes/DNs)
 #
 # Usage:
 #   sudo bash collect-symas-diagnostics.sh
 #   sudo bash collect-symas-diagnostics.sh --since "14 days ago"
-#   sudo bash collect-symas-diagnostics.sh --include-data-ldif
-#   sudo bash collect-symas-diagnostics.sh --include-raw-db
+#   sudo bash collect-symas-diagnostics.sh --include-raw-db   # DANGER: raw data
 #   sudo bash collect-symas-diagnostics.sh --no-redaction
 
 CONFIG_DIR="/opt/symas/etc/openldap/slapd.d"
@@ -24,7 +27,6 @@ DATA_DIR="/var/symas/openldap-data/example"
 SINCE="7 days ago"
 OUT_BASE="/tmp"
 SERVICE_HINT=""
-INCLUDE_DATA_LDIF="false"
 INCLUDE_RAW_DB="false"
 INCLUDE_PRIVATE_KEYS="false"
 REDACT="true"
@@ -45,8 +47,7 @@ Options:
   --since "TIME"             journal/log time range.       Default: "7 days ago"
   --service NAME             systemd service name if known (e.g. symas-openldap)
 
-  --include-data-ldif        Run slapcat -n 1 and include redacted LDAP data LDIF
-  --include-raw-db           Copy raw data.mdb and lock.mdb. Sensitive + can be huge.
+  --include-raw-db           Copy raw data.mdb and lock.mdb. DANGER: all user data.
   --include-private-keys     Copy TLS private key files. Very sensitive.
   --no-redaction             Do not redact passwords/credentials from output.
 
@@ -55,7 +56,7 @@ Options:
 Examples:
   sudo bash $0
   sudo bash $0 --since "24 hours ago"
-  sudo bash $0 --service symas-openldap --include-data-ldif
+  sudo bash $0 --service symas-openldap
 EOF
 }
 
@@ -67,7 +68,6 @@ while [[ $# -gt 0 ]]; do
     --out-base)         OUT_BASE="$2";         shift 2 ;;
     --since)            SINCE="$2";            shift 2 ;;
     --service)          SERVICE_HINT="$2";     shift 2 ;;
-    --include-data-ldif)   INCLUDE_DATA_LDIF="true";    shift ;;
     --include-raw-db)      INCLUDE_RAW_DB="true";       shift ;;
     --include-private-keys) INCLUDE_PRIVATE_KEYS="true"; shift ;;
     --no-redaction)        REDACT="false";             shift ;;
@@ -109,7 +109,8 @@ redact_stream() {
       -e 's/(token[[:space:]]*[:=][[:space:]]*)[^,[:space:]]+/\1<REDACTED>/Ig' \
       -e 's/(secret[[:space:]]*[:=][[:space:]]*)[^,[:space:]]+/\1<REDACTED>/Ig' \
       -e 's/(api[-_]?key[[:space:]]*[:=][[:space:]]*)[^,[:space:]]+/\1<REDACTED>/Ig' \
-      -e 's/(private[-_]?key[[:space:]]*[:=][[:space:]]*)[^,[:space:]]+/\1<REDACTED>/Ig'
+      -e 's/(private[-_]?key[[:space:]]*[:=][[:space:]]*)[^,[:space:]]+/\1<REDACTED>/Ig' \
+      -e 's/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/<EMAIL_REDACTED>/g'
   fi
 }
 
@@ -193,12 +194,14 @@ OpenLDAP etc: ${OPENLDAP_ETC}
 Data dir: ${DATA_DIR}
 Since: ${SINCE}
 Redaction enabled: ${REDACT}
-Include data LDIF: ${INCLUDE_DATA_LDIF}
 Include raw DB: ${INCLUDE_RAW_DB}
 Include private keys: ${INCLUDE_PRIVATE_KEYS}
 
+PRIVACY: This bundle does NOT contain LDAP user/employee/customer data.
+It captures only configuration (cn=config), system state, and logs.
+
 IMPORTANT: Review this bundle before sharing externally.
-Even with redaction, logs may contain usernames, DNs, IPs, hostnames, and operational data.
+Logs may contain usernames, DNs, IPs, hostnames, and operational data.
 EOF
 
   run_shell "date"        "date -Is; uptime"
@@ -372,11 +375,8 @@ collect_slapcat() {
   if [[ -n "${SLAPCAT}" ]]; then
     run_shell "slapcat-config-n0" "slapcat -F '${CONFIG_DIR}' -n 0 2>&1 || true"
 
-    if [[ "${INCLUDE_DATA_LDIF}" == "true" ]]; then
-      run_shell "slapcat-data-n1" "slapcat -F '${CONFIG_DIR}' -n 1 2>&1 || true"
-    else
-      echo "Skipped slapcat -n 1 data dump. Use --include-data-ldif to include it." > "${OUT_DIR}/ldap/data-ldif-skipped.txt"
-    fi
+    run_shell "slapcat-data-stats" \
+      "echo 'Entry count:'; slapcat -F '${CONFIG_DIR}' -n 1 2>/dev/null | grep -c '^dn:' || echo '0'; echo; echo 'Entry count per level:'; slapcat -F '${CONFIG_DIR}' -n 1 2>/dev/null | grep '^dn:' | awk -F',' '{print NF}' | sort -n | uniq -c | sort -rn || true"
   else
     echo "slapcat not found" > "${OUT_DIR}/errors/slapcat-not-found.txt"
   fi
@@ -384,7 +384,7 @@ collect_slapcat() {
 
 collect_raw_db_optional() {
   if [[ "${INCLUDE_RAW_DB}" != "true" ]]; then
-    echo "Skipped raw LMDB files. Use --include-raw-db only with approval." > "${OUT_DIR}/meta/raw-db-skipped.txt"
+    echo "Skipped raw LMDB files. --include-raw-db copies ALL user data — use only with explicit approval and delete after review." > "${OUT_DIR}/meta/raw-db-skipped.txt"
     return 0
   fi
 
@@ -455,7 +455,7 @@ create_summary() {
     echo "## Important files copied"
     find "${OUT_DIR}/files" -type f 2>/dev/null | sed "s#${OUT_DIR}/files/##" | sort | head -300 || true
     echo
-    echo "## Skipped files"
+    echo "## Skipped files (private keys, LMDB — excluded for privacy)"
     cat "${OUT_DIR}/meta/skipped-files.txt" 2>/dev/null || true
     cat "${OUT_DIR}/meta/raw-db-skipped.txt" 2>/dev/null || true
     echo
@@ -485,7 +485,7 @@ make_archive() {
   echo
   echo " Review before sharing:"
   echo "   tar -tzf ${archive} | less"
-  echo "   grep -RniE 'password|credential|secret|token|private|userPassword|olcRootPW' ${OUT_DIR}"
+  echo "   grep -RniE 'password|credential|secret|token|private|userPassword|olcRootPW|@.*\.' ${OUT_DIR}"
 }
 
 main() {
@@ -494,7 +494,7 @@ main() {
   fi
 
   if [[ "${REDACT}" == "false" ]]; then
-    echo "WARNING: --no-redaction used. Bundle may contain secrets." | tee -a "${OUT_DIR}/meta/collector.log"
+    echo "WARNING: --no-redaction used. Bundle will contain raw passwords, credentials, and emails." | tee -a "${OUT_DIR}/meta/collector.log"
   fi
 
   if [[ "${INCLUDE_PRIVATE_KEYS}" == "true" ]]; then
@@ -502,7 +502,7 @@ main() {
   fi
 
   if [[ "${INCLUDE_RAW_DB}" == "true" ]]; then
-    echo "WARNING: --include-raw-db used. Bundle may contain full LDAP database." | tee -a "${OUT_DIR}/meta/collector.log"
+    echo "DANGER: --include-raw-db used. Bundle will contain ALL LDAP user/employee/customer data. Review and delete after use." | tee -a "${OUT_DIR}/meta/collector.log"
   fi
 
   collect_basic_meta
