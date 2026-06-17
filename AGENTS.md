@@ -15,6 +15,7 @@ nextgenopen = Symas OpenLDAP 2.6.13 on RHEL 9, master/replica. Satellite-managed
 |------|---------|
 | `script/install-symas-openldap-all-in-one.sh` | Master installer |
 | `script/install-symas-openldap-replica-all-in-one.sh` | Replica installer |
+| `script/bank-fix-replica-corruption.sh` | Replica recovery (master limits + ppolicy overlay + seed) |
 | `script/replica/r1..r9-*.sh` | Replica scripts |
 | `script/replica/test/test_replica_*.sh` | Replica tests |
 | `terraform/openldap-master-replica/` | AWS infra (VPC + EC2) |
@@ -66,7 +67,7 @@ source .env && bash script/zoho-mail.sh send to@example.com "Subject" "Body"
 
 ## Branch
 
-`feature/replica-no-ssh` (from `feature/replica-setup`). No SSH/SCP replica→master. Self-signed TLS default.
+`fix/bank-replica-corruption-recovery` (from `Development`). Recovery script + orchestrator patches for bank replica corruption. MR !26.
 
 ## AWS Lab (us-west-2)
 
@@ -146,11 +147,20 @@ Paths + permissions on master + replica:
 
 10. **`slapd -Tt` validates config without starting** — safe way to check config integrity.
 
+11. **ppolicy overlay NOT replicated by syncrepl** — must be created on replica independently in cn=config. The overlay DN gets renamed with `{0}` prefix after ldapadd; rediscover with `olcOverlay=ppolicy` search.
+
+12. **Accesslog DB exhaustion kills syncrepl** — when `cn=accesslog` hits `olcDbMaxSize`, all writes fail (MDB_MAP_FULL), replicas stop receiving changes. Default maxsize now 2GB (was 1GB).
+
+13. **Replicator needs unlimited limits** — `olcLimits: dn.exact="cn=replicator,..." time.soft=unlimited time.hard=unlimited size.soft=unlimited size.hard=unlimited` on master's MDB database DN, or syncrepl refresh hits SizeLimit.<｜end▁of▁thinking｜>Code: LDAP_SUCCESS
+
+14. **sudo resets PATH** — `sudo ldapsearch` (without full path `/opt/symas/bin/ldapsearch`) fails silently. Always use full symas path with sudo.
+
 ### Fix Scripts Summary
 
 | Script | Use |
 |--------|-----|
 | `bank-fix-all.sh` | **RECOMMENDED** — single script, detects master/replica, applies all fixes + seeds empty replica + verifies |
+| `bank-fix-replica-corruption.sh` | Full recovery: accesslog size, replicator limits, ppolicy overlay, seed from master |
 | `fix-master.sh` | Standalone master fix (checksums + indices) |
 | `fix-replica.sh` | Standalone replica fix (syncrepl TLS + ppolicy + TLS certs) |
 | `verify-master.sh` | 16-point health check |
@@ -168,3 +178,38 @@ Paths + permissions on master + replica:
 - Force sync: restart replica slapd + check contextCSN
 - Seed replica: `ldapsearch` from master → stop replica → wipe mdb → `slapadd` → start replica
 - Hardening toggle: delete `olcSecurity: simple_bind=128` from cn=config via ldapi
+
+## Diagnostic Collector
+
+| Path | Purpose |
+|------|---------|
+| `script/collect-symas-diagnostics.sh` | Safe diagnostic bundle collector (config + logs + LDAP diags + TLS) |
+| `script/COLLECTOR_README.md` | Usage instructions + options |
+
+Usage: `sudo bash collect-symas-diagnostics.sh --since "30 days ago" --include-data-ldif`
+Redacts passwords by default. Skips private keys + raw LMDB.
+
+## MRs — GitLab Only
+
+GitHub `itumor/opencode-skills` was force-pushed (unrelated history). **All MRs go to GitLab `nxt_edge/nextgenopen`.**
+
+| MR | Branch | Description |
+|----|--------|-------------|
+| !26 | fix/bank-replica-corruption-recovery | Accesslog size, ppolicy overlay, replicator limits |
+| !27 | feature/symas-diagnostic-collector | Diagnostic collector script |
+| !25 | feature/ppolicy-hash-cleartext | olcPPolicyHashCleartext=TRUE on ppolicy overlay |
+
+## AWS Lab Health Check (2026-06-17)
+
+Master (10.30.1.10): syncprov+ppolicy overlays OK, TLS OK, data OK
+Replica (10.30.2.10): syncrepl OK, ppolicy overlay present but **no default policy**, **no TLS certs in cn=config**, **no ACLs on mdb**, checksum warnings (harmless)
+
+## olcPPolicyHashCleartext Learnings (2026-06-17)
+
+**Script**: `bank-add-ppolicy-hash-cleartext.sh` — adds `olcPPolicyHashCleartext: TRUE` to ppolicy overlay entry in cn=config. Causes slapd to hash cleartext passwords before storing.
+
+**Key discoveries**:
+1. `olcPPolicyHashCleartext` is an attribute on the **ppolicy overlay** entry (cn=config), not the database policy entry
+2. cn=config is **NOT replicated** via syncrepl — must be set on both master and replica independently
+3. Replica needs ppolicy overlay created first — `ldapmodify add: olcOverlay` fails with "Object class violation (65)" on Symas builds; use `ldapadd` child entry with `objectClass: olcOverlayConfig` + `objectClass: olcPPolicyConfig` instead
+4. Both master+replica idempotent — script detects "already TRUE" and skips
