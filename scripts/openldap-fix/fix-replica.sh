@@ -366,6 +366,40 @@ LDIF
   }
 fi
 
+# ── 14c: Systemd TimeoutStopSec (prevent SIGKILL) ────────────────────
+banner "Check 13c: Systemd shutdown timeout"
+OVERRIDE_DIR="/etc/systemd/system/${SLAPD_SVC}.service.d"
+OVERRIDE_FILE="${OVERRIDE_DIR}/99-openldap-fix.conf"
+CURRENT_TIMEOUT=$(systemctl show "$SLAPD_SVC" -p TimeoutStopUSec 2>/dev/null | cut -d= -f2 || echo "0")
+# Default is 90s (90000000 usec). We want 300s.
+if [[ "${CURRENT_TIMEOUT:-0}" -ge 180000000 ]]; then
+  ok "Shutdown timeout ≥ 180s (no SIGKILL risk)"; PASS=$((PASS+1))
+else
+  mkdir -p "$OVERRIDE_DIR"
+  cat > "$OVERRIDE_FILE" <<SYSTEMD
+[Service]
+TimeoutStopSec=300
+SYSTEMD
+  systemctl daemon-reload
+  ok "Shutdown timeout set to 300s (was: $((${CURRENT_TIMEOUT:-90000000}/1000000))s)"; PASS=$((PASS+1))
+fi
+
+# ── 14d: Journald rate limiting ──────────────────────────────────────
+banner "Check 13d: Journald rate limiting"
+if grep -q "^RateLimitIntervalSec=0" /etc/systemd/journald.conf 2>/dev/null || \
+   grep -q "^RateLimitIntervalSec=0" /etc/systemd/journald.conf.d/*.conf 2>/dev/null; then
+  ok "Journald rate limiting disabled"; PASS=$((PASS+1))
+else
+  mkdir -p /etc/systemd/journald.conf.d
+  cat > /etc/systemd/journald.conf.d/99-openldap.conf <<'JOURNALD'
+[Journal]
+RateLimitIntervalSec=0
+RateLimitBurst=0
+JOURNALD
+  systemctl restart systemd-journald 2>/dev/null || true
+  ok "Journald rate limiting disabled"; PASS=$((PASS+1))
+fi
+
 # ── 15: Seed from master if empty ───────────────────────────────────
 banner "Check 14: Database seed status"
 DATA_COUNT=$(LDAPTLS_REQCERT=never ldapsearch -x -ZZ -H ldap://localhost \

@@ -408,6 +408,75 @@ LDIF
   }
 fi
 
+# ── 13f: Accesslog DB recovery (if MDB_MAP_FULL caused corruption) ──
+banner "Check 12f: Accesslog DB integrity"
+ACCESSLOG_DIR="/opt/symas/var/openldap-accesslog"
+if [[ -d "$ACCESSLOG_DIR" && -f "${ACCESSLOG_DIR}/data.mdb" ]]; then
+  ACCESSLOG_SIZE=$(stat -c%s "${ACCESSLOG_DIR}/data.mdb" 2>/dev/null || stat -f%z "${ACCESSLOG_DIR}/data.mdb" 2>/dev/null || echo 0)
+  if [[ "$ACCESSLOG_SIZE" -gt 0 ]]; then
+    # Check if accesslog has MDB_MAP_FULL pollution — export/wipe/reimport if needed
+    if journalctl -u "$SLAPD_SVC" --no-pager --since "1 hour ago" 2>/dev/null | grep -q "MDB_MAP_FULL.*cn=accesslog"; then
+      log "Accesslog DB has MDB_MAP_FULL errors — recovering..."
+      log "Exporting accesslog (slapcat -n 2)..."
+      slapcat -n 2 -l /tmp/accesslog-recovery.ldif 2>/dev/null
+      ACC_COUNT=$(grep -c "^dn:" /tmp/accesslog-recovery.ldif 2>/dev/null || echo "0")
+      log "Exported ${ACC_COUNT} accesslog entries"
+      systemctl stop "$SLAPD_SVC"; sleep 2
+      rm -f "${ACCESSLOG_DIR}/data.mdb" "${ACCESSLOG_DIR}/lock.mdb"
+      slapadd -n 2 -l /tmp/accesslog-recovery.ldif 2>/dev/null || warn "Accesslog reimport had warnings"
+      chown -R symas-openldap:symas-openldap "$ACCESSLOG_DIR" 2>/dev/null || chown -R ldap:ldap "$ACCESSLOG_DIR" 2>/dev/null || true
+      restorecon -Rv "$ACCESSLOG_DIR" 2>/dev/null || true
+      rm -f /tmp/accesslog-recovery.ldif
+      systemctl start "$SLAPD_SVC"; sleep 3
+      if systemctl is-active --quiet "$SLAPD_SVC" || pgrep -x slapd >/dev/null 2>&1; then
+        ok "Accesslog DB recovered from MDB_MAP_FULL"; PASS=$((PASS+1))
+      else
+        bad "Slapd failed after accesslog recovery"; FAIL=$((FAIL+1))
+      fi
+    else
+      ok "Accesslog DB healthy (no recent MDB_MAP_FULL)"; PASS=$((PASS+1))
+    fi
+  else
+    ok "Accesslog DB empty — no recovery needed"; PASS=$((PASS+1))
+  fi
+else
+  ok "No accesslog DB — skipping"; PASS=$((PASS+1))
+fi
+
+# ── 13g: Remove duplicate ppolicy module (cn=module{1}) ──────────────
+banner "Check 12g: Deduplicate ppolicy module"
+DUP_MOD=$(ldapi_search -b cn=config -s sub "(cn=module{1})" dn 2>/dev/null | grep -c "^dn:" || true)
+if [[ "$DUP_MOD" -eq 0 ]]; then
+  ok "No duplicate ppolicy module"; PASS=$((PASS+1))
+else
+  double_mod=$(ldapi_search -b "cn=module{1},cn=config" -s base -LLL olcModuleLoad 2>/dev/null || true)
+  if echo "$double_mod" | grep -q "ppolicy"; then
+    log "Removing duplicate cn=module{1} (ppolicy already in module{0})..."
+    ldapdelete -Y EXTERNAL -H ldapi:/// "cn=module{1},cn=config" 2>/dev/null && \
+      { ok "Duplicate ppolicy module removed"; PASS=$((PASS+1)); } || \
+      { warn "Could not remove duplicate — non-critical"; WARN=$((WARN+1)); }
+  else
+    ok "cn=module{1} exists but not ppolicy — keeping"; PASS=$((PASS+1))
+  fi
+fi
+
+# ── 13h: Journald rate limiting ──────────────────────────────────────
+banner "Check 12h: Journald rate limiting"
+JOURNALD_CONF="/etc/systemd/journald.conf"
+if grep -q "^RateLimitIntervalSec=0" "$JOURNALD_CONF" 2>/dev/null; then
+  ok "Journald rate limiting disabled (no message suppression)"; PASS=$((PASS+1))
+else
+  log "Disabling journald rate limiting for ${SLAPD_SVC}..."
+  mkdir -p /etc/systemd/journald.conf.d
+  cat > /etc/systemd/journald.conf.d/99-openldap.conf <<'JOURNALD'
+[Journal]
+RateLimitIntervalSec=0
+RateLimitBurst=0
+JOURNALD
+  systemctl restart systemd-journald 2>/dev/null || true
+  ok "Journald rate limiting disabled"; PASS=$((PASS+1))
+fi
+
 # ── 14: Restart ─────────────────────────────────────────────────────
 banner "Restarting slapd"
 dry "Would restart ${SLAPD_SVC}" || {
