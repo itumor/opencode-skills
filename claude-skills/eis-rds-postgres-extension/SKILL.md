@@ -8,6 +8,10 @@ description: >-
   error "<ext> must be loaded via shared_preload_libraries". ALSO use when an HDS / SOC2 / audit
   certification ticket asks for database audit logs on RDS, or when a customer asks for the change
   "with no downtime" (this skill explains why a reboot is unavoidable and how to minimize it).
+  ALSO use for the companion DB-log asks that usually follow an audit-logging request: changing
+  PostgreSQL on-instance log retention (rds.log_retention_period), publishing RDS logs to CloudWatch
+  (enabled_cloudwatch_logs_exports), or setting a CloudWatch log-group retention — these are
+  zero-downtime and don't need a reboot.
   Covers the eis-rds custom-parameter-group flip, the Atlantis apply, the maintenance-window-gated
   reboot, running CREATE EXTENSION against a private RDS from an EKS pod, and end-to-end verification.
 ---
@@ -118,3 +122,41 @@ Assert against the DB's own catalogs (`pg_extension`, `pg_settings`) — not jus
 **Honesty note for the report:** this verifies the extension is *loaded and configured*. It does NOT verify an audit event renders end-to-end (a DDL by an audited role producing a log line in CloudWatch/PG logs). If the ticket needs that proof, run a test DDL as an audited role and grep the logs — say so explicitly rather than implying it was tested.
 
 Then comment the result on the Jira ticket (@-mention the requester, e.g. `[~akerpauskas]`) with the three verification lines. See [[eis-jira-rest-ops]] for the REST mechanics, [[coext105501_caa_uat_pgaudit]] for the worked example.
+
+---
+
+## Companion: log retention + publish logs to CloudWatch (ALL zero-downtime, no reboot)
+
+These three asks almost always follow an audit-logging request ("keep logs longer", "ship them to CloudWatch"). None need a reboot — skip Step 4 entirely for these.
+
+**1. On-instance log retention (`rds.log_retention_period`)** — a *dynamic* parameter, **measured in minutes**: default `4320` (3 days), max `10080` (7 days). Append to the same `parameters` list:
+```hcl
+{ name = "rds.log_retention_period", value = "10080" }   # 7 days; no apply_method = immediate
+```
+
+**2. Publish logs to CloudWatch (`enabled_cloudwatch_logs_exports`)** — eis-rds already wires `rds_enabled_cloudwatch_logs_exports` to the wrapped module ([eis-rds/main.tf:150](terraform/modules/aws/eis-rds/main.tf)) but EIS consumer projects do **not** pass it, and the `rds` object variable can't be extended from a `_custom.tf` (object types are monolithic). Add it inline on the `module "rds"` block with a marker:
+```hcl
+# CUSTOM CloudWatchLogs | <JIRA> | publish postgres logs to CloudWatch
+rds_enabled_cloudwatch_logs_exports = ["postgresql"]   # postgres log type; "upgrade" only for major upgrades
+```
+Enabling export is an in-place `ModifyDBInstance` — no reboot.
+
+**3. CloudWatch log-group retention** — the module does NOT manage the log group; RDS auto-creates `/aws/rds/instance/<db>/postgresql` with **indefinite** retention. Declare it in a `*_custom.tf` to enforce retention:
+```hcl
+resource "aws_cloudwatch_log_group" "rds_postgresql" {
+  #checkov:skip=CKV_AWS_158:<reason — CloudWatch default at-rest encryption sufficient, CMK not in scope>
+  name              = "/aws/rds/instance/${local.project_prefix}rds01/postgresql"
+  retention_in_days = 365
+  tags              = { Issue = "<JIRA>" }
+}
+```
+**checkov GOTCHA (will block CI):** the credit-agricole `.checkov.yaml` skip-list contains `CKV_AWS_338` (retention ≥1yr — satisfied by 365) but NOT `CKV_AWS_158` (log-group KMS encryption). A new `aws_cloudwatch_log_group` without a CMK fails the blocking `terraform_checkov` pre-commit hook → add the inline `#checkov:skip=CKV_AWS_158` with a reason.
+**Ordering:** if export isn't enabled yet the group doesn't exist, so TF creates it cleanly. If a prior auto-created group exists → `terraform import aws_cloudwatch_log_group.rds_postgresql /aws/rds/instance/<db>/postgresql` then re-apply.
+
+**Verify (zero-downtime, no reboot):** `rds.log_retention_period`→`10080`; `EnabledCloudwatchLogsExports`→`["postgresql"]`; log-group `retentionInDays`→`365`; and `aws logs describe-log-streams --log-group-name /aws/rds/instance/<db>/postgresql` shows streams (proves logs are *actually publishing*, the real E2E signal).
+
+## Gotcha: pgaudit.log perpetual no-op plan diff (RDS value normalization)
+RDS stores comma-list param values **normalized without spaces** — `pgaudit.log = "role, ddl"` is stored as `"role,ddl"`. Terraform then shows `aws_db_parameter_group ... will be updated in-place` on EVERY plan of that stage (config "role, ddl" → state "role,ddl"), forever — a benign no-op that pollutes every MR's plan there. **Import does NOT fix it** (param group already in state; it's a value-format mismatch, not a missing resource). Fix = align config to the stored form: `value = "role,ddl"` (no space). Dynamic param, in-place, no reboot (verified COEXT-105501 — after the fix the param shows zero diff). General rule: a param-group value that keeps re-planning usually means RDS normalized the stored value (spaces/case/order) — match config to it.
+
+## Atlantis delivery order (do NOT deviate) [[feedback_atlantis_apply_before_merge]]
+`atlantis plan` (verify 0 destroy) → review/approval → **`atlantis apply` → confirm `Apply complete!` green → run the live verification above → THEN `glab mr merge` LAST**. Never merge before a verified-green apply — the open MR is your revert path if apply or verification fails. (SSO often expires mid-task; `aws sso login --profile <p>` is interactive/browser — if blocked, the apply output proves resources changed, but hold the merge until you can run the live value checks.)
