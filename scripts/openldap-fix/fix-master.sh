@@ -351,6 +351,63 @@ LDIF
   }
 fi
 
+# ── 13c: ppolicy lockout enforcement ───────────────────────────────
+banner "Check 12c: ppolicy lockout"
+PP_DN=$(ldapi_search -b cn=config -s sub "(olcOverlay=ppolicy)" dn 2>/dev/null | awk '/^dn: /{print $2; exit}')
+if [[ -n "${PP_DN:-}" ]]; then
+  LOCKOUT=$(ldapi_search -b "$PP_DN" -s base -LLL olcPPolicyUseLockout 2>/dev/null | grep "^olcPPolicyUseLockout:" || true)
+  if echo "$LOCKOUT" | grep -q "TRUE"; then
+    ok "ppolicy lockout enabled"; PASS=$((PASS+1))
+  else
+    dry "Would enable lockout" || {
+      ldapi_modify -f <(cat <<LDIF
+dn: ${PP_DN}
+changetype: modify
+replace: olcPPolicyUseLockout
+olcPPolicyUseLockout: TRUE
+LDIF
+) && { ok "ppolicy lockout enabled"; PASS=$((PASS+1)); } || { bad "Lockout update failed"; FAIL=$((FAIL+1)); }
+    }
+  fi
+fi
+
+# ── 13d: Operational logging ────────────────────────────────────────
+banner "Check 12d: Operational logging"
+CURRENT_LOG=$(ldapi_search -b cn=config -s base -LLL olcLogLevel 2>/dev/null | grep "^olcLogLevel:" || true)
+if echo "$CURRENT_LOG" | grep -q "stats"; then
+  ok "Log level includes stats"; PASS=$((PASS+1))
+else
+  dry "Would set olcLogLevel: stats" || {
+    ldapi_modify -f <(cat <<'LDIF'
+dn: cn=config
+changetype: modify
+replace: olcLogLevel
+olcLogLevel: stats
+LDIF
+) && { ok "Log level set to stats"; PASS=$((PASS+1)); } || { bad "Log level update failed"; FAIL=$((FAIL+1)); }
+  }
+fi
+
+# ── 13e: Main DB maxsize ────────────────────────────────────────────
+banner "Check 12e: Main DB maxsize"
+MAIN_SIZE=$(ldapi_search -b "$DB_DN" -s base -LLL olcDbMaxSize 2>/dev/null | awk '/^olcDbMaxSize:/{print $2; exit}')
+MAIN_SIZE="${MAIN_SIZE:-0}"
+MAIN_TARGET_GB=4
+MAIN_TARGET_BYTES=4294967296
+if [[ "$MAIN_SIZE" -ge "$MAIN_TARGET_BYTES" ]]; then
+  ok "Main DB maxsize ≥ ${MAIN_TARGET_GB}GB ($(($MAIN_SIZE/1073741824))GB)"; PASS=$((PASS+1))
+else
+  dry "Would set main DB maxsize to ${MAIN_TARGET_GB}GB" || {
+    ldapi_modify -f <(cat <<LDIF
+dn: ${DB_DN}
+changetype: modify
+replace: olcDbMaxSize
+olcDbMaxSize: ${MAIN_TARGET_BYTES}
+LDIF
+) && { ok "Main DB maxsize → ${MAIN_TARGET_GB}GB (was: $((${MAIN_SIZE}/1073741824))GB)"; PASS=$((PASS+1)); } || { bad "Main DB resize failed"; FAIL=$((FAIL+1)); }
+  }
+fi
+
 # ── 14: Restart ─────────────────────────────────────────────────────
 banner "Restarting slapd"
 dry "Would restart ${SLAPD_SVC}" || {
