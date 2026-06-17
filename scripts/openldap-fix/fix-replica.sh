@@ -317,6 +317,55 @@ else
   warn "TLS cert/key missing — generate before using StartTLS"; WARN=$((WARN+1))
 fi
 
+# ── 14b: Set CA cert + TLS protocol min ─────────────────────────────
+banner "Check 13b: TLS CA cert + protocol min"
+FIX_TLS=0
+CURRENT_CA=$(ldapi_search -b cn=config -s base -LLL olcTLSCACertificateFile 2>/dev/null | grep "^olcTLSCACertificateFile:" || true)
+CURRENT_PROTO=$(ldapi_search -b cn=config -s base -LLL olcTLSProtocolMin 2>/dev/null | grep "^olcTLSProtocolMin:" || true)
+
+if [[ -f "${TLS_DIR}/ca.crt" ]]; then
+  if echo "$CURRENT_CA" | grep -q "${TLS_DIR}/ca.crt"; then
+    ok "TLS CA cert configured"; PASS=$((PASS+1))
+  else
+    log "Setting olcTLSCACertificateFile → ${TLS_DIR}/ca.crt"
+    FIX_TLS=1
+  fi
+else
+  warn "No ca.crt found — syncrepl may need tls_reqcert=never"; WARN=$((WARN+1))
+fi
+
+if echo "$CURRENT_PROTO" | grep -q "3.3"; then
+  ok "TLS protocol min = 3.3"; PASS=$((PASS+1))
+else
+  log "Setting olcTLSProtocolMin → 3.3 (was: $(echo "$CURRENT_PROTO" | awk '{print $2; exit}'))"
+  FIX_TLS=1
+fi
+
+if [[ "$FIX_TLS" -eq 1 ]]; then
+  dry "Would fix TLS config" || {
+    if [[ -f "${TLS_DIR}/ca.crt" ]]; then
+    ldapi_modify -f <(cat <<LDIF
+dn: cn=config
+changetype: modify
+replace: olcTLSCACertificateFile
+olcTLSCACertificateFile: ${TLS_DIR}/ca.crt
+-
+replace: olcTLSProtocolMin
+olcTLSProtocolMin: 3.3
+LDIF
+) && { ok "TLS config updated (CA cert + TLS 1.3 min)"; PASS=$((PASS+1)); } || { bad "TLS config update failed"; FAIL=$((FAIL+1)); }
+    else
+    ldapi_modify -f <(cat <<LDIF
+dn: cn=config
+changetype: modify
+replace: olcTLSProtocolMin
+olcTLSProtocolMin: 3.3
+LDIF
+) && { ok "TLS protocol min set to 3.3 (no CA cert file)"; PASS=$((PASS+1)); } || { bad "TLS protocol update failed"; FAIL=$((FAIL+1)); }
+    fi
+  }
+fi
+
 # ── 15: Seed from master if empty ───────────────────────────────────
 banner "Check 14: Database seed status"
 DATA_COUNT=$(LDAPTLS_REQCERT=never ldapsearch -x -ZZ -H ldap://localhost \
