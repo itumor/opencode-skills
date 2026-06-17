@@ -443,23 +443,6 @@ else
   ok "No accesslog DB — skipping"; PASS=$((PASS+1))
 fi
 
-# ── 13g: Remove duplicate ppolicy module (cn=module{1}) ──────────────
-banner "Check 12g: Deduplicate ppolicy module"
-DUP_MOD=$(ldapi_search -b cn=config -s sub "(cn=module{1})" dn 2>/dev/null | grep -c "^dn:" || true)
-if [[ "$DUP_MOD" -eq 0 ]]; then
-  ok "No duplicate ppolicy module"; PASS=$((PASS+1))
-else
-  double_mod=$(ldapi_search -b "cn=module{1},cn=config" -s base -LLL olcModuleLoad 2>/dev/null || true)
-  if echo "$double_mod" | grep -q "ppolicy"; then
-    log "Removing duplicate cn=module{1} (ppolicy already in module{0})..."
-    ldapdelete -Y EXTERNAL -H ldapi:/// "cn=module{1},cn=config" 2>/dev/null && \
-      { ok "Duplicate ppolicy module removed"; PASS=$((PASS+1)); } || \
-      { warn "Could not remove duplicate — non-critical"; WARN=$((WARN+1)); }
-  else
-    ok "cn=module{1} exists but not ppolicy — keeping"; PASS=$((PASS+1))
-  fi
-fi
-
 # ── 13h: Journald rate limiting ──────────────────────────────────────
 banner "Check 12h: Journald rate limiting"
 JOURNALD_CONF="/etc/systemd/journald.conf"

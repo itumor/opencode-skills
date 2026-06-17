@@ -75,7 +75,7 @@ That's it. One script per node. It auto-detects role, runs all fixes, verifies, 
 | 6 | Replica missing syncprov | Replicas don't serve changes — syncprov only on master |
 | 7 | Syncrepl LDAP vs LDAPS | `starttls=yes` encrypts session — functionally identical |
 | 8 | Missing accesslog module | Accesslog is master-only audit feature |
-| 11 | Duplicate ppolicy module | Both entries point to same .so — no impact |
+| 11 | Duplicate ppolicy module | Both entries point to same .so — harmless, removal riskier than keeping |
 | 13 | Historical service instability | Pre-existing May/June restarts — current uptime stable |
 | 19 | Redundant master-ca.crt on replica | Extra file on disk — not referenced in config |
 | 21 | Missing back_monitor module | Optional monitoring — doesn't affect operations |
