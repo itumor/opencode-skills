@@ -298,3 +298,14 @@ fi
 echo ""
 echo "  To re-run verification:"
 echo "  sudo MASTER_IP=${MASTER_IP} ADMIN_PW=\$ADMIN_PW bash replica/r9-verify-replica.sh"
+
+echo ""
+echo "=== Running OpenLDAP fix + validation ==="
+SCRIPT_DIR_R="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FIX_DIR_R="${SCRIPT_DIR_R}/../scripts/openldap-fix"
+if [[ -f "${FIX_DIR_R}/bank-one-click-fix.sh" ]]; then
+  export MASTER_IP ADMIN_PW REPL_PW BASE_DN
+  bash "${FIX_DIR_R}/bank-one-click-fix.sh" || echo "[WARN] Fix script had non-critical warnings"
+else
+  echo "[WARN] bank-one-click-fix.sh not found at ${FIX_DIR_R} — skipping post-install fix"
+fi
