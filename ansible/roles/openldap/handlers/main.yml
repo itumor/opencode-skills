@@ -1,0 +1,21 @@
+---
+# Handlers — restart slapd when config changes
+
+- name: restart slapd
+  ansible.builtin.systemd:
+    name: "{{ slapd_service }}"
+    state: restarted
+    daemon_reload: true
+  register: _restart
+  until: _restart is success
+  retries: 3
+  delay: 4
+
+- name: daemon reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: reload firewalld
+  ansible.builtin.shell:
+    cmd: firewall-cmd --reload
+  changed_when: false

@@ -1,0 +1,77 @@
+---
+# Verify — health checks
+
+- name: Verify slapd is running
+  ansible.builtin.systemd:
+    name: "{{ slapd_service }}"
+  register: _service
+  failed_when: _service.status.ActiveState != 'active'
+
+- name: Verify ports listening
+  ansible.builtin.wait_for:
+    host: localhost
+    port: "{{ item }}"
+    timeout: 5
+  loop:
+    - 389
+    - 636
+
+- name: Verify ldapi bind
+  ansible.builtin.shell:
+    cmd: "{{ symas_bin }}/ldapwhoami -Y EXTERNAL -H {{ ldapi_uri }}"
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _ldapi
+  changed_when: false
+  failed_when: _ldapi.rc != 0
+
+- name: Verify admin StartTLS bind
+  ansible.builtin.shell:
+    cmd: "{{ symas_bin }}/ldapwhoami -x -ZZ -H ldap://localhost -D '{{ admin_dn }}' -w '{{ admin_pw }}'"
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+    LDAPTLS_REQCERT: "{{ tls_reqcert }}"
+  register: _admin_bind
+  changed_when: false
+  failed_when: _admin_bind.rc != 0
+
+- name: Verify base DN readable
+  ansible.builtin.shell:
+    cmd: "{{ symas_bin }}/ldapsearch -x -ZZ -H ldap://localhost -o ldif-wrap=no -D '{{ admin_dn }}' -w '{{ admin_pw }}' -b '{{ base_dn }}' -s base dn"
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+    LDAPTLS_REQCERT: "{{ tls_reqcert }}"
+  register: _base_dn
+  changed_when: false
+  failed_when: "not ('dn:' in _base_dn.stdout)"
+
+- name: Count entries
+  ansible.builtin.shell:
+    cmd: "{{ symas_bin }}/ldapsearch -x -ZZ -H ldap://localhost -D '{{ admin_dn }}' -w '{{ admin_pw }}' -b '{{ base_dn }}' -s sub dn"
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+    LDAPTLS_REQCERT: "{{ tls_reqcert }}"
+  register: _entries
+  changed_when: false
+
+- name: Show entry count
+  ansible.builtin.debug:
+    msg: "Entries: {{ _entries.stdout | regex_findall('^dn:') | length }}"
+
+- name: Get contextCSN
+  ansible.builtin.shell:
+    cmd: "{{ symas_bin }}/ldapsearch -x -ZZ -H ldap://localhost -o ldif-wrap=no -D '{{ admin_dn }}' -w '{{ admin_pw }}' -b '{{ base_dn }}' -s base contextCSN | awk '/^contextCSN:/{print $2}'"
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+    LDAPTLS_REQCERT: "{{ tls_reqcert }}"
+  register: _csn
+  changed_when: false
+
+- name: Show contextCSN
+  ansible.builtin.debug:
+    msg: "contextCSN: {{ _csn.stdout | default('not found') }}"

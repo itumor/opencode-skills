@@ -1,0 +1,11 @@
+---
+# Replica-specific variables
+openldap_role: replica
+server_id: 2
+replication_rid: 101
+syncprov_enabled: false
+accesslog_enabled: false
+create_ous: false
+create_replicator: false
+readonly: true
+update_ref: "ldap://{{ master_ip }}"

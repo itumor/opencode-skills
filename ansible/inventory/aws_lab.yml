@@ -1,0 +1,43 @@
+---
+# AWS Lab Inventory — OpenLDAP Master + Replica
+all:
+  vars:
+    ansible_user: ec2-user
+    ansible_become: true
+    ansible_become_method: sudo
+    ansible_ssh_private_key_file: "{{ lookup('env', 'HOME') }}/openscript/nextgenopen/terraform/openldap-master-replica/.local-ssh/openldap_master_replica"
+    ansible_python_interpreter: /usr/bin/python3
+
+    # LDAP defaults
+    base_dn: dc=eab,dc=bank,dc=local
+    admin_dn: cn=admin,dc=eab,dc=bank,dc=local
+    admin_pw: TheN1le1
+    replicator_dn: cn=replicator,dc=eab,dc=bank,dc=local
+    replicator_pw: replpass
+    tls_mode: true
+
+    # Paths (Symas OpenLDAP on RHEL 9)
+    symas_bin: /opt/symas/bin
+    symas_sbin: /opt/symas/sbin
+    symas_conf: /opt/symas/etc/openldap
+    symas_data: /var/symas/openldap-data
+    symas_run: /var/symas/run
+    slapd_conf: /opt/symas/etc/openldap/slapd.conf
+    slapd_dir: /opt/symas/etc/openldap/slapd.d
+    tls_dir: /opt/symas/etc/openldap/tls
+    schema_dir: /opt/symas/etc/openldap/schema
+    module_dir: /opt/symas/lib/openldap
+    db_dir: /var/symas/openldap-data/example
+    ldapi_uri: ldapi:///
+
+  children:
+    master:
+      hosts:
+        master1:
+          ansible_host: 54.186.123.12
+          ansible_host_private: 10.30.1.10
+    replica:
+      hosts:
+        replica1:
+          ansible_host: 44.243.198.216
+          ansible_host_private: 10.30.2.10

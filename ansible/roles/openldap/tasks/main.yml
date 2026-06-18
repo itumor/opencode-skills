@@ -1,0 +1,70 @@
+---
+# Role: openldap — main task entry point
+# Orchestrates the full pipeline: install → configure → harden → tune → verify
+
+- name: Set PATH fact
+  ansible.builtin.set_fact:
+    slapd_path: "{{ symas_bin }}:{{ symas_sbin }}:{{ ansible_env.PATH | default('/usr/bin') }}"
+  tags: always
+
+- name: Clean previous install
+  ansible.builtin.include_tasks: clean.yml
+  when: clean_install | bool
+  tags: [clean, never]
+
+- name: Install packages
+  ansible.builtin.include_tasks: install.yml
+  tags: [install]
+
+- name: Initialize cn=config
+  ansible.builtin.include_tasks: init.yml
+  tags: [init]
+
+- name: Start daemon
+  ansible.builtin.include_tasks: service.yml
+  tags: [service]
+
+- name: Fix LDAPI ACL
+  ansible.builtin.include_tasks: fix_acl.yml
+  tags: [fix_acl]
+
+- name: Load schemas
+  ansible.builtin.include_tasks: schema.yml
+  tags: [schema]
+
+- name: Configure TLS
+  ansible.builtin.include_tasks: tls.yml
+  when: tls_mode | bool and not (skip_tls | bool)
+  tags: [tls]
+
+- name: Create OUs and data
+  ansible.builtin.include_tasks: data.yml
+  when: create_ous | bool
+  tags: [data]
+
+- name: Configure replication
+  ansible.builtin.include_tasks: replication.yml
+  tags: [replication]
+
+- name: Configure password policy
+  ansible.builtin.include_tasks: ppolicy.yml
+  tags: [ppolicy]
+
+- name: Configure accesslog
+  ansible.builtin.include_tasks: accesslog.yml
+  when: accesslog_enabled | default(false) | bool
+  tags: [accesslog]
+
+- name: Security hardening
+  ansible.builtin.include_tasks: harden.yml
+  when: not (skip_harden | bool)
+  tags: [harden]
+
+- name: Performance tuning
+  ansible.builtin.include_tasks: tune.yml
+  when: not (skip_tune | bool)
+  tags: [tune]
+
+- name: Health verification
+  ansible.builtin.include_tasks: verify.yml
+  tags: [verify]

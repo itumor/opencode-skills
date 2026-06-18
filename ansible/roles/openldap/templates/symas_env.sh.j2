@@ -1,0 +1,4 @@
+# {{ ansible_managed }}
+export PATH={{ symas_bin }}:{{ symas_sbin }}:$PATH
+export LDAPCONF={{ symas_conf }}/ldap.conf
+export LDAPTLS_REQCERT={{ tls_reqcert }}

@@ -1,0 +1,21 @@
+---
+# Fix ACL — run old proven 8.0-fix_ldapi_acl.sh for cn=config manage access
+
+- name: Copy ACL fix script to target
+  ansible.builtin.copy:
+    src: "{{ lookup('env', 'HOME') }}/openscript/nextgenopen/script/8.0-fix_ldapi_acl.sh"
+    dest: /tmp/8.0-fix_ldapi_acl.sh
+    mode: "0755"
+
+- name: Run old ACL fix script
+  ansible.builtin.shell:
+    cmd: bash /tmp/8.0-fix_ldapi_acl.sh
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+    ADMIN_PW: "{{ admin_pw }}"
+    BASE_DN: "{{ base_dn }}"
+    LDAPTLS_REQCERT: "{{ tls_reqcert }}"
+  changed_when: true
+  failed_when: false
+  notify: restart slapd

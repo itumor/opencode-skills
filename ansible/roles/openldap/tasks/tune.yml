@@ -1,0 +1,36 @@
+---
+# Tune — performance tuning
+
+- name: Create systemd drop-in for NOFILE
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ slapd_service }}.service.d"
+    state: directory
+
+- name: Set NOFILE limit
+  ansible.builtin.copy:
+    content: |
+      [Service]
+      LimitNOFILE={{ nofile_limit }}
+    dest: "/etc/systemd/system/{{ slapd_service }}.service.d/override.conf"
+    mode: "0644"
+  notify: daemon reload
+
+- name: Set DB maxsize
+  ansible.builtin.shell:
+    cmd: |
+      BYTES=$(( {{ db_maxsize_gb }} * 1073741824 ))
+      {{ symas_bin }}/ldapmodify -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: olcDatabase={1}mdb,cn=config
+      changetype: modify
+      replace: olcDbMaxSize
+      olcDbMaxSize: $BYTES
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _size
+  changed_when: _size.rc == 0
+  failed_when: false
+
+- name: Restart after tuning
+  ansible.builtin.meta: flush_handlers

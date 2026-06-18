@@ -1,0 +1,109 @@
+---
+# e2e-test.yml — End-to-end test: install master + replica + verify replication
+# Usage: ansible-playbook -i inventory/aws_lab.yml playbooks/e2e-test.yml
+
+- name: Install OpenLDAP Master
+  hosts: master
+  gather_facts: true
+  vars:
+    openldap_role: master
+    clean_install: true
+    create_ous: true
+    create_replicator: true
+    accesslog_enabled: true
+  roles:
+    - role: openldap
+
+- name: Extract master CA cert to local
+  hosts: master
+  gather_facts: false
+  tasks:
+    - name: Fetch CA cert
+      ansible.builtin.fetch:
+        src: "{{ tls_ca_cert }}"
+        dest: /tmp/ansible-ca/
+        flat: true
+    - name: Fetch CA key
+      ansible.builtin.fetch:
+        src: "{{ tls_ca_key }}"
+        dest: /tmp/ansible-ca/
+        flat: true
+
+- name: Install OpenLDAP Replica
+  hosts: replica
+  gather_facts: true
+  vars:
+    openldap_role: replica
+    clean_install: true
+  pre_tasks:
+    - name: Copy master CA cert to replica
+      ansible.builtin.copy:
+        src: /tmp/ansible-ca/ca.crt
+        dest: /tmp/master-ca.crt
+        mode: "0644"
+    - name: Copy master CA key to replica
+      ansible.builtin.copy:
+        src: /tmp/ansible-ca/ca.key
+        dest: /tmp/master-ca.key
+        mode: "0600"
+    - name: Stage CA as replica certs
+      ansible.builtin.shell:
+        cmd: |
+          mkdir -p {{ tls_dir }}
+          cp /tmp/master-ca.crt {{ tls_dir }}/ca.crt
+          cp /tmp/master-ca.key {{ tls_dir }}/ca.key
+          cp /tmp/master-ca.crt {{ tls_dir }}/ldap.crt
+          cp /tmp/master-ca.key {{ tls_dir }}/ldap.key
+          chmod 600 {{ tls_dir }}/*.key
+          chmod 644 {{ tls_dir }}/*.crt
+      changed_when: true
+  roles:
+    - role: openldap
+
+- name: Verify replication
+  hosts: localhost
+  gather_facts: false
+  vars:
+    master_host: "{{ hostvars['master1'].ansible_host }}"
+    replica_host: "{{ hostvars['replica1'].ansible_host }}"
+  tasks:
+    - name: Wait for sync
+      ansible.builtin.pause:
+        seconds: 15
+
+    - name: Add test entry on master
+      ansible.builtin.shell:
+        cmd: |
+          ldapadd -x -ZZ -H ldap://{{ master_host }} \
+            -D "{{ admin_dn }}" -w "{{ admin_pw }}" <<LDIF
+          dn: uid=ansible-e2e,ou=Users,{{ base_dn }}
+          objectClass: inetOrgPerson
+          cn: Ansible E2E
+          sn: Test
+          uid: ansible-e2e
+          userPassword: test123
+          LDIF
+        executable: /bin/bash
+      environment:
+        LDAPTLS_REQCERT: never
+      register: _add
+      changed_when: _add.rc == 0
+
+    - name: Wait for replication
+      ansible.builtin.pause:
+        seconds: 10
+
+    - name: Verify entry on replica
+      ansible.builtin.shell:
+        cmd: |
+          ldapsearch -x -ZZ -o ldif-wrap=no -H ldap://{{ replica_host }} \
+            -D "{{ admin_dn }}" -w "{{ admin_pw }}" \
+            -b "uid=ansible-e2e,ou=Users,{{ base_dn }}" -s base dn
+        executable: /bin/bash
+      environment:
+        LDAPTLS_REQCERT: never
+      register: _result
+
+    - name: Report replication result
+      ansible.builtin.debug:
+        msg: "REPLICATION: {{ 'PASS' if ('result: 0' in _result.stdout) else 'FAIL' }}"

@@ -1,0 +1,72 @@
+---
+# Data — create base DN, OUs, replicator user via StartTLS admin bind
+
+- name: Wait for TLS to be ready
+  ansible.builtin.pause:
+    seconds: 3
+
+- name: Create base DN
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapadd -x -ZZ -H ldap://localhost \
+        -D "{{ admin_dn }}" -w "{{ admin_pw }}" <<LDIF
+      dn: {{ base_dn }}
+      objectClass: top
+      objectClass: dcObject
+      objectClass: organization
+      o: eab
+      dc: eab
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+    LDAPTLS_REQCERT: "{{ tls_reqcert }}"
+  register: _base
+  changed_when: _base.rc == 0
+  failed_when: false
+
+- name: Create OUs
+  ansible.builtin.shell:
+    cmd: |
+      for ou in Users Groups ServiceAccounts Systems Policies; do
+        {{ symas_bin }}/ldapadd -x -ZZ -H ldap://localhost \
+          -D "{{ admin_dn }}" -w "{{ admin_pw }}" <<LDIF
+      dn: ou=$ou,{{ base_dn }}
+      objectClass: organizationalUnit
+      ou: $ou
+      LDIF
+      done
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+    LDAPTLS_REQCERT: "{{ tls_reqcert }}"
+  register: _ous
+  changed_when: _ous.rc == 0
+  failed_when: false
+
+- name: Create replicator user
+  ansible.builtin.shell:
+    cmd: |
+      HASH=$(python3 -c "
+      import hashlib,base64,os
+      s=os.urandom(8)
+      h=hashlib.sha1(b'{{ replicator_pw }}')
+      h.update(s)
+      print('{SSHA}'+base64.b64encode(h.digest()+s).decode())
+      ")
+      {{ symas_bin }}/ldapadd -x -ZZ -H ldap://localhost \
+        -D "{{ admin_dn }}" -w "{{ admin_pw }}" <<LDIF
+      dn: {{ replicator_dn }}
+      objectClass: simpleSecurityObject
+      objectClass: organizationalRole
+      cn: replicator
+      userPassword: $HASH
+      description: Replication user
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+    LDAPTLS_REQCERT: "{{ tls_reqcert }}"
+  register: _repl_user
+  changed_when: _repl_user.rc == 0
+  failed_when: false

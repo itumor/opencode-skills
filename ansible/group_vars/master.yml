@@ -1,0 +1,9 @@
+---
+# Master-specific variables
+openldap_role: master
+server_id: 1
+replication_rid: 101
+syncprov_enabled: true
+accesslog_enabled: true
+create_ous: true
+create_replicator: true

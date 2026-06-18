@@ -1,0 +1,63 @@
+---
+# Password Policy — load ppolicy module + overlay + default policy
+
+- name: Load ppolicy module
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapmodify -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: cn=module{0},cn=config
+      changetype: modify
+      add: olcModuleLoad
+      olcModuleLoad: ppolicy.la
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _pp_mod
+  changed_when: _pp_mod.rc == 0
+  failed_when: false
+
+- name: Create ppolicy overlay
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapadd -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: olcOverlay=ppolicy,olcDatabase={1}mdb,cn=config
+      objectClass: olcOverlayConfig
+      objectClass: olcPPolicyConfig
+      olcOverlay: ppolicy
+      olcPPolicyDefault: cn=default,ou=Policies,{{ base_dn }}
+      olcPPolicyHashCleartext: TRUE
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _pp_overlay
+  changed_when: _pp_overlay.rc == 0
+  failed_when: false
+
+- name: Create default password policy entry
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapadd -x -ZZ -H ldap://localhost \
+        -D "{{ admin_dn }}" -w "{{ admin_pw }}" <<LDIF
+      dn: cn=default,ou=Policies,{{ base_dn }}
+      objectClass: pwdPolicy
+      objectClass: device
+      cn: default
+      pwdAttribute: userPassword
+      pwdMinLength: 8
+      pwdMaxAge: 10368000
+      pwdExpireWarning: 1296000
+      pwdInHistory: 5
+      pwdMaxFailure: 5
+      pwdLockout: TRUE
+      pwdLockoutDuration: 1800
+      pwdCheckQuality: 2
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+    LDAPTLS_REQCERT: "{{ tls_reqcert }}"
+  register: _pp_entry
+  changed_when: _pp_entry.rc == 0
+  failed_when: false

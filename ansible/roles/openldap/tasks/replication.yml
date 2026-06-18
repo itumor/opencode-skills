@@ -1,0 +1,99 @@
+---
+# Replication — configure syncprov (master) or syncrepl (replica)
+
+- name: Load syncprov module
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapmodify -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: cn=module{0},cn=config
+      changetype: modify
+      add: olcModuleLoad
+      olcModuleLoad: syncprov.la
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _syncprov_mod
+  changed_when: _syncprov_mod.rc == 0
+  failed_when: false
+
+- name: Add entryUUID/entryCSN indices
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapmodify -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: olcDatabase={1}mdb,cn=config
+      changetype: modify
+      add: olcDbIndex
+      olcDbIndex: entryUUID eq
+      -
+      add: olcDbIndex
+      olcDbIndex: entryCSN eq
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _indices
+  changed_when: _indices.rc == 0
+  failed_when: false
+
+# ---- Master: syncprov ----
+- name: Add syncprov overlay (master)
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapadd -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: olcOverlay=syncprov,olcDatabase={1}mdb,cn=config
+      objectClass: olcOverlayConfig
+      objectClass: olcSyncProvConfig
+      olcOverlay: syncprov
+      olcSpCheckpoint: 100 10
+      olcSpSessionLog: 100
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _syncprov
+  changed_when: _syncprov.rc == 0
+  failed_when: false
+  when: openldap_role == 'master'
+
+- name: Set serverID (master)
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapmodify -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: cn=config
+      changetype: modify
+      add: olcServerID
+      olcServerID: {{ server_id }}
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _sid
+  changed_when: _sid.rc == 0
+  failed_when: false
+  when: openldap_role == 'master'
+
+# ---- Replica: syncrepl ----
+- name: Configure syncrepl (replica)
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapmodify -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: olcDatabase={1}mdb,cn=config
+      changetype: modify
+      add: olcSyncrepl
+      olcSyncrepl: {0}rid={{ replication_rid }} provider=ldap://{{ master_ip }} bindmethod=simple binddn="{{ replicator_dn }}" credentials={{ replicator_pw }} searchbase="{{ base_dn }}" type=refreshAndPersist retry="5 5 300 +" timeout=1 starttls=yes tls_reqcert=never interval=00:00:00:10
+      -
+      add: olcReadOnly
+      olcReadOnly: TRUE
+      -
+      add: olcUpdateRef
+      olcUpdateRef: ldap://{{ master_ip }}
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _syncrepl
+  changed_when: _syncrepl.rc == 0
+  failed_when: false
+  when: openldap_role == 'replica'
+  notify: restart slapd

@@ -1,0 +1,49 @@
+---
+# Schema — load base schemas + custom schema
+
+- name: Load core schema (patched — skip searchGuide attribute)
+  ansible.builtin.shell:
+    cmd: |
+      sed '136,143d' {{ schema_dir }}/core.ldif | {{ symas_bin }}/ldapadd -Y EXTERNAL -H {{ ldapi_uri }} -f /dev/stdin
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _core
+  changed_when: _core.rc == 0
+  failed_when: false
+
+- name: Load cosine schema
+  ansible.builtin.shell:
+    cmd: "{{ symas_bin }}/ldapadd -Y EXTERNAL -H {{ ldapi_uri }} -f {{ schema_dir }}/cosine.ldif"
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _cosine
+  changed_when: _cosine.rc == 0
+  failed_when: false
+
+- name: Load inetorgperson schema
+  ansible.builtin.shell:
+    cmd: "{{ symas_bin }}/ldapadd -Y EXTERNAL -H {{ ldapi_uri }} -f {{ schema_dir }}/inetorgperson.ldif"
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _inet
+  changed_when: _inet.rc == 0
+  failed_when: false
+
+- name: Load custom schema (bank-custom)
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapadd -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: cn={{ schema_name }},cn=schema,cn=config
+      objectClass: olcSchemaConfig
+      cn: {{ schema_name }}
+      olcAttributeTypes: ( 1.3.6.1.4.1.4203.666.1.200 NAME 'orclisenabled' DESC 'Account enabled flag' EQUALITY caseIgnoreMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _custom
+  changed_when: _custom.rc == 0
+  failed_when: false

@@ -1,0 +1,51 @@
+---
+# Clean — stop slapd and remove all data
+
+- name: Stop slapd
+  ansible.builtin.systemd:
+    name: "{{ slapd_service }}"
+    state: stopped
+  failed_when: false
+
+- name: Kill any remaining slapd
+  ansible.builtin.shell:
+    cmd: pkill -9 slapd || true
+  changed_when: false
+  failed_when: false
+
+- name: Remove config directory
+  ansible.builtin.file:
+    path: "{{ slapd_dir }}"
+    state: absent
+
+- name: Remove data directory
+  ansible.builtin.file:
+    path: "{{ db_dir }}"
+    state: absent
+
+- name: Remove TLS certs
+  ansible.builtin.shell:
+    cmd: rm -f {{ tls_dir }}/*.crt {{ tls_dir }}/*.key {{ tls_dir }}/*.csr {{ tls_dir }}/*.cnf
+  changed_when: false
+  failed_when: false
+
+- name: Remove slapd.conf
+  ansible.builtin.file:
+    path: "{{ slapd_conf }}"
+    state: absent
+
+- name: Recreate directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ slapd_dir }}"
+    - "{{ db_dir }}"
+    - "{{ tls_dir }}"
+
+- name: Recreate run directory
+  ansible.builtin.file:
+    path: /var/symas/run
+    state: directory
+    mode: "0755"

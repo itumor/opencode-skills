@@ -1,0 +1,4 @@
+---
+# Group vars — applied to all hosts
+scenario: aws_lab
+master_ip: "{{ hostvars['master1'].ansible_host_private }}"

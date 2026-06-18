@@ -1,0 +1,77 @@
+---
+# Init — Exampledb.sh slapd.conf mode → slaptest conversion
+# ponytail: mirrors the old 3-install-example.sh approach exactly
+
+- name: Copy exampledb.sh to vendor location
+  ansible.builtin.copy:
+    src: "{{ lookup('env', 'HOME') }}/openscript/nextgenopen/script/Exampledb/exampledb.sh"
+    dest: /opt/symas/share/symas/exampledb.sh
+    mode: "0755"
+
+- name: Run Exampledb.sh in slapd.conf mode (option 1)
+  ansible.builtin.shell:
+    cmd: |
+      cd /opt/symas/share/symas
+      printf '1\nYES\nYES\nn\n' | bash exampledb.sh
+    executable: /bin/bash
+  changed_when: true
+  failed_when: false  # ponytail: YES prompts may fail on re-runs
+
+- name: Stop any running slapd
+  ansible.builtin.systemd:
+    name: "{{ slapd_service }}"
+    state: stopped
+  failed_when: false
+
+- name: Kill slapd forcefully
+  ansible.builtin.shell:
+    cmd: pkill -9 slapd || true
+  changed_when: false
+  failed_when: false
+
+- name: Wait for ports to release
+  ansible.builtin.pause:
+    seconds: 3
+
+- name: Clear and recreate config directory
+  ansible.builtin.file:
+    path: "{{ slapd_dir }}"
+    state: "{{ item }}"
+  loop:
+    - absent
+    - directory
+
+- name: Convert slapd.conf to cn=config via slaptest
+  ansible.builtin.shell:
+    cmd: "{{ symas_sbin }}/slaptest -f {{ slapd_conf }} -F {{ slapd_dir }}"
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  changed_when: true
+  failed_when: false  # ponytail: searchGuide warnings don't mean failure
+
+- name: Verify cn=config.ldif created
+  ansible.builtin.stat:
+    path: "{{ slapd_dir }}/cn=config.ldif"
+  register: _config_ldif
+
+- name: Fail if cn=config not created
+  ansible.builtin.fail:
+    msg: "slaptest failed — cn=config.ldif not found"
+  when: not _config_ldif.stat.exists
+
+- name: Fix slapd.conf ACL — grant ldapi manage access
+  ansible.builtin.replace:
+    path: "{{ slapd_conf }}"
+    regexp: 'by sockurl="\^ldapi:///\$" write'
+    replace: 'by sockurl="^ldapi:///$" manage'
+  changed_when: false
+
+- name: Write SLAPD defaults
+  ansible.builtin.copy:
+    content: |
+      SLAPD_URLS="ldap:/// ldapi:///"
+      SLAPD_OPTIONS="-F {{ slapd_dir }}"
+    dest: /etc/default/symas-openldap
+    mode: "0644"
+  notify: daemon reload

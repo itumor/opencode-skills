@@ -1,0 +1,19 @@
+---
+# master-install.yml — Full OpenLDAP Master installation via Ansible
+# Usage: ansible-playbook -i inventory/aws_lab.yml playbooks/master-install.yml
+#
+# Env override examples:
+#   ansible-playbook ... -e clean_install=true -e skip_test=true
+#   ansible-playbook ... -e tls_mode=false -e skip_harden=true
+
+- name: Install OpenLDAP Master
+  hosts: master
+  gather_facts: true
+  vars:
+    openldap_role: master
+    create_ous: true
+    create_replicator: true
+    accesslog_enabled: true
+
+  roles:
+    - role: openldap

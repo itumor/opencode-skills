@@ -1,0 +1,14 @@
+---
+# replica-install.yml — Full OpenLDAP Replica installation via Ansible
+# Usage: ansible-playbook -i inventory/aws_lab.yml playbooks/replica-install.yml
+#
+# Requires master already installed. Uses master's CA cert for TLS.
+
+- name: Install OpenLDAP Replica
+  hosts: replica
+  gather_facts: true
+  vars:
+    openldap_role: replica
+
+  roles:
+    - role: openldap

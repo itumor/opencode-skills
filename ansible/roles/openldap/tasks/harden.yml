@@ -1,0 +1,61 @@
+---
+# Harden — security hardening
+
+- name: Disable anonymous binds
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapmodify -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: cn=config
+      changetype: modify
+      add: olcDisallows
+      olcDisallows: bind_anon
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _anon
+  changed_when: _anon.rc == 0
+  failed_when: false
+
+- name: Require TLS for simple binds
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapmodify -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: cn=config
+      changetype: modify
+      replace: olcSecurity
+      olcSecurity: simple_bind=128
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _tls_req
+  changed_when: _tls_req.rc == 0
+  failed_when: false
+
+- name: Set TLS protocol minimum
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapmodify -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: cn=config
+      changetype: modify
+      replace: olcTLSProtocolMin
+      olcTLSProtocolMin: {{ tls_protocol_min }}
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _proto
+  changed_when: _proto.rc == 0
+  failed_when: false
+
+- name: Open firewall ports
+  ansible.builtin.firewalld:
+    port: "{{ item }}"
+    permanent: true
+    state: enabled
+  loop:
+    - 389/tcp
+    - 636/tcp
+  when: ansible_facts.services['firewalld.service'] is defined
+  notify: reload firewalld

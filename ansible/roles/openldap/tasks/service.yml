@@ -1,0 +1,53 @@
+---
+# Service — start and verify daemon
+
+- name: Enable and start slapd
+  ansible.builtin.systemd:
+    name: "{{ slapd_service }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  register: _svc
+  until: _svc is success
+  retries: 3
+  delay: 4
+
+- name: Wait for ldapi socket
+  ansible.builtin.wait_for:
+    path: /var/symas/run/ldapi
+    timeout: 10
+
+- name: Verify ldapi EXTERNAL bind
+  ansible.builtin.shell:
+    cmd: "{{ symas_bin }}/ldapwhoami -Y EXTERNAL -H {{ ldapi_uri }}"
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _ldapi
+  changed_when: false
+  failed_when: _ldapi.rc != 0
+
+- name: Hash rootpw via ldapi
+  ansible.builtin.shell:
+    cmd: |
+      HASH=$(python3 -c "
+      import hashlib,base64,os
+      s=os.urandom(8)
+      h=hashlib.sha1(b'{{ admin_pw }}')
+      h.update(s)
+      print('{SSHA}'+base64.b64encode(h.digest()+s).decode())
+      ")
+      for db in "olcDatabase={0}config,cn=config" "olcDatabase={1}mdb,cn=config"; do
+        {{ symas_bin }}/ldapmodify -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: $db
+      changetype: modify
+      replace: olcRootPW
+      olcRootPW: $HASH
+      LDIF
+      done
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  changed_when: true
+  failed_when: false  # ponytail: may fail on second run, OK
+  tags: [rootpw]

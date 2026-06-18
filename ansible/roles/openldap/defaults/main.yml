@@ -1,0 +1,55 @@
+---
+# Role defaults — overridable at any level
+openldap_role: master             # master or replica
+server_id: 1
+syncprov_enabled: true
+tls_mode: true
+clean_install: false
+skip_tls: false
+skip_harden: false
+skip_tune: false
+skip_test: true
+skip_diag: true
+accesslog_enabled: false
+
+# Paths
+symas_bin: /opt/symas/bin
+symas_sbin: /opt/symas/sbin
+symas_conf: /opt/symas/etc/openldap
+symas_data: /var/symas/openldap-data
+slapd_dir: /opt/symas/etc/openldap/slapd.d
+tls_dir: /opt/symas/etc/openldap/tls
+schema_dir: /opt/symas/etc/openldap/schema
+module_dir: /opt/symas/lib/openldap
+db_dir: /var/symas/openldap-data/example
+
+# LDAP
+base_dn: dc=eab,dc=bank,dc=local
+admin_dn: cn=admin,dc=eab,dc=bank,dc=local
+admin_pw: TheN1le1
+replicator_dn: cn=replicator,dc=eab,dc=bank,dc=local
+replicator_pw: replpass
+
+# TLS
+tls_ca_cert: "{{ tls_dir }}/ca.crt"
+tls_ca_key: "{{ tls_dir }}/ca.key"
+tls_server_cert: "{{ tls_dir }}/ldap.crt"
+tls_server_key: "{{ tls_dir }}/ldap.key"
+tls_protocol_min: "3.3"
+tls_reqcert: never
+
+# Replication
+master_ip: "{{ hostvars['master1'].ansible_host_private | default('10.30.1.10') }}"
+create_ous: false
+create_replicator: false
+replication_rid: 101
+readonly: false
+# Performance
+nofile_limit: 65536
+db_maxsize_gb: 32
+
+# Service
+slapd_service: symas-openldap-servers
+
+# Schema
+schema_name: bank-custom

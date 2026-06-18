@@ -1,0 +1,127 @@
+---
+# TLS — generate self-signed certs via openssl CLI + apply to cn=config
+
+- name: Generate CA private key
+  ansible.builtin.shell:
+    cmd: |
+      mkdir -p {{ tls_dir }}
+      openssl genrsa -out {{ tls_ca_key }} 4096 2>/dev/null
+      chmod 600 {{ tls_ca_key }}
+    creates: "{{ tls_ca_key }}"
+    executable: /bin/bash
+
+- name: Generate CA certificate
+  ansible.builtin.shell:
+    cmd: |
+      openssl req -x509 -new -nodes -key {{ tls_ca_key }} -sha256 -days 3650 \
+        -subj "/C=US/O=Lab-CA/OU=LDAP/CN=LDAP CA" -out {{ tls_ca_cert }} 2>/dev/null
+    creates: "{{ tls_ca_cert }}"
+    executable: /bin/bash
+
+- name: Generate server private key
+  ansible.builtin.shell:
+    cmd: |
+      openssl genrsa -out {{ tls_server_key }} 4096 2>/dev/null
+      chmod 600 {{ tls_server_key }}
+    creates: "{{ tls_server_key }}"
+    executable: /bin/bash
+
+- name: Build SAN config
+  ansible.builtin.copy:
+    content: |
+      [ req ]
+      default_bits = 4096
+      prompt = no
+      default_md = sha256
+      distinguished_name = dn
+      req_extensions = req_ext
+      [ dn ]
+      C=US
+      O=Lab-Org
+      OU=LDAP
+      CN={{ ansible_fqdn }}
+      [ req_ext ]
+      subjectAltName = @alt_names
+      [ alt_names ]
+      DNS.1 = {{ ansible_fqdn }}
+      DNS.2 = {{ ansible_hostname }}
+      DNS.3 = localhost
+      IP.1 = 127.0.0.1
+      IP.2 = {{ ansible_default_ipv4.address | default(ansible_host) }}
+    dest: "{{ tls_dir }}/san.cnf"
+    mode: "0644"
+
+- name: Generate CSR
+  ansible.builtin.shell:
+    cmd: |
+      openssl req -new -key {{ tls_server_key }} -out {{ tls_dir }}/ldap.csr \
+        -config {{ tls_dir }}/san.cnf 2>/dev/null
+    creates: "{{ tls_dir }}/ldap.csr"
+    executable: /bin/bash
+
+- name: Sign server certificate
+  ansible.builtin.shell:
+    cmd: |
+      openssl x509 -req -in {{ tls_dir }}/ldap.csr -CA {{ tls_ca_cert }} \
+        -CAkey {{ tls_ca_key }} -CAcreateserial -out {{ tls_server_cert }} \
+        -days 825 -sha256 -extensions req_ext -extfile {{ tls_dir }}/san.cnf 2>/dev/null
+    creates: "{{ tls_server_cert }}"
+    executable: /bin/bash
+
+- name: Clean up CSR and SAN config
+  ansible.builtin.file:
+    path: "{{ tls_dir }}/{{ item }}"
+    state: absent
+  loop:
+    - ldap.csr
+    - san.cnf
+
+- name: Fix TLS directory permissions
+  ansible.builtin.file:
+    path: "{{ tls_dir }}"
+    mode: "0700"
+    recurse: false
+
+- name: Restrict key file permissions
+  ansible.builtin.file:
+    path: "{{ item }}"
+    mode: "0600"
+  loop:
+    - "{{ tls_ca_key }}"
+    - "{{ tls_server_key }}"
+
+- name: Apply TLS config to cn=config
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapmodify -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: cn=config
+      changetype: modify
+      replace: olcTLSCertificateFile
+      olcTLSCertificateFile: {{ tls_server_cert }}
+      -
+      replace: olcTLSCertificateKeyFile
+      olcTLSCertificateKeyFile: {{ tls_server_key }}
+      -
+      replace: olcTLSCACertificateFile
+      olcTLSCACertificateFile: {{ tls_ca_cert }}
+      -
+      replace: olcTLSProtocolMin
+      olcTLSProtocolMin: {{ tls_protocol_min }}
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _tls_mod
+  changed_when: _tls_mod.rc == 0
+  failed_when: false
+  notify: restart slapd
+
+- name: Add ldaps:// to SLAPD_URLS
+  ansible.builtin.lineinfile:
+    path: /etc/default/symas-openldap
+    regexp: '^SLAPD_URLS='
+    line: 'SLAPD_URLS="ldap:/// ldaps:/// ldapi:///"'
+  notify: restart slapd
+
+- name: Restart for TLS to take effect
+  ansible.builtin.meta: flush_handlers

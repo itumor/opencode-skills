@@ -1,0 +1,64 @@
+---
+# Accesslog Audit — master only
+
+- name: Load accesslog module
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapmodify -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: cn=module{0},cn=config
+      changetype: modify
+      add: olcModuleLoad
+      olcModuleLoad: accesslog.la
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _al_mod
+  changed_when: _al_mod.rc == 0
+  failed_when: false
+
+- name: Create accesslog database
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapadd -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: olcDatabase={2}mdb,cn=config
+      objectClass: olcDatabaseConfig
+      objectClass: olcMdbConfig
+      olcDatabase: {2}mdb
+      olcDbDirectory: {{ symas_data }}/accesslog
+      olcSuffix: cn=accesslog
+      olcDbMaxSize: 2147483648
+      olcRootDN: {{ admin_dn }}
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _al_db
+  changed_when: _al_db.rc == 0
+  failed_when: false
+
+- name: Create accesslog data directory
+  ansible.builtin.file:
+    path: "{{ symas_data }}/accesslog"
+    state: directory
+    mode: "0700"
+
+- name: Add accesslog overlay to main DB
+  ansible.builtin.shell:
+    cmd: |
+      {{ symas_bin }}/ldapadd -Y EXTERNAL -H {{ ldapi_uri }} <<LDIF
+      dn: olcOverlay=accesslog,olcDatabase={1}mdb,cn=config
+      objectClass: olcOverlayConfig
+      objectClass: olcAccessLogConfig
+      olcOverlay: accesslog
+      olcAccessLogDB: cn=accesslog
+      olcAccessLogOps: writes
+      olcAccessLogSuccess: TRUE
+      olcAccessLogPurge: 07+00:00 01+00:00
+      LDIF
+    executable: /bin/bash
+  environment:
+    PATH: "{{ slapd_path }}"
+  register: _al_overlay
+  changed_when: _al_overlay.rc == 0
+  failed_when: false
