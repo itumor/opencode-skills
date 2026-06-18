@@ -28,39 +28,32 @@ scp $SSH_OPTS /tmp/ngoscripts.tar.gz ec2-user@$REPLICA:/tmp/
 ssh $SSH_OPTS ec2-user@$REPLICA 'tar xzf /tmp/ngoscripts.tar.gz -C /tmp/ && rm /tmp/ngoscripts.tar.gz'
 rm /tmp/ngoscripts.tar.gz
 
-# --- Step 2: Clean both nodes ---
-log "Cleaning master..."
-ssh $SSH_OPTS ec2-user@$MASTER 'sudo bash /tmp/script/0-clean-openldap.sh'
-
-log "Cleaning replica..."
-ssh $SSH_OPTS ec2-user@$REPLICA 'sudo bash /tmp/script/0-clean-openldap.sh'
-
-# --- Step 3: Install master with TLS ---
+# --- Step 2: Install master with TLS (clean + install) ---
 log "Installing master (TLS_MODE=yes)..."
-ssh $SSH_OPTS ec2-user@$MASTER 'sudo TLS_MODE=yes bash /tmp/script/install-symas-openldap-all-in-one.sh' || {
+ssh $SSH_OPTS ec2-user@$MASTER 'sudo TLS_MODE=yes CLEAN=1 SKIP_TEST=1 SKIP_DIAG=1 bash /tmp/script/master-all-in-one.sh' || {
   err "Master install failed"
 }
 
-# --- Step 4: Extract master CA cert ---
+# --- Step 3: Extract master CA cert ---
 log "Extracting master CA cert..."
 ssh $SSH_OPTS ec2-user@$MASTER 'sudo cat /opt/symas/etc/openldap/tls/ca.crt' > /tmp/master-ca.crt
 ssh $SSH_OPTS ec2-user@$MASTER 'sudo cat /opt/symas/etc/openldap/tls/ca.key' > /tmp/master-ca.key
 log "CA cert saved to /tmp/master-ca.crt ($(wc -c < /tmp/master-ca.crt) bytes)"
 
-# --- Step 5: Install replica with master CA ---
+# --- Step 4: Install replica with master CA (clean + install) ---
 log "Copying CA to replica..."
 scp $SSH_OPTS /tmp/master-ca.crt /tmp/master-ca.key ec2-user@$REPLICA:/tmp/
 
 log "Installing replica (TLS_MODE=yes + master CA)..."
 ssh $SSH_OPTS ec2-user@$REPLICA \
   "sudo MASTER_IP=$MASTER_PRIV ADMIN_PW=TheN1le1 REPL_PW=replpass \
-   TLS_MODE=yes COPY_FROM_MASTER=1 \
+   TLS_MODE=yes CLEAN=1 COPY_FROM_MASTER=1 \
    STAGED_CA_CERT=/tmp/master-ca.crt STAGED_CA_KEY=/tmp/master-ca.key \
-   LDAPTLS_REQCERT=never bash /tmp/script/install-symas-openldap-replica-all-in-one.sh" || {
+   LDAPTLS_REQCERT=never SKIP_TEST=1 SKIP_DIAG=1 bash /tmp/script/replica-all-in-one.sh" || {
   err "Replica install failed"
 }
 
-# --- Step 6: Test connections ---
+# --- Step 5: Test connections ---
 log "=== Testing Connections ==="
 
 export LDAPTLS_CACERT=/tmp/master-ca.crt
@@ -81,7 +74,7 @@ log "Replica LDAPS bind (port 636)..."
 ldapwhoami -x -H ldaps://$REPLICA:636 \
   -D "cn=admin,dc=eab,dc=bank,dc=local" -w "TheN1le1" || err "Replica LDAPS bind failed"
 
-# --- Step 7: Test replication ---
+# --- Step 6: Test replication ---
 log "=== Testing Replication ==="
 
 TEST_UID="repltest-$(date +%Y%m%d%H%M%S)"
