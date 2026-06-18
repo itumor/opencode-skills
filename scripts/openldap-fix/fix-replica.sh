@@ -3,7 +3,11 @@
 # ====================================================================
 # Validates and fixes Symas OpenLDAP replica configuration.
 # Covers: packages, service, ppolicy overlay, syncrepl, seed from
-# master, ACLs, hardening, frontend, read-only, interval keepalive.
+# master, ACLs, frontend, read-only, interval keepalive.
+#
+# Env vars (all optional):
+#   DB_MAXSIZE_GB=32       Main DB olcDbMaxSize in GB (default 32)
+#   OPENLDAP_HARDEN=yes    Opt-in: apply olcSecurity: simple_bind=128
 #
 # Idempotent — safe to run multiple times.
 # ====================================================================
@@ -63,6 +67,9 @@ ADMIN_PW="${ADMIN_PW:-TheN1le1}"
 REPL_DN="cn=replicator,${BASE_DN}"
 REPL_PW="${REPL_PW:-replpass}"
 MASTER_IP="${MASTER_IP:-}"
+DB_MAXSIZE_GB="${DB_MAXSIZE_GB:-32}"
+DB_MAXSIZE_BYTES=$(( DB_MAXSIZE_GB * 1073741824 ))
+OPENLDAP_HARDEN="${OPENLDAP_HARDEN:-no}"
 NEED_RESTART=0
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -290,21 +297,25 @@ LDIF
   }
 fi
 
-# ── 13: Hardening ───────────────────────────────────────────────────
-banner "Check 12: Hardening (olcSecurity)"
-CURRENT_SEC=$(ldapi_search -b cn=config -s base -LLL olcSecurity 2>/dev/null | grep "^olcSecurity:" || true)
-if echo "$CURRENT_SEC" | grep -q "simple_bind=128"; then
-  ok "Hardening active"; PASS=$((PASS+1))
+# ── 13: Hardening (opt-in) ───────────────────────────────
+banner "Check 12: Hardening (opt-in — OPENLDAP_HARDEN=yes to enable)"
+if [[ "${OPENLDAP_HARDEN}" != "yes" ]]; then
+  log "Hardening skipped — set OPENLDAP_HARDEN=yes to enforce TLS on binds"; SKIP=$((SKIP+1))
 else
-  dry "Would apply hardening" || {
-    ldapi_modify -f <(cat <<'LDIF'
+  CURRENT_SEC=$(ldapi_search -b cn=config -s base -LLL olcSecurity 2>/dev/null | grep "^olcSecurity:" || true)
+  if echo "$CURRENT_SEC" | grep -q "simple_bind=128"; then
+    ok "Hardening active"; PASS=$((PASS+1))
+  else
+    dry "Would apply hardening" || {
+      ldapi_modify -f <(cat <<'LDIF'
 dn: cn=config
 changetype: modify
 replace: olcSecurity
 olcSecurity: simple_bind=128
 LDIF
 ) && { ok "Hardening applied"; PASS=$((PASS+1)); NEED_RESTART=1; } || { bad "Hardening failed"; FAIL=$((FAIL+1)); }
-  }
+    }
+  fi
 fi
 
 # ── 14: TLS cert check ──────────────────────────────────────────────
@@ -400,6 +411,24 @@ JOURNALD
   ok "Journald rate limiting disabled"; PASS=$((PASS+1))
 fi
 
+# ── 14e: Main DB maxsize (match master) ─────────────────────────────
+banner "Check 14: Main DB maxsize"
+REPLICA_SIZE=$(ldapi_search -b "$DB_DN" -s base -LLL olcDbMaxSize 2>/dev/null | awk '/^olcDbMaxSize:/{print $2; exit}')
+REPLICA_SIZE="${REPLICA_SIZE:-0}"
+if [[ "$REPLICA_SIZE" -ge "$DB_MAXSIZE_BYTES" ]]; then
+  ok "Main DB maxsize ≥ ${DB_MAXSIZE_GB}GB ($(($REPLICA_SIZE/1073741824))GB)"; PASS=$((PASS+1))
+else
+  dry "Would set main DB maxsize to ${DB_MAXSIZE_GB}GB" || {
+    ldapi_modify -f <(cat <<LDIF
+dn: ${DB_DN}
+changetype: modify
+replace: olcDbMaxSize
+olcDbMaxSize: ${DB_MAXSIZE_BYTES}
+LDIF
+) && { ok "Main DB maxsize → ${DB_MAXSIZE_GB}GB (was: $((${REPLICA_SIZE:-0}/1073741824))GB)"; PASS=$((PASS+1)); } || { bad "Main DB resize failed"; FAIL=$((FAIL+1)); }
+  }
+fi
+
 # ── 15: Seed from master if empty ───────────────────────────────────
 banner "Check 14: Database seed status"
 DATA_COUNT=$(LDAPTLS_REQCERT=never ldapsearch -x -ZZ -H ldap://localhost \
@@ -465,11 +494,13 @@ fi
 # ═══════════════════════════════════════════════════════════════════════
 echo ""
 echo "============================================================"
-echo "  REPLICA FIX — Complete"
-echo "  Host:     ${HOSTNAME}"
-echo "  Service:  ${SLAPD_SVC}"
-echo "  Master:   ${MASTER_IP:-auto-detected}"
-echo "  PASS=${PASS}  FAIL=${FAIL}  WARN=${WARN}  SKIP=${SKIP}"
+  echo "  REPLICA FIX — Complete"
+  echo "  Host:     ${HOSTNAME}"
+  echo "  Service:  ${SLAPD_SVC}"
+  echo "  Master:   ${MASTER_IP:-auto-detected}"
+  echo "  Main DB:  ${DB_MAXSIZE_GB}GB"
+  echo "  Hardening: ${OPENLDAP_HARDEN}"
+  echo "  PASS=${PASS}  FAIL=${FAIL}  WARN=${WARN}  SKIP=${SKIP}"
 echo "  Backup:   ${BACKUP}"
 echo "============================================================"
 

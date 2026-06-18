@@ -56,7 +56,7 @@ check() {
   check 14 "Medium"   "Master"  "ACL break may deny access"                    "fix-master.sh (Check 9: clean ACLs)" fixed
   check 15 "Medium"   "Both"    "No operational logging"                       "fix-master.sh (olcLogLevel: stats)" fixed
   check 16 "Medium"   "Replica" "Small MDB maxsize"                            "fix-replica.sh (seed gives correct DB; auto-expand)" fixed
-  check 17 "Low"      "Both"    "No TLS enforcement (olcSecurity)"              "fix-master (Check 11) + fix-replica (Check 12)" fixed
+  check 17 "Low"      "Both"    "No TLS enforcement (olcSecurity)"              "fix-master (Check 11) + fix-replica (Check 12) — opt-in via OPENLDAP_HARDEN=yes" partial
   check 18 "Low"      "Replica" "olcReadOnly FALSE"                            "fix-replica.sh (Check 8)" fixed
   check 19 "Low"      "Replica" "Redundant master-ca.crt"                      "Cosmetic — not harmful" partial
   check 20 "Low"      "Replica" "Frontend ACLs empty"                          "fix-replica.sh (Check 10)" fixed

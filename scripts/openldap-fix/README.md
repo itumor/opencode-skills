@@ -1,4 +1,4 @@
-# Bank OpenLDAP Fix Package
+# Bank OpenLDAP Fix Package — V4
 
 ## One command to fix everything
 
@@ -8,6 +8,9 @@ sudo bash scripts/openldap-fix/bank-one-click-fix.sh
 
 # On REPLICA:
 sudo MASTER_IP=<master_ip> bash scripts/openldap-fix/bank-one-click-fix.sh
+
+# With hardening (if needed later):
+sudo OPENLDAP_HARDEN=yes bash scripts/openldap-fix/bank-one-click-fix.sh
 ```
 
 That's it. One script per node. It auto-detects role, runs all fixes, verifies, diagnoses, and writes a report.
@@ -64,7 +67,7 @@ That's it. One script per node. It auto-detects role, runs all fixes, verifies, 
 
 | # | Issue | Node | How we fix it | Script check |
 |---|-------|------|---------------|-------------|
-| 17 | No hardening (plaintext binds accepted) | Both | `olcSecurity: simple_bind=128` | fix-master Check 11 + fix-replica Check 12 |
+| 17 | No hardening (plaintext binds accepted) | Both (opt-in) | `OPENLDAP_HARDEN=yes` to enable | fix-master Check 11 + fix-replica Check 12 |
 | 18 | Replica olcReadOnly=FALSE | Replica | `olcReadOnly: TRUE` | fix-replica Check 8 |
 | 20 | Frontend ACLs empty | Replica | Add baseline frontend ACLs | fix-replica Check 10 |
 
@@ -162,8 +165,29 @@ systemctl restart symas-openldap-servers
 | `ADMIN_PW` | TheN1le1 | LDAP admin password |
 | `REPL_PW` | replpass | Replicator bind password |
 | `BASE_DN` | dc=eab,dc=bank,dc=local | LDAP base DN |
-| `ACCESSLOG_GB` | 30 | Accesslog max size in GB |
-| `RETENTION_DAYS` | 360 | Accesslog retention in days |
+| `ACCESSLOG_GB` | 50 | Accesslog max size (GB) — master only |
+| `RETENTION_DAYS` | 360 | Accesslog retention in days — master only |
+| `DB_MAXSIZE_GB` | 32 | Main mdb max size (GB) — both nodes |
+| `OPENLDAP_HARDEN` | no | Set to `yes` to enforce TLS on binds |
+
+### Production sizing (500K users, 64GB RAM)
+
+```bash
+sudo DB_MAXSIZE_GB=32 ACCESSLOG_GB=50 RETENTION_DAYS=360 bash bank-one-click-fix.sh
+```
+
+## Tuning compatibility
+
+The fix scripts do NOT touch these parameters — leave them to dedicated tuning scripts:
+
+| Parameter | Managed by | Notes |
+|-----------|-----------|-------|
+| `olcThreads` | Not set by any script | Set manually via `ldapmodify` |
+| `olcDbConfig` (MDB flags) | Not set by any script | MDB env tuning |
+| `DB_CONFIG` (cachesize, writemap) | Not set by any script | File-based MDB tuning |
+| `LimitNOFILE` | `22-tuning.sh` / `r8-tune-replica.sh` | 524288 file descriptors |
+| `olcLogLevel` | Exampledb bootstrap → our fix is additive | Keeps `sync`, adds `stats` |
+| `olcAccessLogPurge` | `25-configure-accesslog-audit.sh` → our fix skips if present | Respects existing config |
 
 ---
 

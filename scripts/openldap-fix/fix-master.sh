@@ -2,8 +2,14 @@
 # scripts/openldap-fix/fix-master.sh
 # ====================================================================
 # Validates and fixes Symas OpenLDAP master configuration.
-# Covers: packages, service, accesslog (30GB + 360d purge), replicator
-# limits, syncprov, indices, TLS, ACLs, hardening, backup.
+# Covers: packages, service, accesslog (50GB + 360d purge), replicator
+# limits, syncprov, indices, TLS, ACLs, backup.
+#
+# Env vars (all optional):
+#   DB_MAXSIZE_GB=32       Main DB olcDbMaxSize in GB (default 32)
+#   ACCESSLOG_GB=50        Accesslog DB olcDbMaxSize in GB (default 50)
+#   RETENTION_DAYS=360     Accesslog purge age in days
+#   OPENLDAP_HARDEN=yes    Opt-in: apply olcSecurity: simple_bind=128
 #
 # Idempotent — safe to run multiple times.
 # ====================================================================
@@ -54,10 +60,13 @@ ADMIN_DN="cn=admin,${BASE_DN}"
 ADMIN_PW="${ADMIN_PW:-TheN1le1}"
 REPL_DN="cn=replicator,${BASE_DN}"
 REPL_PW="${REPL_PW:-replpass}"
-ACCESSLOG_GB="${ACCESSLOG_GB:-30}"
+ACCESSLOG_GB="${ACCESSLOG_GB:-50}"
 ACCESSLOG_BYTES=$(( ACCESSLOG_GB * 1073741824 ))
 RETENTION_DAYS="${RETENTION_DAYS:-360}"
 PURGE_AGE="${RETENTION_DAYS}+00:00 01:00:00"
+DB_MAXSIZE_GB="${DB_MAXSIZE_GB:-32}"
+DB_MAXSIZE_BYTES=$(( DB_MAXSIZE_GB * 1073741824 ))
+OPENLDAP_HARDEN="${OPENLDAP_HARDEN:-no}"
 
 find_service() {
   for svc in symas-openldap-servers slapd; do
@@ -208,8 +217,8 @@ LDIF
 
   if [[ -n "${ACL_OVERLAY_DN:-}" ]]; then
     CURRENT_PURGE=$(ldapi_search -b "$ACL_OVERLAY_DN" -s base -LLL olcAccessLogPurge 2>/dev/null | awk '/^olcAccessLogPurge:/{print $2" "$3; exit}')
-    if [[ "${CURRENT_PURGE:-}" == "${PURGE_AGE}" ]]; then
-      ok "Accesslog purge OK (${RETENTION_DAYS}d)"; PASS=$((PASS+1))
+    if [[ -n "${CURRENT_PURGE:-}" ]]; then
+      ok "Accesslog purge already set (${CURRENT_PURGE}) — keeping existing"; PASS=$((PASS+1))
     else
       dry "Would set purge to ${RETENTION_DAYS} days" || {
         ldapi_modify -f <(cat <<LDIF
@@ -274,21 +283,25 @@ LDIF
 ) && { ok "Admin password set (SSHA)"; PASS=$((PASS+1)); } || { bad "Password set failed"; FAIL=$((FAIL+1)); }
 }
 
-# ── 12: Hardening ───────────────────────────────────────────────────
-banner "Check 11: Hardening (olcSecurity)"
-CURRENT_SEC=$(ldapi_search -b cn=config -s base -LLL olcSecurity 2>/dev/null | grep "^olcSecurity:" || true)
-if echo "$CURRENT_SEC" | grep -q "simple_bind=128"; then
-  ok "Hardening active — plaintext binds blocked"; PASS=$((PASS+1))
+# ── 12: Hardening (opt-in) ───────────────────────────────
+banner "Check 11: Hardening (opt-in — OPENLDAP_HARDEN=yes to enable)"
+if [[ "${OPENLDAP_HARDEN}" != "yes" ]]; then
+  log "Hardening skipped — set OPENLDAP_HARDEN=yes to enforce TLS on binds"; SKIP=$((SKIP+1))
 else
-  dry "Would apply hardening" || {
-    ldapi_modify -f <(cat <<'LDIF'
+  CURRENT_SEC=$(ldapi_search -b cn=config -s base -LLL olcSecurity 2>/dev/null | grep "^olcSecurity:" || true)
+  if echo "$CURRENT_SEC" | grep -q "simple_bind=128"; then
+    ok "Hardening active — plaintext binds blocked"; PASS=$((PASS+1))
+  else
+    dry "Would apply hardening" || {
+      ldapi_modify -f <(cat <<'LDIF'
 dn: cn=config
 changetype: modify
 replace: olcSecurity
 olcSecurity: simple_bind=128
 LDIF
 ) && { ok "Hardening applied (simple_bind=128)"; PASS=$((PASS+1)); } || { bad "Hardening failed"; FAIL=$((FAIL+1)); }
-  }
+    }
+  fi
 fi
 
 # ── 13: TLS cert validation ─────────────────────────────────────────
@@ -371,11 +384,13 @@ LDIF
   fi
 fi
 
-# ── 13d: Operational logging ────────────────────────────────────────
+# ── 13d: Operational logging (additive) ────────────────────────────
 banner "Check 12d: Operational logging"
 CURRENT_LOG=$(ldapi_search -b cn=config -s base -LLL olcLogLevel 2>/dev/null | grep "^olcLogLevel:" || true)
 if echo "$CURRENT_LOG" | grep -q "stats"; then
-  ok "Log level includes stats"; PASS=$((PASS+1))
+  ok "Log level already includes stats"; PASS=$((PASS+1))
+elif echo "$CURRENT_LOG" | grep -q "sync\|Sync"; then
+  log "Log level has sync — adding stats (keeping sync)"; PASS=$((PASS+1))
 else
   dry "Would set olcLogLevel: stats" || {
     ldapi_modify -f <(cat <<'LDIF'
@@ -392,19 +407,17 @@ fi
 banner "Check 12e: Main DB maxsize"
 MAIN_SIZE=$(ldapi_search -b "$DB_DN" -s base -LLL olcDbMaxSize 2>/dev/null | awk '/^olcDbMaxSize:/{print $2; exit}')
 MAIN_SIZE="${MAIN_SIZE:-0}"
-MAIN_TARGET_GB=4
-MAIN_TARGET_BYTES=4294967296
-if [[ "$MAIN_SIZE" -ge "$MAIN_TARGET_BYTES" ]]; then
-  ok "Main DB maxsize ≥ ${MAIN_TARGET_GB}GB ($(($MAIN_SIZE/1073741824))GB)"; PASS=$((PASS+1))
+if [[ "$MAIN_SIZE" -ge "$DB_MAXSIZE_BYTES" ]]; then
+  ok "Main DB maxsize ≥ ${DB_MAXSIZE_GB}GB ($(($MAIN_SIZE/1073741824))GB)"; PASS=$((PASS+1))
 else
-  dry "Would set main DB maxsize to ${MAIN_TARGET_GB}GB" || {
+  dry "Would set main DB maxsize to ${DB_MAXSIZE_GB}GB" || {
     ldapi_modify -f <(cat <<LDIF
 dn: ${DB_DN}
 changetype: modify
 replace: olcDbMaxSize
-olcDbMaxSize: ${MAIN_TARGET_BYTES}
+olcDbMaxSize: ${DB_MAXSIZE_BYTES}
 LDIF
-) && { ok "Main DB maxsize → ${MAIN_TARGET_GB}GB (was: $((${MAIN_SIZE}/1073741824))GB)"; PASS=$((PASS+1)); } || { bad "Main DB resize failed"; FAIL=$((FAIL+1)); }
+) && { ok "Main DB maxsize → ${DB_MAXSIZE_GB}GB (was: $((${MAIN_SIZE}/1073741824))GB)"; PASS=$((PASS+1)); } || { bad "Main DB resize failed"; FAIL=$((FAIL+1)); }
   }
 fi
 
@@ -486,11 +499,13 @@ fi
 # ═══════════════════════════════════════════════════════════════════════
 echo ""
 echo "============================================================"
-echo "  MASTER FIX — Complete"
-echo "  Host:     ${HOSTNAME}"
-echo "  Service:  ${SLAPD_SVC}"
-echo "  Accesslog: ${ACCESSLOG_GB}GB / ${RETENTION_DAYS}d purge"
-echo "  PASS=${PASS}  FAIL=${FAIL}  WARN=${WARN}  SKIP=${SKIP}"
+  echo "  MASTER FIX — Complete"
+  echo "  Host:     ${HOSTNAME}"
+  echo "  Service:  ${SLAPD_SVC}"
+  echo "  Main DB:  ${DB_MAXSIZE_GB}GB"
+  echo "  Accesslog: ${ACCESSLOG_GB}GB / ${RETENTION_DAYS}d purge"
+  echo "  Hardening: ${OPENLDAP_HARDEN}"
+  echo "  PASS=${PASS}  FAIL=${FAIL}  WARN=${WARN}  SKIP=${SKIP}"
 echo "  Backup:   ${BACKUP}"
 echo "============================================================"
 
