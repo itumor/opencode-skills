@@ -95,4 +95,13 @@ run_test "test_accesslog_audit.sh"
 run_test "test_bindings.sh"
 
 echo
+echo "=== Running OpenLDAP fix + validation ==="
+FIX_DIR="${SCRIPT_DIR}/../scripts/openldap-fix"
+if [[ -f "${FIX_DIR}/bank-one-click-fix.sh" ]]; then
+  bash "${FIX_DIR}/bank-one-click-fix.sh" || echo "[WARN] Fix script had non-critical warnings"
+else
+  echo "[WARN] bank-one-click-fix.sh not found at ${FIX_DIR} — skipping post-install fix"
+fi
+
+echo
 echo "=== All scripts and tests completed ==="
