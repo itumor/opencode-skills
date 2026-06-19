@@ -321,6 +321,70 @@ kubectl --context "$HUB" -n argocd get application istio-ingress-cluster-$CLUSTE
 
 **Hook-only changes + force sync:** ArgoCD hook resources (`argocd.argoproj.io/hook: PreSync/PostSync`) are NOT included in desired-vs-live state comparison — they never cause drift. After merging a hook-only change (like adding the gate), clusters stay "Synced" without re-running. Force sync via `kubectl patch application --type merge -p '{"operation":{"sync":...}}'` on all affected apps. See [[argocd_hook_only_force_sync]] memory.
 
+## Phase 6.9 — Fresh-cluster first-sync gotchas (EISSAASDEV-302 learnings)
+
+A **brand-new** cluster (first time the `all-components` ApplicationSet generates apps for it) hits
+failure modes that an established cluster never sees. All are now **durably fixed** in the clusters
+Copier template and the argocd repo — generate new clusters with `copier copy --vcs-ref V1.0.8` (the
+release carrying both fixes below) and they should NOT recur. The diagnoses/hot-fixes here are for
+when you DO see them (older template, or you need to confirm the fix is in effect). Sign-off for a
+freshly-provisioned env runs through the **`eis-onesuite-e2e-verify`** skill.
+
+**1. "synchronization tasks are not valid" — CRD dry-run cascade.** On a fresh cluster ArgoCD
+dry-runs ServiceMonitor / PrometheusRule / SLO CRs **before** `observascope-oss` has installed the
+prometheus-operator CRDs → the dry-run fails because the CRD doesn't exist yet → the error
+**cascade-fails** every CRD-consumer: `oidc`, `gen-dashboard`, `observascope-eis`, and the exporters.
+- **Durable fix (merged):** `argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true` on the
+  CRD-consumer templates (**argocd repo MR !298**) + bump `observascope-oss` syncWave **3 → 2** so the
+  keystone installs the CRDs earlier (clusters template). Both ship in **clusters template tag V1.0.8**.
+- **Verify the fix is in effect:** the consumer templates carry the `SkipDryRunOnMissingResource=true`
+  annotation; on a V1.0.8-generated cluster these apps go Synced+Healthy without the dry-run error.
+
+**2. istiod packs onto one node → starves monitoring DaemonSets.** The `istiod` component default is
+**3 replicas × 2-core CPU request with no spread**, so all 3 istiod pods land on **ONE** system node
+(driving it to ~100% CPU). The `node-exporter` / `x509-cert-exporter` / `grafana-alloy` **DaemonSet**
+pods pinned to that node then **can't schedule** → `observascope-{oss,exporters,logging}` sit stuck
+**Progressing**. The trap: the StatefulSets never flip to Degraded, so it masquerades as a slow
+warmup. It is **NOT a capacity problem** — aggregate cluster CPU is fine; it's a packing/spread issue.
+- **Durable fix (merged):** istiod soft `pilot.topologySpreadConstraints` (`whenUnsatisfiable:
+  ScheduleAnyway`, `topologyKey: kubernetes.io/hostname`, selector `istio: pilot`) in **clusters
+  template V1.0.8**.
+- **Per-cluster hot-fix if needed:** drop istiod `pilot.resources.requests.cpu` to `500m` in
+  `clusters/<c>/istiod/values.yaml`.
+- **Diagnose:** `kubectl describe node <n>` → check **Allocated resources** CPU (istiod node near
+  100%); the Pending DaemonSet pod's events show `FailedScheduling … Insufficient cpu`. (Needs
+  spoke pod-level access — see the temp-endpoint-open-then-REVERT trick in `eis-onesuite-e2e-verify`.)
+  See [[priorityclass_for_monitoring_daemonsets]] for the complementary PriorityClass approach.
+
+**3. Keystone secret-seeding (NOT template-fixable — seed BEFORE first sync).** `observascope-oss` is
+the **keystone**: it installs the prometheus-operator CRDs that everything else dry-runs against. It
+blocks on its own ExternalSecrets at `<c>/monitoring/observascope-oss/{ldap,objstore,slack-api-urls}`.
+- **objstore** = the cluster's **OWN** observascope S3 bucket, accessed via IRSA — set
+  `aws_sdk_auth: true` (no access keys in the secret). **ldap/slack** can be **disabled** in cluster
+  values if unused. Either way, unblocking the keystone **cascade-unblocks** oidc / gen-dashboard /
+  observascope-eis / exporters (they were only failing on the missing CRDs from #1).
+- Also seed: `gen-dashboard` needs `<c>/monitoring/gen-dashboard/registry` (the shared EIS Nexus
+  `dockerconfigjson`), and `headlamp` needs `<c>/monitoring/headlamp/headlamp-oidc`.
+- See [[argocd_fresh_cluster_smooth_install]] and the ExternalSecret-404 patterns in Phase 6.5 /
+  [[argocd_post_onboarding_failed_hooks]].
+
+**4. Private-cluster diagnosis access.** A spoke EKS API is **private** AND the hub kubectl is
+**RBAC-scoped to ArgoCD CRDs only** (you can list `applications/applicationsets/secrets -n argocd`
+but NOT pods/svc — and the `argocd-server` pods aren't on the hub cluster). So app-level health =
+hub; **pod-level** health needs spoke access. With the project SSO admin you can temporarily open the
+API to your IP, diagnose, then **REVERT to private**:
+```bash
+MYIP=$(curl -s https://checkip.amazonaws.com)
+aws eks update-cluster-config --name <c> --region <r> --profile <proj> \
+  --resources-vpc-config endpointPublicAccess=true,endpointPrivateAccess=true,publicAccessCidrs=${MYIP}/32
+# ... aws eks update-kubeconfig + kubectl describe node / get pods -n monitoring ...
+# !!! ALWAYS REVERT:
+aws eks update-cluster-config --name <c> --region <r> --profile <proj> \
+  --resources-vpc-config endpointPublicAccess=false,endpointPrivateAccess=true
+```
+Or use an in-VPC WorkSpace/bastion (none exists until the toolchain fleet is up). Full procedure +
+sign-off checklist in the **`eis-onesuite-e2e-verify`** skill.
+
 ## Phase 7 — Rollback
 
 `git revert` on the same MR branch and push. ApplicationSet re-reconciles within `requeueAfterSeconds: 120`. Release names match adopted state, so prior resources restore cleanly.
@@ -342,8 +406,12 @@ velero restore create restore-pre-mr --from-backup <backup-name> --kubecontext "
 - `eis_argocd_hub_topology.md` — hub-spoke topology + ApplicationSet defaults
 - `aws0fvdemoeks01_genesis420629_complete.md` — full real-world onboarding (FV demo, 18 components, K8s 1.35 + Istio 1.29)
 - `argocd_post_onboarding_failed_hooks.md` — 3 patterns when Synced+Healthy but Operation=Failed
+- `argocd_fresh_cluster_smooth_install.md` — fresh-cluster first-sync (CRD dry-run cascade + istiod packing); durable fixes in clusters template V1.0.8 + argocd MR !298 (Phase 6.9)
+- `priorityclass_for_monitoring_daemonsets.md` — PriorityClass to guarantee monitoring DaemonSet coverage on CPU-saturated nodes (Phase 6.9 complement)
 - `alb_tgb_targetType_immutable.md` — chart default ip vs TF instance; immutable webhook
 - `bitnami_redis8_secret_reload.md` — Redis password reload pattern; restart cycle
 - `tf_apply_live_monitoring_pattern.md` — real-time TF apply progress without tail buffer
 - `istio_sidecar_injection_check.md` — skip mesh-wide restart when no app namespace injection
 - `eis_secret_and_irsa_conventions.md` — Vault path conventions + IRSA naming
+
+**Related skill:** `eis-onesuite-e2e-verify` — end-to-end env sign-off (private-cluster access, the two first-sync failure modes, full checklist); the verification phase that runs after this onboarding (Phase 6 of the OneSuite master flow).
