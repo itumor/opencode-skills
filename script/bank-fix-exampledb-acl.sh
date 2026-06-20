@@ -124,15 +124,15 @@ banner "Fix 2: Database ACL — proper self-read restrictions"
 
 CURRENT_ACL=$(ldapi_search -b "$DB_DN" -s base -LLL olcAccess 2>/dev/null || true)
 
-if echo "$CURRENT_ACL" | grep -q "by self read"; then
-  ok "Database ACL already has self-read rule"; PASS=$((PASS+1))
+if echo "$CURRENT_ACL" | grep -q "by self read" && echo "$CURRENT_ACL" | grep -q "by dn.exact=.*write.*by self write"; then
+  ok "Database ACL already properly configured"; PASS=$((PASS+1))
 else
   log "Applying proper database ACLs"
   ldapi_modify -f <(cat <<LDIF
 dn: ${DB_DN}
 changetype: modify
 replace: olcAccess
-olcAccess: {0}to attrs=userPassword by self write by anonymous auth by * none
+olcAccess: {0}to attrs=userPassword by dn.exact="${ADMIN_DN}" write by self write by anonymous auth by * none
 olcAccess: {1}to * by dn.exact="${ADMIN_DN}" write by * break
 olcAccess: {2}to * by dn.exact="${REPL_DN}" read by * break
 olcAccess: {3}to dn.subtree="ou=Users,${BASE_DN}" by dn="uid=mw,ou=ServiceAccounts,ou=Systems,${BASE_DN}" write by * break
