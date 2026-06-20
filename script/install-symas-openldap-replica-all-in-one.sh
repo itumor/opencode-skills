@@ -216,9 +216,9 @@ fi
 if [[ "$TLS_MODE" == "no" ]]; then
   echo ""
   echo "=== TLS_MODE=no: Skipping TLS cert configuration ==="
-  echo "=== Running hardening (TLS enforcement disabled) ==="
+  echo "=== Running hardening (TLS hardening disabled unless OPENLDAP_HARDEN=yes) ==="
   run "r6-fix-replica-ldapi-acl.sh"
-  DISALLOW_ANON_BIND=1 REQUIRE_TLS_SIMPLE_BINDS=0 bash "${REPLICA_DIR}/r7-harden-replica.sh"
+  run "r7-harden-replica.sh"
 else
   run "r5-configure-replica-tls.sh"
   run "r6-fix-replica-ldapi-acl.sh"

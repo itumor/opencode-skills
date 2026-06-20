@@ -57,8 +57,8 @@ if [[ "$TLS_MODE" == "yes" ]]; then
 else
   echo
   echo "=== TLS_MODE=no: Skipping TLS cert configuration ==="
-  echo "=== Running hardening (TLS enforcement disabled) ==="
-  REQUIRE_TLS_SIMPLE_BINDS=0 bash "$SCRIPT_DIR/21-hardening.sh"
+  echo "=== Running hardening (TLS hardening disabled unless OPENLDAP_HARDEN=yes) ==="
+  run "21-hardening.sh"
 fi
 
 run "22-tuning.sh"
