@@ -64,7 +64,7 @@ External items go IN-PROGRESS the moment you've sent the ask. Items 1–2 above 
 | 5 | Customer on-prem VPN | infra owners | N-A (none) |
 | 6 | Access model (Private/WorkSpaces vs Public+WAF) | infra owners | DONE (Private) |
 | 7 | TGW RAM-shared into SaaS OUs | you (network-hub MR) | DONE (MR !9 merged) |
-| 8 | Vault `secret2/data/<code>` created + populated | Vault owner + you | IN-PROGRESS (knowledge gap) |
+| 8 | Vault `secret2/data/<code>`: branch + seed + AD-read grant (3 distinct actions; access≠seed) | DevOps (Denys/Sergii/Olha) + you | IN-PROGRESS |
 | 9 | Registry pull-secret | shared — reuse | DONE (no new seed) |
 | 10 | Selenoid golden-image AMI | you (ansible role, Phase 5) | TODO (deferred to P5) |
 | 11 | SSO permission set assignment | IdC admin (Markuss) | DONE |
@@ -226,14 +226,20 @@ Phase-3 TGW gate cleared.)
 Clients use the Vault path **`secret2/data/<project_code>`** (EISSAASDEV-302: **`secret2/data/axajp`**).
 **Do NOT use** the old `secret2/data/rnd/cicd/3.0/…` path for new clients.
 
-- ➕ **ACTION:** request the path be **created + assigned to your project/role**.
-- ⚠️ **Populating it with secrets uses an undocumented script** (ran for CAA by Sergii Kravchenko;
-  old-cloud-team siloed) — believed to **copy/transform from `secret2/data/ansible`** into the new
-  path. This is a **knowledge gap → reverse-engineer or escalate.** Consult the wiki "Vault – Rules
-  and Structure" doc.
-- This is a **Phase-5 (ansible) concern**, not a Phase-3 blocker — but request the path NOW (lead
-  time). The Phase-5 ansible copier takes this as the `vault` path. Vault addr:
-  `https://eqx-cvops-vault01.eqxdev.exigengroup.com`.
+- ➕ **ACTION:** kick off the setup NOW (lead time). It is **3 DISTINCT DevOps actions, each a
+  different owner** — request all three up front (verified EISSAASDEV-302, see
+  [[eissaasdev302_axajp_env_state]]):
+  1. **branch create** — Denys Zvenyhorodskyi.
+  2. **seed default secrets via script** — Sergii Kravchenko / Olha Isachenko.
+  3. **AD-group READ-access grant** — `Genesis_DevOps_CI` group / `genesis-ci` Vault policy must
+     include `secret2/data/<project_code>/*`.
+- ⚠️ **The access-grant (step 3) is SEPARATE from seeding (step 2) and easily missed: LIST ≠ READ.**
+  A token can list the path yet every data-leaf read returns `permission denied` until the AD-group
+  grant lands. Don't assume "branch seeded" = usable — Phase 5 verifies a direct leaf read.
+- This is a **Phase-5 (ansible) concern**, not a Phase-3 blocker — but request all three NOW. The
+  Phase-5 ansible copier takes this as the `vault` path. Vault addr:
+  `https://eqx-cvops-vault01.eqxdev.exigengroup.com`. Consult the wiki "Vault – Rules and Structure"
+  doc.
 
 ---
 

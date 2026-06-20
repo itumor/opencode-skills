@@ -243,6 +243,71 @@ aws cognito-idp list-user-pools --max-results 10 --profile <client-sso-profile> 
 
 ---
 
+## Toolchain-fleet apply gotchas (axajp run — verified EISSAASDEV-302)
+
+The 7 things that bit (or nearly bit) the `infra/services` fleet apply, in apply order. See
+[[eissaasdev302_axajp_env_state]].
+
+1. **eis-ec2 version — pin ≥ v2.2.1 BEFORE applying.** v2.0.0–v2.2.0 silently drop root-volume
+   `size`/`type`/**encryption** → unencrypted AMI-default roots. Bump the `?ref=` first (see the
+   Step-5 gotcha + the verify-volumes command there). [[eis_ec2_v6_root_block_device_rename]]
+
+2. **Subnet-sort host-churn (CRITICAL — fix this FIRST or it destroys the whole fleet).** `ec2.tf`
+   sets each host `subnet_id = element(data.aws_subnets.private.ids, (id-1) % len)`. But
+   `data.aws_subnets.private.ids` returns IDs in **NON-DETERMINISTIC order**, so every plan
+   reshuffles host→subnet and **all 9 toolchain hosts show `must be replaced`** spuriously. FIX: add a
+   local and use it inside `element()`:
+   ```hcl
+   locals { private_subnet_ids = tolist(sort(toset(data.aws_subnets.private.ids))) }
+   # subnet_id = element(local.private_subnet_ids, (id - 1) % length(local.private_subnet_ids))
+   ```
+   CAA uses an even-better **AZ-sorted** local (`for az in sort([... availability_zone])`). This is a
+   **template-owned file** → promote the fix upstream (template/client). **CROSS-PROJECT:**
+   `pto-reference` + `oc-sandbox` carry the SAME unsorted bug (at risk); CAA already fixed it locally.
+   [[aws_subnets_sort_fix]]
+
+3. **Security Hub already enabled → import, don't create.** Control Tower auto-enables Security Hub,
+   so `aws_securityhub_account.this` create returns **409 `ResourceConflictException`**. Adopt it:
+   ```hcl
+   import { to = aws_securityhub_account.this, id = "<account-id>" }
+   ```
+   After import the plan is a no-op.
+
+4. **AD trust to `aws.eis.cloud` fails on a fresh account → DEFER it.** The `directory_service` trust
+   to `aws.eis.cloud` errors **`"could not contact aws.eis.cloud"`** (state `Failed`). It's
+   **two-sided** — the EIS corporate-AD team must accept the reciprocal trust — and needs a **DNS
+   path** (conditional forwarder / resolver rule to `aws.eis.cloud`; resolvers **10.24.24.151** /
+   **10.24.24.135**). To apply infra/services clean: **comment ONLY the `"aws.eis.cloud"` trust entry,
+   KEEP the MicrosoftAD directory** (hosts join the local AXAJP AD). Re-add after eis-AD + DNS
+   coordination. **Flag as a coordination ticket.**
+
+5. **Selenoid ASG — defer if the golden AMI doesn't exist yet.** `asg.selenoidasg01` uses
+   `launch_template_image_regex = "selenoid_*"`; that golden AMI is built **later** by an Ansible role
+   (Vault-gated, Phase 5). If absent, **comment (marked CUSTOM)** the `selenoidasg01` ASG + its S3
+   bucket + the **`ta01` scaler EC2** so the 9 main hosts apply; re-add post-Ansible.
+
+6. **Red Hat Cloud Access ownership — Cloud team, NOT Markuss.** The private RHEL AMIs the fleet needs
+   (`eis-ec2-rhel-ami`, owner **309956199498**, `is-public=false`) are shared via **Red Hat Cloud
+   Access**, owned by the **Cloud team (`cloud-queue` Jira)**. **dzvenyhorodskyi** is the
+   Red Hat-subscription SME. A new account must be **added to the Cloud Access sharing**. Verify the
+   share landed before applying:
+   ```bash
+   aws ec2 describe-images --owners 309956199498 \
+     --filters Name=is-public,Values=false --profile <client-sso-profile> \
+     --query 'length(Images)'   # must be > 0
+   ```
+
+7. **Re-add the deferred EKS access entries AFTER the fleet applies** (the fleet IAM roles must exist
+   first): `jnk`/`bld`/`cicd-team` in dev/services. Before re-adding **cicd-team**, confirm the
+   **CICDAccess IdC permission set is assigned** — the `AWSReservedSSO_CICDAccess_*` role must be
+   present in the account:
+   ```bash
+   aws iam list-roles --profile <client-sso-profile> \
+     --query "Roles[?contains(RoleName,'AWSReservedSSO_CICDAccess')].RoleName"
+   ```
+
+---
+
 ## Step 6 — Hand-off to Phase 4
 
 When all three infra projects are green:

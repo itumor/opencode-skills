@@ -54,5 +54,20 @@ Pull the **published tag** (not the local working dir) and diff against the real
 3. `diff -rq $TMP/caa $TMP/render` for structural drift; `diff -ru …` for content.
 **Pass = zero files missing; only intentional additions** (`.copier-answers.yml`, `.env.example`, `.pre-commit-config.yaml`); **and every content diff is one of:** docs/cosmetic, the v1.0.1 whitespace cleanup, runtime-`{{ }}` generalizations that resolve to identical values (`{{ aws_region_code }}{{ project_name }}` with aws0/caa = `aws0caa…`), or the requirements.yml base-first reorder (same roles/versions). Confirm the Ansible `{{ }}` survived: `grep -rn '{{ project_name }}\|secret2/data' $TMP/render/inventory` should match the source byte-for-byte. The v1.0.1 E2E run confirmed all 13 content diffs benign, 0 unintended. Clean up `$TMP` after.
 
+## Vault access + run prerequisites (axajp run — verified EISSAASDEV-302)
+Before running ANY playbook, the project's Vault secrets must be both **seeded** and **readable**, and these are NOT the same gate.
+
+- **Path = `secret2/data/<project_code>`** (new-client convention, NOT `rnd/cicd/3.0/...`). Seeding is a **3-step DevOps process, each a distinct owner**: (1) **branch created** — Denys Zvenyhorodskyi; (2) **default secrets seeded via a script** — Sergii Kravchenko / Olha Isachenko; (3) **AD-group READ-access grant** — the **`Genesis_DevOps_CI`** group / **`genesis-ci`** Vault policy must include `secret2/data/<proj>/*`.
+- **LIST ≠ READ (the #1 gotcha).** A token can list metadata under the path yet every data-leaf read returns `permission denied` until step 3 lands. **Always verify a DIRECT leaf read before running** — don't trust "branch seeded":
+  ```bash
+  curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
+    "$VAULT_ADDR/v1/secret2/data/<project_code>/automation/ldap" | jq .data.data
+  ```
+  Non-empty `.data.data` = readable; `permission denied` = step 3 (AD-group grant) is still missing → escalate, don't start the run.
+- **Leaf paths the playbooks read:** `automation/ldap` (`adbinddn`/`adhost`/`adpassword`/`adsearch` = AD domain-join), `identities/cloud_team/{cicd/redhat, software/sslupdate-certificates-approle}`, `ssl/<zone>/ecdsa`.
+- **Run prereqs:** `VAULT_TOKEN` (via `vault login -method=ldap` → write to `.env`, which is **gitignored** — `chmod 600 .env`) **+** Vault read-access (above) **+** hosts SSM-reachable (`aws ssm describe-instance-information --profile <proj>`) **+** the `ansible-aws:local` docker runner built (`docker build -t ansible-aws:local docker/`). Set **`enable_selenoid=false`** if the Selenoid ASG was deferred in Phase 3 (golden AMI not yet built).
+
+See [[eissaasdev302_axajp_env_state]].
+
 ## Related
 [[ansible_copier_template]] (memory), [[clusters_template_v107]] (copier conditional-dir gating tricks), [[eis-account-vending]] / generate-new-project (the terraform half of onboarding), [[ansible_docker_runner_macos]] (the docker/run.sh runner the generated project uses), [[gitlab_module_repo_bootstrap]].
