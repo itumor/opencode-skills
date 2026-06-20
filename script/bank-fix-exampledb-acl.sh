@@ -132,8 +132,8 @@ else
 dn: ${DB_DN}
 changetype: modify
 replace: olcAccess
-olcAccess: {0}to attrs=userPassword by dn.exact="${ADMIN_DN}" write by self write by anonymous auth by * none
-olcAccess: {1}to * by dn.exact="${ADMIN_DN}" write by * break
+olcAccess: {0}to attrs=userPassword by dn.exact="${ADMIN_DN}" write by sockurl.exact="ldapi:///" write by self write by anonymous auth by * none
+olcAccess: {1}to * by dn.exact="${ADMIN_DN}" write by sockurl.exact="ldapi:///" write by * break
 olcAccess: {2}to * by dn.exact="${REPL_DN}" read by * break
 olcAccess: {3}to dn.subtree="ou=Users,${BASE_DN}" by dn="uid=mw,ou=ServiceAccounts,ou=Systems,${BASE_DN}" write by * break
 olcAccess: {4}to * by self read by * none
