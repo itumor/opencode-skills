@@ -52,6 +52,9 @@ run "18-service-account-password-policy-never-expire.sh"
 run "19-create-user-using-mw-user.sh"
 run "20-migration.sh"
 
+echo; echo "=== Running bank-fix-exampledb-acl.sh ==="
+bash "$SCRIPT_DIR/bank-fix-exampledb-acl.sh"
+
 if [[ "$TLS_MODE" == "yes" ]]; then
   run "24-configure-ssl-tls.sh"
   run "21-hardening.sh"

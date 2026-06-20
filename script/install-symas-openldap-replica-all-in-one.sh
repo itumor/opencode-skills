@@ -231,6 +231,11 @@ else
   echo "[INFO] PPM module not found — skipping (advanced complexity checks require licensed Symas)"
 fi
 
+# Apply ExampleDB ACL fix (prevents normal users from reading each other)
+echo ""
+echo "=== Applying ExampleDB ACL fix ==="
+bash "${SCRIPT_DIR_OUTER}/bank-fix-exampledb-acl.sh"
+
 # Ensure openssl is available for TLS cert generation
 if ! command -v openssl >/dev/null 2>&1; then
   echo "[INFO] Installing openssl for TLS cert generation"

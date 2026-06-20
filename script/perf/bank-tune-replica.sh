@@ -13,6 +13,7 @@ set -euo pipefail
 
 # === Tuning Parameters (validated) ===
 THREADS="${LDAP_THREADS:-32}"
+LMDB_MAIN="${LMDB_MAIN:-34359738368}"        # 32GB
 LMDB_MAIN="${LMDB_MAIN:-26843545600}"        # 25GB
 LMDB_CACHE="${LMDB_CACHE:-536870912}"         # 512MB
 LG_REGIONMAX="${LG_REGIONMAX:-262144}"        # 256KB
@@ -263,6 +264,7 @@ systemctl restart "$SVC"; sleep 5
 errors=0
 systemctl is-active --quiet "$SVC" && ok "Service running" || { fail "Service stopped"; errors=1; }
 
+if ldapwhoami -x -H ldaps://localhost:636 -D "cn=admin,${BASE_DN}" -w "${ADMIN_PW:-TheN1le1}" >/dev/null 2>&1; then
 if ldapwhoami -x -ZZ -H ldap://localhost -D "cn=admin,${BASE_DN}" -w "${ADMIN_PW:-TheN1le1}" >/dev/null 2>&1; then
     ok "Admin bind OK"
 else
