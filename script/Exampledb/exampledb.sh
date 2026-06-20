@@ -302,7 +302,7 @@ objectClass: olcDatabaseConfig
 objectClass: olcFrontendConfig
 olcDatabase: frontend
 olcAccess: {0}to dn=""  by * read
-olcAccess: {1}to *  by self write  by sockurl.exact="ldapi:///" write  by users read  by anonymous auth
+olcAccess: {1}to *  by self write  by sockurl.exact="ldapi:///" write  by anonymous auth
 
 dn: olcDatabase=config,cn=config
 objectClass: olcDatabaseConfig
