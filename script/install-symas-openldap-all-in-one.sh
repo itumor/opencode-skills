@@ -56,9 +56,6 @@ run "20-migration.sh"
 echo; echo "=== Running bank-fix-exampledb-acl.sh ==="
 bash "$SCRIPT_DIR/bank-fix-exampledb-acl.sh"
 
-echo; echo "=== Running MW ACL fix + idle timeout ==="
-run "29-fix-mw-acl-idle.sh"
-
 if [[ "$TLS_MODE" == "yes" ]]; then
   run "24-configure-ssl-tls.sh"
   run "21-hardening.sh"
@@ -82,6 +79,10 @@ if [[ -f "$PERF_TUNE" ]]; then
 else
   echo "[INFO] bank-tune-master.sh not found - skipping comprehensive tuning"
 fi
+
+echo
+echo "=== Running MW ACL fix + idle timeout ==="
+run "29-fix-mw-acl-idle.sh"
 
 echo
 echo "=== Running tests ==="
