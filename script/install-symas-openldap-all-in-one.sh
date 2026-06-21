@@ -49,13 +49,15 @@ run "28-fix-ppolicy-seconds.sh"
 run "bank-add-ppolicy-hash-cleartext.sh"
 run "17-create_mw_user.sh"
 run "27-configure-mw-acl.sh"
-run "29-fix-mw-acl-idle.sh"
 run "18-service-account-password-policy-never-expire.sh"
 run "19-create-user-using-mw-user.sh"
 run "20-migration.sh"
 
 echo; echo "=== Running bank-fix-exampledb-acl.sh ==="
 bash "$SCRIPT_DIR/bank-fix-exampledb-acl.sh"
+
+echo; echo "=== Running MW ACL fix + idle timeout ==="
+run "29-fix-mw-acl-idle.sh"
 
 if [[ "$TLS_MODE" == "yes" ]]; then
   run "24-configure-ssl-tls.sh"

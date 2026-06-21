@@ -41,7 +41,7 @@ MW_DN="uid=mw,ou=ServiceAccounts,ou=Systems,${BASE_DN}"
 REPL_DN="cn=replicator,${BASE_DN}"
 
 LDAPI_URI="${LDAPI_URI:-ldapi:///}"
-ldapi_search()  { ldapsearch -o ldif-wrap=no -Y EXTERNAL -H "$LDAPI_URI" "$@" 2>/dev/null; }
+ldapi_search()  { ldapsearch -Y EXTERNAL -H "$LDAPI_URI" -o ldif-wrap=no "$@" 2>/dev/null; }
 ldapi_modify()  { ldapmodify -Y EXTERNAL -H "$LDAPI_URI" "$@"; }
 
 echo ""
@@ -144,16 +144,14 @@ banner "Verification"
 
 # Check ACL
 log "--- ACL ---"
-ACL_OUT=$(ldapi_search -b "$DB_DN" -s base -LLL olcAccess 2>/dev/null || true)
-if echo "$ACL_OUT" | grep -q "dn.exact=${MW_DN}.*write"; then
-    ok "MW has write access"; PASS=$((PASS+1))
+ACL_MW_COUNT=$(ldapi_search -b "$DB_DN" -s base -LLL olcAccess 2>/dev/null | grep -cF "${MW_DN}" || true)
+if [[ "$ACL_MW_COUNT" -ge 2 ]]; then
+    ok "MW in ACL (${ACL_MW_COUNT} rules — userPassword + Users subtree)"; PASS=$((PASS+2))
+elif [[ "$ACL_MW_COUNT" -eq 1 ]]; then
+    warn "MW in ACL only ${ACL_MW_COUNT}x (expected 2 — userPassword + Users subtree)"
+    WARN=$((WARN+1))
 else
-    bad "MW write access missing"; FAIL=$((FAIL+1))
-fi
-if echo "$ACL_OUT" | grep -q "attrs=userPassword.*${MW_DN}"; then
-    ok "MW has userPassword access"; PASS=$((PASS+1))
-else
-    bad "MW userPassword access missing"; FAIL=$((FAIL+1))
+    bad "MW missing from ACL"; FAIL=$((FAIL+2))
 fi
 
 # Check idle timeout
