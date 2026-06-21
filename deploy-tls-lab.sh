@@ -36,8 +36,8 @@ log "Cleaning replica..."
 ssh $SSH_OPTS ec2-user@$REPLICA 'sudo bash /tmp/script/0-clean-openldap.sh'
 
 # --- Step 3: Install master with TLS ---
-log "Installing master (TLS_MODE=yes)..."
-ssh $SSH_OPTS ec2-user@$MASTER 'sudo TLS_MODE=yes bash /tmp/script/install-symas-openldap-all-in-one.sh' || {
+log "Installing master (TLS_MODE=yes OPENLDAP_HARDEN=yes)..."
+ssh $SSH_OPTS ec2-user@$MASTER 'sudo TLS_MODE=yes OPENLDAP_HARDEN=yes bash /tmp/script/install-symas-openldap-all-in-one.sh' || {
   err "Master install failed"
 }
 
@@ -54,7 +54,7 @@ scp $SSH_OPTS /tmp/master-ca.crt /tmp/master-ca.key ec2-user@$REPLICA:/tmp/
 log "Installing replica (TLS_MODE=yes + master CA)..."
 ssh $SSH_OPTS ec2-user@$REPLICA \
   "sudo MASTER_IP=$MASTER_PRIV ADMIN_PW=TheN1le1 REPL_PW=replpass \
-   TLS_MODE=yes COPY_FROM_MASTER=1 \
+   TLS_MODE=yes OPENLDAP_HARDEN=yes COPY_FROM_MASTER=1 \
    STAGED_CA_CERT=/tmp/master-ca.crt STAGED_CA_KEY=/tmp/master-ca.key \
    LDAPTLS_REQCERT=never bash /tmp/script/install-symas-openldap-replica-all-in-one.sh" || {
   err "Replica install failed"

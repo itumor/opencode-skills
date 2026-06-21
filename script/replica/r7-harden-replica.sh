@@ -33,6 +33,8 @@ require_cmd ldapmodify
 
 LDAPI_URI="${LDAPI_URI:-ldapi:///}"
 BASE_DN="${BASE_DN:-dc=eab,dc=bank,dc=local}"
+OPENLDAP_HARDEN="${OPENLDAP_HARDEN:-no}"
+
 SIMPLE_BIND_SSF="${SIMPLE_BIND_SSF:-128}"
 TLS_PROTOCOL_MIN="${TLS_PROTOCOL_MIN:-3.3}"
 TLS_CIPHER_SUITE="${TLS_CIPHER_SUITE:-HIGH:!aNULL:!eNULL:!MD5:!RC4:!3DES:!DES:!NULL}"
@@ -69,53 +71,61 @@ EOF
   log "Disallowed anonymous binds"
 fi
 
-# Require TLS for simple binds
-if [[ "$tls_ready" -eq 1 ]]; then
-  existing_ssf="$(ldapsearch_attr cn=config olcSecurity | awk -F'simple_bind=' '{print $2}' | head -1 || true)"
-  if [[ -z "$existing_ssf" ]]; then
-    apply_ldif "$(cat <<EOF
+# Require TLS for simple binds (only when OPENLDAP_HARDEN=yes)
+if [[ "$OPENLDAP_HARDEN" == "yes" || "${REQUIRE_TLS_SIMPLE_BINDS:-0}" -eq 1 ]]; then
+  if [[ "$tls_ready" -eq 1 ]]; then
+    existing_ssf="$(ldapsearch_attr cn=config olcSecurity | awk -F'simple_bind=' '{print $2}' | head -1 || true)"
+    if [[ -z "$existing_ssf" ]]; then
+      apply_ldif "$(cat <<EOF
 dn: cn=config
 changetype: modify
 add: olcSecurity
 olcSecurity: simple_bind=${SIMPLE_BIND_SSF}
 EOF
 )"
-    log "Required TLS for simple binds (simple_bind=${SIMPLE_BIND_SSF})"
-  else
-    log "simple_bind SSF already set to ${existing_ssf}"
+      log "Required TLS for simple binds (simple_bind=${SIMPLE_BIND_SSF})"
+    else
+      log "simple_bind SSF already set to ${existing_ssf}"
+    fi
   fi
+else
+  log "Skipping TLS simple bind enforcement (OPENLDAP_HARDEN=${OPENLDAP_HARDEN})"
 fi
 
-# TLS protocol min
-if [[ "$tls_ready" -eq 1 ]]; then
-  current_min="$(ldapsearch_attr cn=config olcTLSProtocolMin | head -1 || true)"
-  if [[ "$current_min" != "$TLS_PROTOCOL_MIN" ]]; then
-    op="replace"; [[ -z "$current_min" ]] && op="add"
-    apply_ldif "$(cat <<EOF
+# TLS protocol + cipher hardening (only when OPENLDAP_HARDEN=yes)
+if [[ "$OPENLDAP_HARDEN" == "yes" || "${SET_TLS_PARAMS:-0}" -eq 1 ]]; then
+  if [[ "$tls_ready" -eq 1 ]]; then
+    current_min="$(ldapsearch_attr cn=config olcTLSProtocolMin | head -1 || true)"
+    if [[ "$current_min" != "$TLS_PROTOCOL_MIN" ]]; then
+      op="replace"; [[ -z "$current_min" ]] && op="add"
+      apply_ldif "$(cat <<EOF
 dn: cn=config
 changetype: modify
 ${op}: olcTLSProtocolMin
 olcTLSProtocolMin: ${TLS_PROTOCOL_MIN}
 EOF
 )"
-    log "Set TLS protocol min to ${TLS_PROTOCOL_MIN}"
-  else
-    log "TLS protocol min already ${TLS_PROTOCOL_MIN}"
-  fi
+      log "Set TLS protocol min to ${TLS_PROTOCOL_MIN}"
+    else
+      log "TLS protocol min already ${TLS_PROTOCOL_MIN}"
+    fi
 
-  # TLS cipher suite
-  current_cipher="$(ldapsearch_attr cn=config olcTLSCipherSuite | head -1 || true)"
-  if [[ "$current_cipher" != "$TLS_CIPHER_SUITE" ]]; then
-    op="replace"; [[ -z "$current_cipher" ]] && op="add"
-    apply_ldif "$(cat <<EOF
+    # TLS cipher suite
+    current_cipher="$(ldapsearch_attr cn=config olcTLSCipherSuite | head -1 || true)"
+    if [[ "$current_cipher" != "$TLS_CIPHER_SUITE" ]]; then
+      op="replace"; [[ -z "$current_cipher" ]] && op="add"
+      apply_ldif "$(cat <<EOF
 dn: cn=config
 changetype: modify
 ${op}: olcTLSCipherSuite
 olcTLSCipherSuite: ${TLS_CIPHER_SUITE}
 EOF
 )"
-    log "Set TLS cipher suite"
+      log "Set TLS cipher suite"
+    fi
   fi
+else
+  log "Skipping TLS protocol/cipher hardening (OPENLDAP_HARDEN=${OPENLDAP_HARDEN})"
 fi
 
 # Filesystem permissions
