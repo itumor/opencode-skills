@@ -267,6 +267,11 @@ else
   echo "[INFO] bank-tune-replica.sh not found - skipping comprehensive tuning"
 fi
 
+# Apply MW ACL fix + idle timeout (corrected ACL for middleware — AFTER perf tuning)
+echo ""
+echo "=== Applying MW ACL + idle timeout fix ==="
+bash "${SCRIPT_DIR_OUTER}/29-fix-mw-acl-idle.sh" || echo "[WARN] MW ACL / idle timeout fix had errors - continuing"
+
 # ---- Tests ----
 echo ""
 echo "=== Running Tests ==="

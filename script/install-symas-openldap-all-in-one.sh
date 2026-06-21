@@ -81,6 +81,10 @@ else
 fi
 
 echo
+echo "=== Running MW ACL fix + idle timeout ==="
+run "29-fix-mw-acl-idle.sh"
+
+echo
 echo "=== Running tests ==="
 
 run_test() {
