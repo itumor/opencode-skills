@@ -299,7 +299,7 @@ fi
 
 # ── Step 4: Add attribute type ──────────────────────────────────────
 banner "Step 4: Add attribute type"
-ATTR_DEF="( ${ATTR_OID} NAME '${ATTR_NAME}' DESC 'Oracle enabled flag' EQUALITY booleanMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.7 SINGLE-VALUE )"
+ATTR_DEF="( ${ATTR_OID} NAME '${ATTR_NAME}' DESC 'Oracle enabled flag' EQUALITY caseIgnoreMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )"
 
 if [[ "$ATTR_DONE" -eq 1 ]]; then
     log "Attribute already present — skipping"
