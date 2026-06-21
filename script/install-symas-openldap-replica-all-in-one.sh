@@ -105,7 +105,12 @@ run_test() {
 }
 
 # ---- Installation & Configuration ----
-run "r1-install-symas-openldap-replica.sh"
+SKIP_PACKAGE_INSTALL="${SKIP_PACKAGE_INSTALL:-0}"
+if [[ "$SKIP_PACKAGE_INSTALL" == "1" ]]; then
+  echo "=== SKIP_PACKAGE_INSTALL=1: skipping package installation ==="
+else
+  run "r1-install-symas-openldap-replica.sh"
+fi
 run "r2-configure-replica-instance.sh"
 run "r3-start-replica-daemon.sh"
 run "r4-fix-replica-env.sh"

@@ -9,6 +9,7 @@ if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
 fi
 
 TLS_MODE="${TLS_MODE:-yes}"
+SKIP_PACKAGE_INSTALL="${SKIP_PACKAGE_INSTALL:-0}"
 
 run() {
   local script_name="$1"
@@ -25,7 +26,11 @@ run() {
   bash "$path" "$@" || echo "[WARN] $script_name had errors - continuing"
 }
 
-run "1-install-symas-openldap.sh"
+if [[ "$SKIP_PACKAGE_INSTALL" == "1" ]]; then
+  echo "=== SKIP_PACKAGE_INSTALL=1: skipping package installation ==="
+else
+  run "1-install-symas-openldap.sh"
+fi
 run "3-install-example.sh"
 run "4-Start-the-daemon.sh"
 run "5-fix_all_symas_warns.sh"
