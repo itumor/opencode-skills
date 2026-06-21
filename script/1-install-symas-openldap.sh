@@ -36,13 +36,27 @@ require_cmd dnf
 
 REPO_URL="${REPO_URL:-https://repo.symas.com/configs/SOLDAP/rhel9/release26.repo}"
 REPO_DEST="${REPO_DEST:-/etc/yum.repos.d/soldap-release26.repo}"
+SKIP_REPO_SETUP="${SKIP_REPO_SETUP:-auto}"
 
-echo "[INFO] Installing Symas SOLDAP repo: ${REPO_URL} -> ${REPO_DEST}"
-download "$REPO_URL" "$REPO_DEST"
-
-echo "[INFO] Refreshing dnf metadata"
-dnf clean all
-dnf -y makecache
+if [[ "$SKIP_REPO_SETUP" == "1" ]]; then
+  echo "[INFO] Skipping repo setup (SKIP_REPO_SETUP=1 — Satellite managed)"
+elif [[ "$SKIP_REPO_SETUP" == "auto" ]]; then
+  if dnf info symas-openldap-servers >/dev/null 2>&1; then
+    echo "[INFO] Symas packages already resolvable — skipping repo setup"
+  else
+    echo "[INFO] Symas packages not found — adding SOLDAP repo from ${REPO_URL}"
+    download "$REPO_URL" "$REPO_DEST"
+    echo "[INFO] Refreshing dnf metadata"
+    dnf clean all -q
+    dnf makecache -q
+  fi
+else
+  echo "[INFO] Installing Symas SOLDAP repo: ${REPO_URL} -> ${REPO_DEST}"
+  download "$REPO_URL" "$REPO_DEST"
+  echo "[INFO] Refreshing dnf metadata"
+  dnf clean all -q
+  dnf makecache -q
+fi
 
 if [[ "${SKIP_DNF_UPDATE:-0}" != "1" ]]; then
   echo "[INFO] Updating OS packages (set SKIP_DNF_UPDATE=1 to skip)"
