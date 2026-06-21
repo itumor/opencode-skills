@@ -236,6 +236,11 @@ echo ""
 echo "=== Applying ExampleDB ACL fix ==="
 bash "${SCRIPT_DIR_OUTER}/bank-fix-exampledb-acl.sh"
 
+# Apply MW ACL fix + idle timeout (corrected ACL for middleware)
+echo ""
+echo "=== Applying MW ACL + idle timeout fix ==="
+bash "${SCRIPT_DIR_OUTER}/29-fix-mw-acl-idle.sh"
+
 # Ensure openssl is available for TLS cert generation
 if ! command -v openssl >/dev/null 2>&1; then
   echo "[INFO] Installing openssl for TLS cert generation"
