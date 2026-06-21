@@ -22,6 +22,7 @@ warn()  { echo "[WARN]  $*"; }
 bad()   { echo "[FAIL]  $*" >&2; }
 fatal() { echo "[FATAL] $*" >&2; exit 1; }
 banner() { echo ""; echo "=== $* ==="; }
+require_cmd() { command -v "$1" >/dev/null 2>&1 || fatal "$1 not found in PATH"; }
 
 PASS=0; FAIL=0; WARN=0
 
