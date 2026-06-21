@@ -19,7 +19,7 @@ err()  { echo "[$(date +%H:%M:%S)] ERROR: $*" >&2; exit 1; }
 
 # --- Step 1: Copy scripts to both nodes ---
 log "Copying scripts to master..."
-tar czf /tmp/ngoscripts.tar.gz -C "$(pwd)" script
+COPYFILE_DISABLE=1 tar czf /tmp/ngoscripts.tar.gz -C "$(pwd)" script
 scp $SSH_OPTS /tmp/ngoscripts.tar.gz ec2-user@$MASTER:/tmp/
 ssh $SSH_OPTS ec2-user@$MASTER 'tar xzf /tmp/ngoscripts.tar.gz -C /tmp/ && rm /tmp/ngoscripts.tar.gz'
 
