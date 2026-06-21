@@ -12,6 +12,7 @@ TLS_MODE="${TLS_MODE:-yes}"
 
 run() {
   local script_name="$1"
+  shift
   local path="$SCRIPT_DIR/$script_name"
 
   if [[ ! -f "$path" ]]; then
@@ -21,7 +22,7 @@ run() {
 
   echo
   echo "=== Running $script_name ==="
-  bash "$path" || echo "[WARN] $script_name had errors - continuing"
+  bash "$path" "$@" || echo "[WARN] $script_name had errors - continuing"
 }
 
 run "1-install-symas-openldap.sh"
@@ -40,8 +41,7 @@ run "10-ppolicy-container.sh"
 run "10.0-password_policy_make_default.sh"
 run "12-Create_custom_schema.sh"
 run "13-Create_custom_schema_attr.sh"
-echo; echo "=== Running bank-add-orclisenabled.sh ==="
-bash "$SCRIPT_DIR/bank-add-orclisenabled.sh" --force
+run "bank-add-orclisenabled.sh" --force
 run "7-verify_symas_openldap.sh"
 run "16-add-strong-password-quality-checker-PPM.sh"
 run "bank-apply-password-policy.sh"
