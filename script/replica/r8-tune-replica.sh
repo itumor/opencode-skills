@@ -73,6 +73,15 @@ else
   log "SLAPD_OPTIONS not provided; skipping"
 fi
 
+log "Setting olcIdleTimeout=0 (no idle disconnect)"
+ldapmodify -Y EXTERNAL -H ldapi:/// <<'LDIFEOF' 2>/dev/null || true
+dn: cn=config
+changetype: modify
+replace: olcIdleTimeout
+olcIdleTimeout: 0
+LDIFEOF
+log "olcIdleTimeout set to 0"
+
 systemctl daemon-reload
 systemctl restart "$SERVICE_NAME"
 log "Reloaded systemd and restarted ${SERVICE_NAME}"

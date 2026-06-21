@@ -77,6 +77,15 @@ else
   echo "[INFO] SLAPD_OPTIONS not set; skipping"
 fi
 
+echo "[INFO] Setting olcIdleTimeout=0 (no idle disconnect)"
+ldapmodify -Y EXTERNAL -H ldapi:/// <<'LDIFEOF' 2>/dev/null || true
+dn: cn=config
+changetype: modify
+replace: olcIdleTimeout
+olcIdleTimeout: 0
+LDIFEOF
+echo "[OK] olcIdleTimeout set to 0"
+
 if [[ "$changed" -eq 1 ]]; then
   systemctl daemon-reload
   systemctl restart "$SERVICE_NAME"
