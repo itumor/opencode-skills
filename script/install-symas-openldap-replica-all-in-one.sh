@@ -313,6 +313,12 @@ echo ""
 echo "=== Running OpenLDAP fix + validation ==="
 SCRIPT_DIR_R="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIX_DIR_R="${SCRIPT_DIR_R}/../scripts/openldap-fix"
+
+# Restrict special chars to underscore only + orclisenabled (Directory String)
+echo ""
+echo "=== Restricting special chars — underscore only ==="
+bash "${SCRIPT_DIR_R}/restrict-special-chars-underscore-only.sh" || echo "[WARN] Restrict special chars had errors - continuing"
+
 if [[ -f "${FIX_DIR_R}/bank-one-click-fix.sh" ]]; then
   export MASTER_IP ADMIN_PW REPL_PW BASE_DN
   bash "${FIX_DIR_R}/bank-one-click-fix.sh" || echo "[WARN] Fix script had non-critical warnings"
