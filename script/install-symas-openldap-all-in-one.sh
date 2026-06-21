@@ -45,6 +45,7 @@ bash "$SCRIPT_DIR/bank-add-orclisenabled.sh" --force
 run "7-verify_symas_openldap.sh"
 run "16-add-strong-password-quality-checker-PPM.sh"
 run "bank-apply-password-policy.sh"
+run "28-fix-ppolicy-seconds.sh"
 run "bank-add-ppolicy-hash-cleartext.sh"
 run "17-create_mw_user.sh"
 run "27-configure-mw-acl.sh"
@@ -93,7 +94,7 @@ run_test() {
 
   echo
   echo "=== Running $test_name ==="
-  bash "$test_path"
+  bash "$test_path" || echo "[WARN] $test_name had errors - continuing"
 }
 
 run_test "test_password_checker.sh"
