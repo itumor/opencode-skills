@@ -124,16 +124,22 @@ fi
 # ====================================================================
 banner "Fix 3: Enable monitoring (cn=Monitor)"
 
-if ldapi_modify -f <(cat <<'LDIF'
-dn: olcDatabase=monitor,cn=config
+MONITOR_DN=$(ldapi_search -b cn=config -s sub '(&(objectClass=olcDatabaseConfig)(olcDatabase=monitor))' dn 2>/dev/null | awk '/^dn: /{print $2; exit}')
+if [[ -n "$MONITOR_DN" ]]; then
+    if ldapi_modify -f <(cat <<LDIF
+dn: ${MONITOR_DN}
 changetype: modify
 replace: olcMonitoring
 olcMonitoring: TRUE
 LDIF
 ) 2>/dev/null; then
-    ok "olcMonitoring: TRUE"; PASS=$((PASS+1))
+        ok "olcMonitoring: TRUE on ${MONITOR_DN}"; PASS=$((PASS+1))
+    else
+        warn "olcMonitoring toggle failed on ${MONITOR_DN}"
+        WARN=$((WARN+1))
+    fi
 else
-    warn "olcMonitoring toggle failed — monitor database may not exist"
+    warn "Monitor database not configured — skipping"
     WARN=$((WARN+1))
 fi
 
@@ -165,11 +171,15 @@ fi
 
 # Check monitoring
 log "--- Monitoring ---"
-MON_VAL=$(ldapi_search -b "olcDatabase=monitor,cn=config" -s base -LLL olcMonitoring 2>/dev/null | awk -F': ' '/^olcMonitoring:/ {print $2}')
-if [[ "$MON_VAL" == "TRUE" ]]; then
-    ok "olcMonitoring: TRUE"; PASS=$((PASS+1))
+if [[ -n "${MONITOR_DN:-}" ]]; then
+    MON_VAL=$(ldapi_search -b "$MONITOR_DN" -s base -LLL olcMonitoring 2>/dev/null | awk -F': ' '/^olcMonitoring:/ {print $2}')
+    if [[ "$MON_VAL" == "TRUE" ]]; then
+        ok "olcMonitoring: TRUE on ${MONITOR_DN}"; PASS=$((PASS+1))
+    else
+        warn "olcMonitoring: ${MON_VAL:-not set} on ${MONITOR_DN}"; WARN=$((WARN+1))
+    fi
 else
-    warn "olcMonitoring: ${MON_VAL:-not set}"; WARN=$((WARN+1))
+    warn "Monitor database not found — skipping"; WARN=$((WARN+1))
 fi
 
 # ====================================================================
