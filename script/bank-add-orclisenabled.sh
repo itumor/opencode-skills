@@ -265,8 +265,19 @@ schema_dump="$(ldapi_search -b "$SCHEMA_DN" -s base -LLL olcAttributeTypes olcOb
 attr_exists="$(echo "$schema_dump" | grep "olcAttributeTypes:" | grep -c "NAME '${ATTR_NAME}'" || true)"
 oc_has_attr="$(echo "$schema_dump" | grep "olcObjectClasses:" | grep -c "${ATTR_NAME}" || true)"
 
+ATTR_NEEDS_FIX=0
+ATTR_BOOL_VAL=""
 if [[ "$attr_exists" -gt 0 ]]; then
-    ok "Attribute '${ATTR_NAME}' already exists in schema"; ATTR_DONE=1
+    # Check if it's Boolean syntax (needs conversion to Directory String)
+    ATTR_BOOL_LINE="$(echo "$schema_dump" | grep "olcAttributeTypes:" | grep "NAME '${ATTR_NAME}'" | grep "SYNTAX 1.3.6.1.4.1.1466.115.121.1.7" || true)"
+    if [[ -n "$ATTR_BOOL_LINE" ]]; then
+        warn "Attribute '${ATTR_NAME}' exists as Boolean — will convert to Directory String"
+        ATTR_DONE=0
+        ATTR_NEEDS_FIX=1
+        ATTR_BOOL_VAL="${ATTR_BOOL_LINE#olcAttributeTypes: }"
+    else
+        ok "Attribute '${ATTR_NAME}' already exists in schema"; ATTR_DONE=1
+    fi
 else
     log "Attribute '${ATTR_NAME}' not found — will add"; ATTR_DONE=0
 fi
@@ -303,6 +314,20 @@ ATTR_DEF="( ${ATTR_OID} NAME '${ATTR_NAME}' DESC 'Oracle enabled flag' EQUALITY 
 
 if [[ "$ATTR_DONE" -eq 1 ]]; then
     log "Attribute already present — skipping"
+elif [[ "$ATTR_NEEDS_FIX" -eq 1 ]]; then
+    # Replace Boolean with Directory String (delete old + add new)
+    log "Replacing Boolean orclisenabled with Directory String..."
+    ldapi_modify -f <(cat <<LDIFEOF
+dn: ${SCHEMA_DN}
+changetype: modify
+delete: olcAttributeTypes
+olcAttributeTypes: ${ATTR_BOOL_VAL}
+-
+add: olcAttributeTypes
+olcAttributeTypes: ${ATTR_DEF}
+LDIFEOF
+    ) && { ok "Converted ${ATTR_NAME} from Boolean → Directory String"; PASS=$((PASS+1)); CHANGES=$((CHANGES+1)); ATTR_DONE=1; } \
+      || { bad "Failed to update ${ATTR_NAME} syntax"; FAIL=$((FAIL+1)); }
 elif [[ "$DRY_RUN" -eq 1 ]]; then
     log "DRY_RUN: would add: ${ATTR_DEF}"
 else
