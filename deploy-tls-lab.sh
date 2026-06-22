@@ -21,11 +21,11 @@ err()  { echo "[$(date +%H:%M:%S)] ERROR: $*" >&2; exit 1; }
 log "Copying scripts to master..."
 COPYFILE_DISABLE=1 tar czf /tmp/ngoscripts.tar.gz -C "$(pwd)" script
 scp $SSH_OPTS /tmp/ngoscripts.tar.gz ec2-user@$MASTER:/tmp/
-ssh $SSH_OPTS ec2-user@$MASTER 'rm -rf /tmp/script && tar xzf /tmp/ngoscripts.tar.gz -C /tmp/ && rm /tmp/ngoscripts.tar.gz'
+ssh $SSH_OPTS ec2-user@$MASTER 'sudo rm -rf /tmp/script && tar xzf /tmp/ngoscripts.tar.gz -C /tmp/ && rm /tmp/ngoscripts.tar.gz'
 
 log "Copying scripts to replica..."
 scp $SSH_OPTS /tmp/ngoscripts.tar.gz ec2-user@$REPLICA:/tmp/
-ssh $SSH_OPTS ec2-user@$REPLICA 'rm -rf /tmp/script && tar xzf /tmp/ngoscripts.tar.gz -C /tmp/ && rm /tmp/ngoscripts.tar.gz'
+ssh $SSH_OPTS ec2-user@$REPLICA 'sudo rm -rf /tmp/script && tar xzf /tmp/ngoscripts.tar.gz -C /tmp/ && rm /tmp/ngoscripts.tar.gz'
 rm /tmp/ngoscripts.tar.gz
 
 # --- Step 2: Clean both nodes ---
