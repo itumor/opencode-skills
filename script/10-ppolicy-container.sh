@@ -64,7 +64,7 @@ pwdMinLength: 8
 pwdMaxFailure: 5
 pwdLockout: TRUE
 pwdLockoutDuration: 1800
-pwdGraceAuthNLimit: 3
+pwdGraceAuthNLimit: 1000
 pwdFailureCountInterval: 0
 pwdMustChange: FALSE
 pwdAllowUserChange: TRUE
