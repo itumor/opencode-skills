@@ -6,9 +6,9 @@
 set -euo pipefail
 
 SSH_KEY="terraform/openldap-master-replica/.local-ssh/openldap_master_replica"
-MASTER=54.185.183.18
-REPLICA=54.191.26.211
-MASTER_PRIV=10.50.1.10
+MASTER=54.186.123.12
+REPLICA=44.243.198.216
+MASTER_PRIV=10.30.1.10
 SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=10 -i $SSH_KEY"
 
 log()  { echo "[$(date +%H:%M:%S)] $*"; }

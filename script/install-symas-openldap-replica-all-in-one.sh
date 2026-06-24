@@ -213,3 +213,30 @@ fi
 echo ""
 echo "  To re-run verification:"
 echo "  sudo MASTER_IP=${MASTER_IP} ADMIN_PW=\$ADMIN_PW bash replica/r9-verify-replica.sh"
+
+# ---- Post-Install Fixes ----
+echo ""
+echo "=== Applying production post-install fixes ==="
+
+# Fix replicator ACL on replica
+echo ""
+echo "=== Running 28-fix-replicator-acl.sh ==="
+bash "${SCRIPT_DIR_OUTER}/28-fix-replicator-acl.sh" || echo "[WARN] replicator ACL fix had errors - continuing"
+
+# Fix olcSyncrepl on replica
+echo ""
+echo "=== Running 30-fix-olcsyncrepl.sh ==="
+MASTER_IP="${MASTER_IP}" REPL_PW="${REPL_PW}" bash "${SCRIPT_DIR_OUTER}/30-fix-olcsyncrepl.sh" || echo "[WARN] olcSyncrepl fix had errors - continuing"
+
+# Apply MW ACL fix + idle timeout
+echo ""
+echo "=== Running 29-fix-mw-acl-idle.sh ==="
+bash "${SCRIPT_DIR_OUTER}/29-fix-mw-acl-idle.sh" || echo "[WARN] MW ACL fix had errors - continuing"
+
+# Restrict special chars to underscore only
+echo ""
+echo "=== Restricting special chars - underscore only ==="
+bash "${SCRIPT_DIR_OUTER}/restrict-special-chars-underscore-only.sh" || echo "[WARN] restrict special chars had errors - continuing"
+
+echo ""
+echo "=== All fixes applied ==="

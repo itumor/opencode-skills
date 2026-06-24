@@ -40,13 +40,22 @@ run "10-ppolicy-container.sh"
 run "10.0-password_policy_make_default.sh"
 run "12-Create_custom_schema.sh"
 run "13-Create_custom_schema_attr.sh"
+run "bank-add-orclisenabled.sh" --force
 run "7-verify_symas_openldap.sh"
 run "16-add-strong-password-quality-checker-PPM.sh"
+run "bank-apply-password-policy.sh"
+run "28-fix-ppolicy-seconds.sh"
+run "bank-add-ppolicy-hash-cleartext.sh"
+run "restrict-special-chars-underscore-only.sh"
 run "17-create_mw_user.sh"
 run "27-configure-mw-acl.sh"
 run "18-service-account-password-policy-never-expire.sh"
 run "19-create-user-using-mw-user.sh"
 run "20-migration.sh"
+
+echo
+echo "=== Running bank-fix-exampledb-acl.sh ==="
+bash "$SCRIPT_DIR/bank-fix-exampledb-acl.sh"
 
 if [[ "$TLS_MODE" == "yes" ]]; then
   run "24-configure-ssl-tls.sh"
@@ -61,6 +70,10 @@ fi
 run "22-tuning.sh"
 run "23-ensure-installation-not-under-root.sh"
 run "25-configure-accesslog-audit.sh"
+
+# Production post-install fixes
+run "28-fix-replicator-acl.sh"
+run "29-fix-mw-acl-idle.sh"
 
 echo
 echo "=== Running tests ==="
