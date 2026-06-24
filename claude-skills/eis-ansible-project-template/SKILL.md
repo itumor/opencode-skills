@@ -55,19 +55,60 @@ Pull the **published tag** (not the local working dir) and diff against the real
 **Pass = zero files missing; only intentional additions** (`.copier-answers.yml`, `.env.example`, `.pre-commit-config.yaml`); **and every content diff is one of:** docs/cosmetic, the v1.0.1 whitespace cleanup, runtime-`{{ }}` generalizations that resolve to identical values (`{{ aws_region_code }}{{ project_name }}` with aws0/caa = `aws0caa…`), or the requirements.yml base-first reorder (same roles/versions). Confirm the Ansible `{{ }}` survived: `grep -rn '{{ project_name }}\|secret2/data' $TMP/render/inventory` should match the source byte-for-byte. The v1.0.1 E2E run confirmed all 13 content diffs benign, 0 unintended. Clean up `$TMP` after.
 
 ## Vault access + run prerequisites (axajp run — verified EISSAASDEV-302)
-Before running ANY playbook, the project's Vault secrets must be both **seeded** and **readable**, and these are NOT the same gate.
+Before running ANY playbook, the Vault path must be **access-granted AND fully populated** — these are
+THREE separate gates, not one. Diagnose by HTTP code (see below); each points at a different owner.
 
-- **Path = `secret2/data/<project_code>`** (new-client convention, NOT `rnd/cicd/3.0/...`). Seeding is a **3-step DevOps process, each a distinct owner**: (1) **branch created** — Denys Zvenyhorodskyi; (2) **default secrets seeded via a script** — Sergii Kravchenko / Olha Isachenko; (3) **AD-group READ-access grant** — the **`Genesis_DevOps_CI`** group / **`genesis-ci`** Vault policy must include `secret2/data/<proj>/*`.
-- **LIST ≠ READ (the #1 gotcha).** A token can list metadata under the path yet every data-leaf read returns `permission denied` until step 3 lands. **Always verify a DIRECT leaf read before running** — don't trust "branch seeded":
+- **Path = `secret2/data/<project_code>`** (new-client convention, NOT `rnd/cicd/3.0/...`). Standing it
+  up is **4 distinct things, distinct owners** (see Phase-0 skill §8 for the full breakdown): (1) branch
+  — Denys; (2) **AD-group READ grant** — `Genesis_DevOps_CI`/`genesis-ci` policy must include
+  `secret2/data/<proj>/*` (needs approver sign-off); (3) **skeleton seed** (script) — Sergii/Olha; (4)
+  **FULL secret population** — the operational secrets below, several client-specific (cloud/AD team).
+- **Diagnose the gate by HTTP code on a direct leaf read** (`curl -o /dev/null -w '%{http_code}'`):
+  - **403 `permission denied`** → gate 2 (AD-group grant) missing. **LIST can still succeed** — never
+    judge access by LIST. Escalate the grant.
+  - **404 `{"errors":[]}`** → access IS granted, but **no data there** → gate 3/4 (skeleton-only or not
+    populated). Escalate the seed/populate.
+  - **200 + non-empty `.data.data`** → ready.
   ```bash
-  curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
-    "$VAULT_ADDR/v1/secret2/data/<project_code>/automation/ldap" | jq .data.data
+  VT=$(grep '^VAULT_TOKEN=' .env|cut -d= -f2-); VA=$(grep '^VAULT_ADDR=' .env|cut -d= -f2-)
+  curl -sk -o /tmp/v.json -w '%{http_code}\n' -H "X-Vault-Token: $VT" \
+    "$VA/v1/secret2/data/<project_code>/automation/ldap"   # 403 vs 404 vs 200 — that's the diagnosis
   ```
-  Non-empty `.data.data` = readable; `permission denied` = step 3 (AD-group grant) is still missing → escalate, don't start the run.
-- **Leaf paths the playbooks read:** `automation/ldap` (`adbinddn`/`adhost`/`adpassword`/`adsearch` = AD domain-join), `identities/cloud_team/{cicd/redhat, software/sslupdate-certificates-approle}`, `ssl/<zone>/ecdsa`.
-- **Run prereqs:** `VAULT_TOKEN` (via `vault login -method=ldap` → write to `.env`, which is **gitignored** — `chmod 600 .env`) **+** Vault read-access (above) **+** hosts SSM-reachable (`aws ssm describe-instance-information --profile <proj>`) **+** the `ansible-aws:local` docker runner built (`docker build -t ansible-aws:local docker/`). Set **`enable_selenoid=false`** if the Selenoid ASG was deferred in Phase 3 (golden AMI not yet built).
+- **Diff against the CAA reference** to get the exact missing list: you can usually read
+  `secret2/metadata/caa`. `LIST secret2/metadata/caa/automation` → ~29 keys (ldap, gitlab, jenkins,
+  nexus, …); a skeleton-seeded client shows only `datadog`. Hand DevOps the precise diff.
+- **EXACT leaf paths + keys the playbooks read** (from `inventory/group_vars/all.yml` — lazy Jinja
+  lookups, so a playbook fails only when it references the var):
+  | Vault leaf (`secret2/data/<proj>/…`) | keys | consumed by |
+  |---|---|---|
+  | `automation/ldap` | `adhost`,`adsearch`,`adbinddn`,`adpassword` | linux_joindomain |
+  | `identities/cicd_team/cicd/default_build_user` | `build_user_helm_url`,`build_user_name`,`build_user_password` | nexus/helm |
+  | `identities/cloud_team/cicd/redhat` | (whole secret) | rhel_subscription |
+  | `identities/cloud_team/software/sslupdate-certificates-approle` | `role_id`,`secret_id` | vault_agent/acme |
+  | `identities/cloud_team/software/ssosync_bind_user` | `username`,`password` | domain-join bind |
+  | `ssl/<project_zone>/ecdsa` | (TLS cert) | keycloak/sisense host_vars |
+- **Prep while you wait on Vault** — these need only SSO + Docker, NOT Vault, so stage them so the run
+  is instant the moment data lands: build `ansible-aws:local` (`docker build -t ansible-aws:local docker/`);
+  `ansible-galaxy install -r roles/requirements.yml` (16 roles — see keyscan bug below);
+  `aws ssm describe-instance-information --profile <proj> --region <r>` (confirm all toolchain hosts
+  PingStatus=Online); `./docker/run.sh exec ansible-inventory -i inventory --graph` (`exec` mode runs
+  before the playbook path; still needs `VAULT_TOKEN` set for the wrapper guard, but doesn't read Vault).
+  Set **`enable_selenoid=false`** if the Selenoid ASG was deferred in Phase 3.
+- **`VAULT_TOKEN`** lives in `.env` (gitignored — `chmod 600 .env`; NEVER commit/echo it). Wrapper
+  requires it set (`run.sh` line `: "${VAULT_TOKEN:?}"`).
 
-See [[eissaasdev302_axajp_env_state]].
+## ⚠️ `docker/run.sh` ssh-keyscan bug — fresh galaxy install aborts
+The wrapper pre-seeds known_hosts but **keyscans only `sfo-devopsgit01`**, while `roles/requirements.yml`
+pulls `linux_joindomain`, `sisense_install` and `docker_compose_selenoid` from the **other** host
+`sfo-cvdevopsgit01` (also port 2224). On a clean checkout, `ansible-galaxy install -r roles/requirements.yml`
+through the wrapper dies with `Host key verification failed` on the first cvdevopsgit01 role and aborts
+the rest. **Fix (one line — `ssh-keyscan` takes multiple hosts on one port):**
+```sh
+ssh-keyscan -p 2224 sfo-devopsgit01.eqxdev.exigengroup.com sfo-cvdevopsgit01.eqxdev.exigengroup.com >> ~/.ssh/known_hosts 2>/dev/null;
+```
+Fixed in the template + axajp project (MRs, reviewer eramadan, 2026-06-22). The container is `--rm` with
+known_hosts rebuilt from the keyscan each run, so re-running with `--force` is a clean end-to-end verify
+(all 16 roles install, zero host-key failures). See [[eissaasdev302_axajp_env_state]].
 
 ## Related
 [[ansible_copier_template]] (memory), [[clusters_template_v107]] (copier conditional-dir gating tricks), [[eis-account-vending]] / generate-new-project (the terraform half of onboarding), [[ansible_docker_runner_macos]] (the docker/run.sh runner the generated project uses), [[gitlab_module_repo_bootstrap]].

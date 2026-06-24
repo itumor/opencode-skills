@@ -64,7 +64,7 @@ External items go IN-PROGRESS the moment you've sent the ask. Items 1–2 above 
 | 5 | Customer on-prem VPN | infra owners | N-A (none) |
 | 6 | Access model (Private/WorkSpaces vs Public+WAF) | infra owners | DONE (Private) |
 | 7 | TGW RAM-shared into SaaS OUs | you (network-hub MR) | DONE (MR !9 merged) |
-| 8 | Vault `secret2/data/<code>`: branch + seed + AD-read grant (3 distinct actions; access≠seed) | DevOps (Denys/Sergii/Olha) + you | IN-PROGRESS |
+| 8 | Vault `secret2/data/<code>`: branch + AD-read grant + skeleton-seed + **FULL populate** (4 distinct actions; access≠seed≠populated) | DevOps (Denys/Sergii/Olha) + cloud/AD team | IN-PROGRESS |
 | 9 | Registry pull-secret | shared — reuse | DONE (no new seed) |
 | 10 | Selenoid golden-image AMI | you (ansible role, Phase 5) | TODO (deferred to P5) |
 | 11 | SSO permission set assignment | IdC admin (Markuss) | DONE |
@@ -221,25 +221,45 @@ Phase-3 TGW gate cleared.)
 
 ---
 
-## 8. Vault `secret2/data/<project_code>`  ⚠️ knowledge gap
+## 8. Vault `secret2/data/<project_code>`  ⚠️ knowledge gap — "seeded" has TWO meanings
 
 Clients use the Vault path **`secret2/data/<project_code>`** (EISSAASDEV-302: **`secret2/data/axajp`**).
 **Do NOT use** the old `secret2/data/rnd/cicd/3.0/…` path for new clients.
 
-- ➕ **ACTION:** kick off the setup NOW (lead time). It is **3 DISTINCT DevOps actions, each a
-  different owner** — request all three up front (verified EISSAASDEV-302, see
-  [[eissaasdev302_axajp_env_state]]):
+➕ **ACTION:** kick off the setup NOW (lead time). It is **4 DISTINCT things** (NOT one request) —
+ask for all four up front and track each separately (verified EISSAASDEV-302, see
+[[eissaasdev302_axajp_env_state]]):
   1. **branch create** — Denys Zvenyhorodskyi.
-  2. **seed default secrets via script** — Sergii Kravchenko / Olha Isachenko.
-  3. **AD-group READ-access grant** — `Genesis_DevOps_CI` group / `genesis-ci` Vault policy must
-     include `secret2/data/<project_code>/*`.
-- ⚠️ **The access-grant (step 3) is SEPARATE from seeding (step 2) and easily missed: LIST ≠ READ.**
-  A token can list the path yet every data-leaf read returns `permission denied` until the AD-group
-  grant lands. Don't assume "branch seeded" = usable — Phase 5 verifies a direct leaf read.
-- This is a **Phase-5 (ansible) concern**, not a Phase-3 blocker — but request all three NOW. The
-  Phase-5 ansible copier takes this as the `vault` path. Vault addr:
-  `https://eqx-cvops-vault01.eqxdev.exigengroup.com`. Consult the wiki "Vault – Rules and Structure"
-  doc.
+  2. **AD-group READ-access grant** — `Genesis_DevOps_CI` group / `genesis-ci` Vault policy must
+     include `secret2/data/<project_code>/*`. Olha raises it but it **needs an approver sign-off** →
+     it has lead time of its own; chase it.
+  3. **skeleton seed (script)** — Sergii Kravchenko / Olha Isachenko run the script. It creates the
+     branch tree + a *handful* of entries (`automation/datadog`, `identities/.../default_jira_user`,
+     `cloud_team/cicd/docker_puller`, `approles/`, an empty `ssl/dns_zone`). **This is NOT the secret
+     set the playbooks read.**
+  4. **FULL secret population** — the operational CI3.0 secrets the Ansible playbooks actually consume:
+     `automation/ldap`, `identities/cicd_team/cicd/default_build_user`,
+     `identities/cloud_team/cicd/redhat`,
+     `identities/cloud_team/software/{sslupdate-certificates-approle,ssosync_bind_user}`,
+     `ssl/<zone>/ecdsa`. Several are **client-specific** (AD bind user/password, RHEL subscription) and
+     owned by the **cloud/AD team** — a generic script can't produce them. **This is the most-missed
+     gate; skeleton-seed often gets reported as "done" while this is still empty.**
+
+⚠️ **Three failure states — diagnose by HTTP code, they point at different owners (LIST ≠ READ ≠ POPULATED):**
+  - **`permission denied` (HTTP 403)** on a leaf read = step 2 (AD-group grant) missing. LIST can still
+    succeed → don't be fooled by a working LIST.
+  - **`{"errors":[]}` (HTTP 404)** on a leaf read = access **is** granted but **no data at that path** =
+    step 3/4 incomplete (skeleton only / not populated).
+  - **non-empty `.data.data` (HTTP 200)** = ready.
+
+⚠️ **Diff against the CAA reference.** You can usually read `secret2/metadata/caa` (fully populated). 
+  `LIST secret2/metadata/caa/automation` returns ~29 keys (ldap, gitlab, jenkins, nexus, sonar, …); a
+  freshly skeleton-seeded client shows only `datadog`. Walk both trees and diff before declaring the
+  path ready — that's the fastest way to hand DevOps an exact "still-missing" list.
+
+This is a **Phase-5 (ansible) concern**, not a Phase-3 blocker — but request all four NOW. The Phase-5
+ansible copier takes this as the `vault` path. Vault addr:
+`https://eqx-cvops-vault01.eqxdev.exigengroup.com`. Consult the wiki "Vault – Rules and Structure" doc.
 
 ---
 
