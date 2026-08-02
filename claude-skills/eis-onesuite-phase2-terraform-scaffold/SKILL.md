@@ -3,10 +3,10 @@ name: eis-onesuite-phase2-terraform-scaffold
 description: >-
   Phase 2 of EIS OneSuite platform provisioning — scaffold a new per-client Terraform
   project from the iac/terraform/template/client Copier template (custom [[ ]] delimiters,
-  --vcs-ref v1.3.0), then onboard it to GitLab + the IaC Atlantis webhook. Covers the full
-  copier answer set (project_code / full_project_name → repo path, region/region_code,
-  domain_name, account_id_default, the /23 Shared-VPC subnet trap requiring
-  intra_auto_calculate=false, the dev /23 lower stage, and the cognito metadata_url
+  --vcs-ref v2.0.0), then onboard it to GitLab + the IaC Atlantis webhook. Covers the full
+  copier answer set (global_project_code / global_project_name → repo path, lower_region,
+  global_domain_name, lower_account_id, the /23 Shared-VPC subnet trap requiring
+  lower_infra_auto_calculate=false, the dev /23 lower stage, and the cognito metadata_url
   placeholder), the GitLab subgroup+project creation under iac/projects/aws (group 1724),
   git init+push, atlantis.yaml regeneration via ci/generate-atlantis-projects.sh, and adding
   the GitLab webhook pointing at IaC Atlantis. Use when the user says "scaffold the terraform
@@ -27,7 +27,7 @@ template-repo skill `generate-new-project` (which is the generic version) by har
 OneSuite answer conventions and the IaC-Atlantis webhook step.
 
 **Prereqs (from earlier phases):**
-- Phase 1 (`eis-account-vending`) done → you have the 12-digit `account_id_default` and the
+- Phase 1 (`eis-account-vending`) done → you have the 12-digit `lower_account_id` and the
   StackSet baseline has created the `aws0iacdeveks01-atlantis-{plan,apply}-Role` so shared IaC
   Atlantis can assume into the new account.
 - Phase 0 (`eis-onesuite-phase0-prereqs`) settled: CIDR block allocated, root DNS zone in place,
@@ -44,47 +44,52 @@ TPL=/Users/eramadan/gitwork/iac/terraform/template/client      # local clone of 
 
 ## Step 1 — Pin down the answer set
 
-`full_project_name` drives the **repo path** (`| lower | replace(' ', '-')`). Choose it so the path
-is what you want: `AXA Japan` → `axa-japan`. `project_code` (3–5 lowercase alphanumerics, validated
+`global_project_name` drives the **repo path** (`| lower | replace(' ', '-')`). Choose it so the path
+is what you want: `AXA Japan` → `axa-japan`. `global_project_code` (3–5 lowercase alphanumerics, validated
 `^[a-z0-9]{3,5}$`) drives resource names (`aws0<code>deveks01`, `aws0<code>tfstate`, etc.).
 
-| Answer | Value (rule) |
+> **Preferred path:** don't hand-write the answers — fill the kit's `intake/onesuite.yaml` once and run
+> `intake/render-answers.py` (emits the v2 answer file) or `intake/render-and-copy.sh` (renders all 3
+> templates). The table below is the manual/verification view of the same keys.
+
+| Answer (v2.0.0 key) | Value (rule) |
 |---|---|
-| `region` | `us-west-2` (EIS infra always lands in us-west-2 regardless of "Asian region" app wording) |
-| `region_code` | `aws0` — **auto-derived** from region; don't supply |
-| `project_code` | e.g. `axajp` — short, lowercase, `^[a-z0-9]{3,5}$` |
-| `full_project_name` | e.g. `AXA Japan` — drives repo path `axa-japan` (NOT the verbose "POC" form, which would yield `axa-japan-poc`) |
-| `domain_name` | root zone, e.g. `axajp-eis.cloud` |
-| `master_issue` | the Jira key, e.g. `EISSAASDEV-302` (also fills every `*_issue` default) |
-| `account_id_default` | 12-digit vended account ID from Phase 1 (`^[0-9]{12}$`) |
-| `networkhub_account_id` | `729852324759` (default — keep) |
-| `argocd_role_arn` | `arn:aws:iam::182399717428:role/-20260211102113018500000002` (default shared EIS ArgoCD — keep) |
-| `cognito_application_url` | IdC SAML metadata URL, or a placeholder like `PENDING-IdC-SAML-metadata-url` (fill before infra/services apply) |
+| `lower_region` | `us-west-2` (EIS infra always lands in us-west-2 regardless of "Asian region" app wording) |
+| `lower_region_code` | `aws0` — **auto-derived** from region; don't supply |
+| `global_project_code` | e.g. `axajp` — short, lowercase, `^[a-z0-9]{3,5}$` |
+| `global_project_name` | e.g. `AXA Japan` — drives repo path `axa-japan` (NOT the verbose "POC" form, which would yield `axa-japan-poc`) |
+| `global_domain_name` | root zone, e.g. `axajp-eis.cloud` |
+| `global_master_issue` | the Jira key, e.g. `EISSAASDEV-302` (also fills every `global_*_issue` default) |
+| `lower_account_id` | 12-digit vended account ID from Phase 1 (`^[0-9]{12}$`) |
+| `global_networkhub_account_id` | `729852324759` (default — keep) |
+| `global_argocd_role_arn` | `arn:aws:iam::182399717428:role/-20260211102113018500000002` (default shared EIS ArgoCD — keep) |
+| `lower_cognito_url` | IdC SAML metadata URL, or a placeholder like `PENDING-IdC-SAML-metadata-url` (fill before infra/services apply) |
 
 ### The `/23` Shared-VPC subnet trap (critical)
 
 The infra-stage auto-subnet calc assumes a **`/22`**: it places TGW subnets at `base+3`. For a
 **`/23` Shared VPC** that overflows the `/23` and collides with the Development range. So for a `/23`
-infra CIDR you **must** set `intra_auto_calculate: false` and hand-size the subnets inside the block.
+infra CIDR you **must** set `lower_infra_auto_calculate: false` and hand-size the subnets inside the block.
 The **dev** lower stage `/23` auto-calc is fine (the lower-stage generator is `/23`-aware).
 
-Reference `/23` hand-sizing inside `10.34.128.0/23`:
+Reference `/23` hand-sizing inside `10.34.128.0/23` (v2.0.0 keys):
 ```yaml
-infra_cidr: 10.34.128.0/23
-intra_auto_calculate: false
-infra_private_subnets:          # EC2 toolchain fleet, 2 AZs (/25 each = 128 IPs)
+lower_infra_cidr: 10.34.128.0/23
+lower_infra_auto_calculate: false
+lower_infra_private_subnets:    # EC2 toolchain fleet, 2 AZs (/25 each = 128 IPs)
   - 10.34.128.0/25              # us-west-2a
   - 10.34.128.128/25            # us-west-2b
-infra_tgw_subnets:              # TGW attachment, 2 AZs
+lower_infra_tgw_subnets:        # TGW attachment, 2 AZs
   - 10.34.129.208/28            # us-west-2a
   - 10.34.129.224/28            # us-west-2b
-lower_stages:
+lower_stages:                   # copier REPLACES this map wholesale — every stage needs the FULL shape
   dev:
     stage_full: Development
     cidr: 10.34.130.0/23        # /23 auto-calc stays inside this range
+    az_count: 2
     pod_cidr: 100.64.48.0/20    # CGNAT, VPC-local, not TGW-routed → safe to reuse across clients
     pod_subnets: [100.64.48.0/21, 100.64.56.0/21]
-    eks_service_cidr: 10.202.0.0/16   # k8s-internal → safe to reuse
+# eks_service_cidr is GLOBAL in v2 (global_eks_service_cidr, default 10.202.0.0/16) — leave to default
 ```
 > Dev `/23` auto-resolves to: public `10.34.131.0/28`+`.16/28`, private `10.34.130.0/26`+`.64/26`,
 > eks `10.34.130.128/26`+`.192/26`, tgw `10.34.131.208/28`+`.224/28` — all inside `10.34.130.0/23`. ✓
@@ -94,48 +99,85 @@ lower_stages:
 `add-lower-stage` skill (don't pre-seed it). The full toolchain EC2 fleet ships by default in
 `infra/services` — no extra answers needed.
 
-Write the answers to a data file so the render is reproducible:
+Write the answers to a data file so the render is reproducible (or better: generate it with
+`intake/render-answers.py` from `onesuite.yaml` — same keys, zero drift):
 ```bash
 cat > /tmp/<code>-copier.yml <<'EOF'
-region: us-west-2
-project_code: axajp
-full_project_name: AXA Japan
-domain_name: axajp-eis.cloud
-master_issue: EISSAASDEV-302
-account_id_default: "586117079971"
-networkhub_account_id: "729852324759"
-cognito_application_url: PENDING-IdC-SAML-metadata-url
-infra_cidr: 10.34.128.0/23
-intra_auto_calculate: false
-infra_private_subnets: [10.34.128.0/25, 10.34.128.128/25]
-infra_tgw_subnets: [10.34.129.208/28, 10.34.129.224/28]
+lower_region: us-west-2
+global_project_code: axajp
+global_project_name: AXA Japan
+global_domain_name: axajp-eis.cloud
+global_master_issue: EISSAASDEV-302
+lower_account_id: "586117079971"
+global_networkhub_account_id: "729852324759"
+lower_cognito_url: PENDING-IdC-SAML-metadata-url
+lower_infra_cidr: 10.34.128.0/23
+lower_infra_auto_calculate: false
+lower_infra_private_subnets: [10.34.128.0/25, 10.34.128.128/25]
+lower_infra_tgw_subnets: [10.34.129.208/28, 10.34.129.224/28]
 lower_stages:
   dev:
     stage_full: Development
     cidr: 10.34.130.0/23
+    az_count: 2
     pod_cidr: 100.64.48.0/20
     pod_subnets: [100.64.48.0/21, 100.64.56.0/21]
-    eks_service_cidr: 10.202.0.0/16
 EOF
 ```
 
 ---
 
-## Step 2 — `copier copy` (pin v1.3.0, custom delimiters)
+## Step 2 — `copier copy` (pin v2.0.0, custom delimiters)
 
 The template uses Copier custom delimiters `[[ ]]` / `[% %]` (HCL-safe — set in `_envops`), so the
-rendered HCL keeps its native `${}` / `{{ }}`. **Always pass `--vcs-ref v1.3.0`** (the validated tag;
+rendered HCL keeps its native `${}` / `{{ }}`. **Always pass `--vcs-ref v2.0.0`** (the current released
+tag — the kit's intake emits v2 keys, so rendering an older tag with them silently drops every value;
 `copier.yaml` has migrations keyed to versions, and an unpinned `HEAD` can drift).
+
+> **History — never render < v1.4.0 (v1.3.0 ships a broken CI); current pin is v2.0.0.** The `.gitlab-ci.yml` commit-msg lint loop in
+> v1.3.0 (and earlier) runs `git rev-list` WITHOUT `--no-merges`, so the project's `main`
+> pipeline goes RED after every MR merge (the GitLab merge commit `Merge branch … into 'main'`
+> fails conventional/jira lint). The template-baseline fix (`--no-merges`, COEXT-105281) first
+> tagged in **v1.4.0** (commit `d9621fc`); v1.4.0 also defaults EKS to 1.35 and adds the velero
+> baseline. **But on an already-rendered v1.3.0 project the preferred fix is NOT to weaken CI** —
+> set `merge_method=ff` (Step 5c) so merges fast-forward and no merge commit is ever created, and
+> amend the existing bad merge commit to a conventional+jira subject. axajp hit this (job 1797455);
+> the `--no-merges` per-project MR (axajp !3) was **closed/rejected** per user directive ("don't
+> change the ci/cd"), and main was fixed on 2026-06-25 via `merge_method merge→ff` + amending the
+> merge commit (`af25a93 → e04e175`, both parents kept), pipeline 1734151 green — **no CI change**.
+> Full recipe: memory `gitlab_merge_commit_lint_ff_fix`.
+
+> **v2.0.0 IS the current released schema** (was MR !23 / COEXT-105822; now merged + tagged). It reworked
+> the template to a level-generic lower/upper schema and added an `upper` (preprod) tier (`enable_upper`,
+> core-only; upper services is a WIP scaffold). Every key in this skill is already the v2 name. If you're
+> reading an OLD render or doc that uses v1.x keys, this is the rename map (v1 → v2):
+>
+> | v1.x key | v2.0.0 key |
+> |---|---|
+> | `project_code` | `global_project_code` |
+> | `full_project_name` | `global_project_name` |
+> | `domain_name` | `global_domain_name` |
+> | `master_issue` | `global_master_issue` |
+> | `networkhub_account_id` | `global_networkhub_account_id` |
+> | `argocd_role_arn` / `*_issue` | `global_argocd_role_arn` / `global_*_issue` |
+> | `region` / `region_code` | `lower_region` / `lower_region_code` |
+> | `account_id_default` | `lower_account_id` |
+> | `infra_cidr` | `lower_infra_cidr` |
+> | `intra_auto_calculate` | `lower_infra_auto_calculate` |
+> | `cognito_application_url` | `lower_cognito_url` |
+> | _(new)_ | `enable_upper` + `upper_region` / `upper_account_id` / `upper_share_cidr` / `upper_stages` + `global_eks_service_cidr` |
+>
+> `lower_stages` is unchanged. The v2 `copier update` migration (`ci/migrations/v2_prefix_and_freeze.sh`) renames keys and freezes existing stage subnets so live VPCs are never re-subnetted. Full detail + copier-TF MR review gotchas: memory `iac-client-template-v2-review`.
 
 ```bash
 DEST=/Users/eramadan/gitwork/iac/projects/aws/axa-japan/terraform
-copier copy --vcs-ref v1.3.0 --data-file /tmp/axajp-copier.yml "$TPL" "$DEST"
-# (interactive alt: copier copy --vcs-ref v1.3.0 "$TPL" "$DEST" and answer the prompts)
+copier copy --vcs-ref v2.0.0 --data-file /tmp/axajp-copier.yml "$TPL" "$DEST"
+# (interactive alt: copier copy --vcs-ref v2.0.0 "$TPL" "$DEST" and answer the prompts)
 ```
 
 Verify the render:
 ```bash
-cat "$DEST/.copier-answers.yml"          # _commit: v1.3.0; region_code auto = aws0
+cat "$DEST/.copier-answers.yml"          # _commit: v2.0.0; lower_region_code auto = aws0
 find "$DEST/lower" -maxdepth 2 -type d   # expect: infra/{bootstrap,core,services} + dev/{core,services}
 cd "$DEST" && terraform fmt -recursive -check
 ```
@@ -222,9 +264,19 @@ glab api -X POST projects \
   -f namespace_id=<subgroup_id> \
   -f initialize_with_readme=false
 # capture project id (reference run: id 1579)
+
+# 5c. merge method = fast-forward (DO THIS NOW — prevents merge-commit CI reds)
+glab api -X PUT projects/<project_id> -f merge_method=ff
 ```
 > GOTCHA (memory `gitlab_module_repo_bootstrap`): `initialize_with_readme=false` leaves `main`
 > uninitialized — that's intended; you push `main` yourself in Step 6.
+>
+> GOTCHA — **merge_method default is `merge`** → every MR merge mints a `Merge branch '…' into 'main'`
+> commit whose first line is NOT conventional. The template CI commit-msg loop validates every commit
+> in `rev-list ${CI_COMMIT_BEFORE_SHA}..${CI_COMMIT_SHA}`, so **main goes red after EVERY merge**
+> (job 1797455, axa-japan MR !1). Setting `merge_method=ff` (5c) makes merges fast-forward — no merge
+> commit, no recurrence — without weakening CI. **User directive: fix the commit / use `ff`, do NOT
+> add `--no-merges` to the lint loop here.** See memory `gitlab_merge_commit_lint_ff_fix`.
 
 ---
 
@@ -238,7 +290,7 @@ cd "$DEST"
 rm -rf .git
 git init -b main
 git add -A
-git commit -m "feat(terraform): EISSAASDEV-302 - initial scaffold from client template v1.3.0"
+git commit -m "feat(terraform): EISSAASDEV-302 - initial scaffold from client template v2.0.0"
 # the regex-fix commit from Step 3 if not already in:
 #   git commit -m "chore(ci): EISSAASDEV-302 - allow EISSAASDEV jira project in commit-msg lint"
 git remote add origin ssh://git@sfo-cvdevopsgit01.eqxdev.exigengroup.com:2224/iac/projects/aws/axa-japan/terraform.git
@@ -307,7 +359,7 @@ glab api "projects/iac%2Fprojects%2Faws%2Faxa-japan%2Fterraform/hooks" \
 
 ## Verification checklist
 
-1. `.copier-answers.yml` shows `_commit: v1.3.0`, `region_code: aws0`, `intra_auto_calculate: false`,
+1. `.copier-answers.yml` shows `_commit: v2.0.0`, `lower_region_code: aws0`, `lower_infra_auto_calculate: false`,
    and the hand-sized infra subnets.
 2. `lower/` has `infra/{bootstrap,core,services}` + `dev/{core,services}` only.
 3. `./ci/generate-atlantis-projects.sh && git diff --exit-code atlantis.yaml` is clean (5 projects,
@@ -320,7 +372,7 @@ glab api "projects/iac%2Fprojects%2Faws%2Faxa-japan%2Fterraform/hooks" \
 
 ## Reference run: EISSAASDEV-302 (AXA Japan / axajp)
 
-- Rendered with `copier copy --vcs-ref v1.3.0` into
+- Rendered with `copier copy --vcs-ref v2.0.0` into
   `iac/projects/aws/axa-japan/terraform/` — `account_id_default=586117079971`, `/23` Shared with
   `intra_auto_calculate: false` + hand-sized subnets, dev `/23` auto-calc, `fmt` clean.
 - `full_project_name: AXA Japan` (→ repo path `axa-japan`); `project_code: axajp`;

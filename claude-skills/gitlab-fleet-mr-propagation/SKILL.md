@@ -11,6 +11,12 @@ Propagate a small identical change to N repos **server-side via the Commits API*
 
 **Fix the template first** (`iac/terraform/template/module`), tag a release, then propagate the same diff to generated repos directly (copier update is overkill for 1 line; next update is a no-op).
 
+> The classic use of this playbook was the `--no-merges` commit-msg-lint fix (COEXT-105281). For the
+> merge-commit-reds-main problem specifically, the **preferred fix on a single project is NOT to weaken
+> CI** — set the project `merge_method=ff` (`glab api -X PUT projects/<id> -f merge_method=ff`) so merges
+> fast-forward and never create a `Merge branch …` commit. Use fleet propagation only when the change
+> genuinely must touch file content in N repos. See memory `gitlab_merge_commit_lint_ff_fix`.
+
 ## Core recipe (per repo, ~3 API calls)
 
 ```bash

@@ -220,6 +220,24 @@ MCP under spaces/Devops next to the "EIS OneSuite Platform Creation Workflow" ru
 
 ---
 
+## Learnings — axajp (2026-06)
+
+**Toolchain URL access for handover (private hosts `*.infra.aws0.<proj>-eis.cloud`):** two legs, mirror CAA.
+- **Routing** is typically already in place — the whole `10.34.0.0/21` is routed to `us-west-2`; confirm with networking. Routing `!=` DNS.
+- **DNS is the gating leg.** File an **EISHELP** ticket (issuetype **Access Request**) to forward the **ENTIRE `<proj>-eis.cloud` apex zone** to the EIS network-hub Route53 resolvers (same resolvers as CAA). Forwarding the apex covers future stages (test/uat) with no re-routing.
+- **Until DNS lands**, access via SSM port-forward:
+  ```bash
+  aws ssm start-session --document AWS-StartPortForwardingSession \
+    --parameters portNumber=443,localPortNumber=8443 --target <instance-id>
+  # then browse https://localhost:8443
+  ```
+- A COEXT "enable VPN access" ticket can be **closed once routing is confirmed + the DNS EISHELP ticket is filed** (routing != DNS).
+- CAA precedents: routing COEXT-98982 / COEXT-98488 / COEXT-98490; DNS COEXT-91882 / COEXT-102376 / COEXT-105095 + EISHELP-108949.
+
+**Handoff doc sections that worked:** env overview; **ACCESS** (URLs + SSM tunnel + instance-ids + DNS-pending note); toolchain status (N/9); GitOps/ArgoCD; secrets (Vault paths); known gaps / open tickets; Cognito/SSO + RBAC SIDs; repo links.
+
+---
+
 **Reference run: EISSAASDEV-302 (AXA Japan / axajp)** — account `586117079971` (SaaS/Lower), cluster
 `aws0axajpdeveks01` (`us-west-2`), root domain `axajp-eis.cloud`, ArgoCD ingress
 `dev.aws0.axajp-eis.cloud`, full CAA-parity toolchain fleet (git01/jnk01/bld01/nexus01/atlantis01/

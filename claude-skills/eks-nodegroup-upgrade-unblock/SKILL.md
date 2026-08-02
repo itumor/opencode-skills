@@ -106,6 +106,12 @@ If chart is **not under Argo CD** (`kubectl get applications.argoproj.io -A` ret
 | `fivetran` | `hd-agent-pdb` | `minAvailable:1`, 1 replica, `Recreate` | Chart `hybrid-deployment-agent`. Documented in [[aws0caadeveks01-eks-135-upgrade]] |
 | `kube-system` | `cluster-autoscaler` etc. | Usually drainable | Check `disruptionsAllowed` field |
 
+## Learnings — axajp (2026-06)
+
+- Fresh cluster K8s version: a new cluster may come up at the client-template **default** version (e.g. `1.33`), not the latest. Upgrade **one minor at a time** (`1.33`→`1.34`→`1.35`) via the `eks.version` bump in the project's services tfvars + Atlantis apply.
+- Around each control-plane bump, flip the ArgoCD `syncProject` apps `apps-denied` ↔ `apps-allowed` (deny before bump, allow after).
+- ALSO fix the **client template's** default `eks` version so future clusters start current.
+
 ## References
 
 - [[aws0caadeveks01-eks-135-upgrade]] — first known incident; full timeline

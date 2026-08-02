@@ -121,6 +121,12 @@ After `lower-dev-services` applies, pull from `outputs.tf` (`AWS_PROFILE=axajp t
 - Cognito audience can only be read *after* the infra/services apply — don't block dev/services on it; it's a parallel hand-off.
 - Tag everything `Issue = EISSAASDEV-302` for a clean decommission path later (skill `fv-cluster-decommission`).
 
+## Learnings — axajp (2026-06)
+Sisense single-node install (`sisense_install` role → `./sisense.sh single_config.yaml`):
+- **Raw /opt EBS.** The dedicated /opt EBS attaches RAW. Add idempotent `pre_tasks` (in `playbooks/sisense.yaml` or before the role): discover the unformatted disk (`lsblk -J`; a disk with no `fstype` + no `mountpoint` + no `children` = the EBS — the root disk has children so never matches), `mkfs` ext4, `ansible.posix.mount` /opt `opts=defaults,nofail`. **CRITICAL:** after mounting, **RE-GATHER `ansible_mounts`** (`ansible.builtin.setup filter=ansible_mounts`) — the role's "/opt is a mounted volume" assert reads facts gathered at play start (pre-mount) and fails otherwise.
+- **ROLE GAP: empty `application_dns_name`.** The role's `lineinfile` config-edit (`install.yml`) does NOT set `application_dns_name` → `single_config.yaml` keeps `application_dns_name: ""` → the Sisense api-gateway helm chart hard-fails: `Must provide global.applicationDnsName`. FIX: set `application_dns_name` to the host FQDN (e.g. `aws0<proj>sis01.infra.aws0.<proj>-eis.cloud`). Affects every project. The vendored `sisense_install` role re-extracts the tarball each run, so either patch on-host + re-run `sisense.sh` directly, OR fix the role to set it.
+- **RKE2, not k3s.** Sisense single-node uses RKE2 (v1.36); deploys calico/coredns/metrics + a monitoring ns (prometheus/grafana) before the sisense umbrella chart. k8s comes up even if the umbrella deploy fails — re-running resumes the helm deploy. Install takes ~15–20 min.
+
 ## Reference run: EISSAASDEV-302 (AXA Japan / axajp)
 - account `586117079971` (AXA Japan Lower, SaaS/Lower), profile `axajp`, region `us-west-2`.
 - cluster `aws0axajpdeveks01`, dev VPC `10.34.130.0/23` + pod CIDR `100.64.48.0/20`, K8s 1.35.

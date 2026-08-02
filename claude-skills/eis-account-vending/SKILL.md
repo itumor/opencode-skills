@@ -65,8 +65,9 @@ python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt   # boto3>=
 
 ## 4. Write `account.env`
 
-`account.env` is **not gitignored** and a stale one usually exists — **back it up first**
-(`cp account.env account.env.bak.$(date +%s)`). Then:
+`account.env` is **gitignored** since **COEXT-105822** (it holds per-run account id/email/profile —
+never commit). Scaffold from the tracked template: `cp account.env.example account.env`. A stale
+local one may still exist — back it up first (`cp account.env account.env.bak.$(date +%s)`). Then:
 
 ```ini
 AWS_PROFILE=Audit              # discovery/staging; for the create, swap to a mgmt-account profile
@@ -76,7 +77,7 @@ SSO_REGION=us-east-1           # IdC instance region (skips slow autodiscovery)
 STACKSET_NAME=eis-terraform-bootstrap
 TEMPLATE_FILE=bootstrap-baseline.yaml
 PROJECT_PREFIX=<code>          # e.g. axajp → state bucket aws0<code>tfstate
-BUCKET_SUFFIX=tfstate
+BUCKET_SUFFIX=tfstate          # state bucket = aws<regioncode><prefix>tfstate (regioncode from §4a map)
 ACCOUNT_NAME=<Display Name>
 ACCOUNT_EMAIL=eis-pnt-aws+<slug>@eisgroup.com
 OU_NAME=Lower
@@ -93,6 +94,29 @@ IDENTITY_CENTER_PERMISSION_SETS=AdministratorAccess
 IdC assignment is **best-effort** (failures are logged, don't block vending) and needs the runner to
 also be an IdC admin — it's how `oc-team`/you get AdministratorAccess on the new account for the
 Terraform bootstrap. If it doesn't take, grant access separately.
+
+## 4a. Region-code map — non-`us-west-2` accounts (COEXT-105822)
+
+The state-bucket region prefix (`aws<regioncode>...`) comes from **two in-repo copies** that **MUST
+match `eis-env-common-utility`'s `aws_region_codes`** (authoritative naming source, all fleet TF
+backends derive from it):
+- `config.py` → `region_code_map`
+- `bootstrap-baseline.yaml` → `Mappings.RegionCodes`
+
+If `AWS_REGION` is missing from these maps (or its code ≠ the module's), the bootstrap StackSet fails
+`Unable to get mapping for RegionCodes::<region>::code` **and** the state bucket is misnamed →
+doesn't match the Terraform backend. Current authoritative set (module **v2.1.1**, 12 regions):
+
+```
+us-west-2=0  eu-west-1=01  us-east-1=02  us-west-1=03  ca-central-1=04  ap-south-1=05
+ap-northeast-1=06  eu-west-2=07  us-east-2=08  eu-central-1=09  ap-northeast-3=10  eu-west-3=11
+```
+(`us-west-2=0` is single-char by legacy convention; rest zero-padded 2-char — mirror exactly.)
+
+**Adding a region not yet in the map**: add it to `eis-env-common-utility` **first** (gets the
+authoritative code, cut a module tag), then mirror the *same* entry into both files above. Never
+invent sequential codes here — that recreates the bucket-name drift this fix removed. Don't bulk-add
+"all AWS regions"; only mirror what the module defines.
 
 ## 5. Run (needs mgmt-account creds)
 
@@ -126,3 +150,5 @@ Atlantis role), switching to `aws0<code>atlantis01` only after the toolchain Atl
 - OU must pre-exist; `Vending.py` won't create it.
 - `ACCOUNT_EMAIL` must be globally unique across all AWS; reusing one fails `CreateAccount`.
 - System boto3 too old → always venv.
+- Non-`us-west-2` region + region absent from the two region-code maps → StackSet
+  `Unable to get mapping for RegionCodes::<region>::code` + misnamed state bucket (see §4a).

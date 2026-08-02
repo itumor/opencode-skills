@@ -308,6 +308,25 @@ The 7 things that bit (or nearly bit) the `infra/services` fleet apply, in apply
 
 ---
 
+## Learnings — axajp (2026-06)
+
+- **Sisense `sis01` needs a DEDICATED `/opt` EBS volume.** `sisense_install` (Phase 5 ansible) asserts
+  `/opt` is a mounted FS. The historical `ec2_settings.sis` default carried `extra_block_devices = [200]`
+  but that key is **DEAD** — `ec2.tf` only consumes `ebs_volumes = lookup(each.value,"ebs_volumes",{})`.
+  FIX (belongs as the **DEFAULT in `variables.tf` `ec2_settings.sis`**, not a per-env override):
+  ```hcl
+  ebs_volumes = { "/dev/sdf" = { size = "200", type = "gp3", encrypted = "true" } }
+  ```
+  `ec2.tf` merges per-acronym `ec2_settings` into `each.value`
+  (`merge(lookup(ec2_settings,<acronym>,{}), value, ...)`) so the default flows to `sis01={}`
+  automatically. Promoted to the **client template (MR !24)**. The attached EBS is **RAW** — still
+  needs an ansible `mkfs`+`mount /opt` step (see the ansible/sisense skill); `eis-ec2` `user_data`
+  only installs the SSM agent.
+- **EKS may come up at the template-default K8s version** (e.g. `1.33`), not the newest. Verify
+  `eks.version` in the cluster's services tfvars AND the client template default; bump if behind.
+
+---
+
 ## Step 6 — Hand-off to Phase 4
 
 When all three infra projects are green:

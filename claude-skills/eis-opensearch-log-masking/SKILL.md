@@ -129,6 +129,106 @@ The spoke EKS API is private; the build host (e.g. `aws0caatestbld01`, tag query
 - Apply SAML/secrets/admin from the build host or with a `Credit-Agricole`-style AdministratorAccess
   profile (separate from the Atlantis CI role).
 
+## Index separation per the EIS wiki (OpenSearch Index Strategy / SaaS Log Collecting)
+The default single-index ships application+dependency+infrastructure logs together; the EIS standard
+splits them by component. CAA/CICD define the strategy, **infra implements it in the shipper config**.
+- **Pattern:** `<stage>-<service>-<component>-YYYY.MM.dd` — **NO namespace segment** (CAA dropped my
+  namespace idea, comment 9793869; matches wiki "Upper-level env ELK index name convention"). stage=tier
+  (dev/test/stage/prod; UAT→`test`), service=cluster (`aws0caatesteks01`), component = pod label
+  `app.kubernetes.io/component` ∈ {`application`,`dependency`,`infrastructure`}. `infrastructure` =
+  `<stage>-infrastructure-*` (NO `<service>`, non-EKS — Jenkins/Nexus etc handled OUTSIDE our
+  Filebeat→Logstash; our EKS pipeline ships only `application` + `dependency`). **Logs WITHOUT the label
+  are DROPPED** (intended — a filtering feature; tooling pods must carry the label to ship).
+- **Filebeat:** `add_kubernetes_metadata` with ONLY a `logs_path` matcher does NOT enrich pod
+  labels/namespace (docs come out with no `kubernetes.*` fields — confirmed on COEXT-105505). Add
+  `default_indexers.enabled: true` + `labels.dedot: true` so `kubernetes.namespace` + `kubernetes.labels.*`
+  populate. Label `app.kubernetes.io/component` **dedots to `app_kubernetes_io/component`** (`.`→`_`, `/`
+  kept). The Filebeat ClusterRole needs get/list/watch on pods+namespaces (already present in the chart).
+- **Logstash:** filter `if ![kubernetes][labels][app_kubernetes_io/component] { drop {} }` (drop unlabeled)
+  + `mutate { lowercase => ["[kubernetes][labels][app_kubernetes_io/component]"] }` (OpenSearch index names
+  must be lowercase); output `index => "${OPENSEARCH_INDEX_PREFIX}-%{[kubernetes][labels][app_kubernetes_io/component]}-%{+YYYY.MM.dd}"`
+  with `OPENSEARCH_INDEX_PREFIX`=`<stage>-<service>` env (no namespace token in the index name).
+- **OpenSearch:** ISM policy (retention by tier — UAT ~1 month + rollover) + an index template for
+  `<prefix>-*` via the API (no TF provider). Read-access AD groups `elk_<project>_<env>_<index>_r` =
+  separate access task.
+- **PREREQ (the gate):** confirm the deployed components are ACTUALLY labeled BEFORE shipping
+  drop-unlabeled — else you drop ALL logs. Run the pattern by the customer (Jira) first.
+  On COEXT-105505 CAA came back with: base/low-level envs DON'T set `component` (only pre-prod/prod
+  helper does) → they added it to the CAA template + redeployed. **Offer a `-unclassified-` catch-all
+  instead of dropping** — it de-risks the rollout, costs one `else` branch, and the customer can
+  refine later.
+
+### ⚠️ Route on the label ONLY inside the customer's app namespace (COEXT-105505, 2026-07-31)
+Real labels found on the live cluster: `caa-uat` had `application`(28 pods), `solr`, `zookeeper`,
+`all-in-one`, +7 UNLABELED. **But every other namespace sets `app.kubernetes.io/component` to its
+OWN upstream chart value** — `ingester`, `compactor`, `csi-driver`, `memcached-chunks-cache`,
+`storegateway`, `query-frontend`, `prometheus-operator`, `metrics`, `smoke-test`, `log-pipeline`, …
+Routing on the bare label sprays **dozens of junk indexes**. Gate on the app namespace via a single
+env var (`EIS_APP_NAMESPACE`), and map `component == "application"` → application, any OTHER value in
+that ns → **dependency** (customers label deps with the workload NAME, e.g. `component: solr`, not the
+literal `dependency`; the raw label stays on the doc for filtering inside the index). Everything else
+→ unclassified. **Inventory the live labels before writing the filter:**
+`kubectl get pods -A -o json | ...` count by (ns, `app.kubernetes.io/component`).
+- **Volume reality check:** platform namespaces are ~95% of doc volume (117k unclassified vs 5.7k
+  application on a sample day) and usually already ship to Loki via Alloy → offer to stop shipping
+  them; that alone cuts ingest ~10x.
+- **Filebeat needs NO change** — `add_kubernetes_metadata` with only a `logs_path` matcher DOES
+  already enrich `kubernetes.namespace` + dedotted `kubernetes.labels.*` (verified on live docs).
+  Don't add `default_indexers`/`labels.dedot`; check a real doc first (`_search?size=1`) instead of
+  assuming enrichment is missing.
+- **Validate the pipeline against the real image BEFORE merging** — copy the rendered `logstash.conf`
+  into the running pod and run
+  `logstash -f /tmp/new.conf --config.test_and_exit --path.data /tmp/lsdata` → want `Configuration OK`.
+  Catches the grammar bugs that otherwise only appear as CrashLoopBackOff.
+- Aggregating on a label needs the **`.keyword`** subfield
+  (`kubernetes.labels.app_kubernetes_io/component.keyword`); the bare field is `text` and errors.
+
+### ⚠️ No ISM policy + a 20 GB volume = the pipeline dies silently (COEXT-105505, found 2026-07-31)
+Ingestion **stopped dead for 24 days** and nothing alerted. ~1.1 GB/day of daily indexes filled the
+20 GB volume → OpenSearch tripped its **flood-stage watermark** → set
+`index.blocks.read_only_allow_delete` + `index.blocks.write` on EVERY log index. **Filebeat and
+Logstash both stayed `Running`/`1/1` the whole time** — their writes were just rejected. Symptom to
+look for: newest index is days/weeks old while pods look perfectly healthy.
+- Diagnose: `_cat/allocation?v` (disk), `_all/_settings/index.blocks*?flat_settings=true`,
+  `_cluster/settings?flat_settings=true`.
+- Recover: delete aged-out indexes (explicit list, never a wildcard) → clear blocks with
+  `PUT <idx>/_settings {"index.blocks.read_only_allow_delete":null,"index.blocks.write":null}`.
+- **`cluster.blocks.create_index: true`** is also set, and blocks creating ANY new index (so the new
+  per-component indexes can't be made, and even `PUT _plugins/_ism/policies/...` fails — it needs to
+  create `.opendistro-ism-config`). **You cannot clear it**: `_cluster/settings` on a managed domain
+  returns `{"Message":"Your request: '/_cluster/settings' payload is not allowed."}`. It clears on
+  AWS's own recovery cycle once disk is healthy — in practice within minutes. Poll with a canary
+  (`PUT /<prefix>-canary`, delete it) rather than guessing.
+- **ORDER TRAP: apply the ISM policy AFTER the create-index block clears, then re-verify.** A policy
+  PUT that failed earlier leaves the index template pointing at a non-existent `policy_id`, so indexes
+  come up with NO retention and the disk refills. `ism_template` only auto-attaches at index
+  CREATION → attach to already-created indexes with
+  `POST _plugins/_ism/add/<prefix>-* {"policy_id":"..."}` (returns `updated_indices`), and confirm via
+  `_plugins/_ism/explain/<idx>` showing `policy_id` + `enabled:true`.
+- **Set `number_of_replicas: 0` in the index template.** A single-node domain can NEVER allocate
+  replicas: the default of 1 left ~90–120 shards `UNASSIGNED` and the cluster permanently `yellow`.
+  Legacy indexes need it applied explicitly (`PUT caa-uat-app-logs-*/_settings`). Expect the cluster
+  to stay `yellow` with ~5 unassigned anyway — `.opendistro-ism-config` is AWS-managed and FGAC
+  refuses the replica change (`security_exception`). That residual yellow is normal.
+- Sizing: usable ≈ volume − ~15% − flood watermark. 20 GB ≈ **10 days** at 1.1 GB/day; the wiki's
+  ~1 month UAT retention needs ~40 GB+, i.e. grow `ebs_options.volume_size` (TF/Atlantis) FIRST, then
+  raise `min_index_age`. Never raise the age without the volume.
+- **Cutover trap:** clearing the blocks while the OLD Logstash pod is still running makes it flush its
+  whole queued backlog into the OLD index names (created seconds apart — check
+  `_cat/indices?h=index,creation.date.string`). Those are NOT safe to delete as "duplicates": Filebeat
+  advances its registry, so the new pipeline may never re-ship those events. Set `replicas:0` on them
+  and ask the customer. To avoid it entirely: merge the new pipeline FIRST, let the new pod roll, and
+  clear the blocks last.
+
+### ArgoCD app stuck OutOfSync on an ExternalSecret (cosmetic, worth fixing)
+`logstash-<cluster>` sat `OutOfSync` + `Healthy` forever with the last sync `Succeeded` and ESO
+reporting `SecretSynced`. Cause: the ExternalSecret **CRD defaults** fields the rendered manifest
+never declared, so ArgoCD diffs git-without vs live-with on every pass. Declare them explicitly:
+`spec.target.template.mergePolicy: Replace`, and per `data[].remoteRef`:
+`conversionStrategy: Default`, `decodingStrategy: None`, `metadataPolicy: None`. No behaviour change.
+(Diff `helm template` output against the live `spec` field-by-field to find which fields defaulted.)
+Ref: COEXT-105505 argocd!335 (separation) + !336 (this drift fix).
+
 ## Day-2 recovery: endpoint dead / basic-auth 401 after a config change (COEXT-105505, 2026-06-22)
 A SAML/config `update-domain-config` triggers a **blue/green** that can leave the domain's **VPC endpoint ENIs dead** — 443 times out **VPC-wide** (confirm from a 2nd in-VPC host, e.g. the build host, to rule out the client/PSM side) while the node is healthy internally (CloudWatch Nodes=1, ClusterStatus.red=0, disk fine) and SG/NACL/route are all permissive and CloudTrail shows no change. Tell-tale: all domain ENIs (`describe-network-interfaces` by the domain SG) show `available`/detached.
 - **Fix = reprovision** to rebuild the ENIs: the reliable trigger is an instance change. `t3.large.search` does NOT exist for OpenSearch (t3 stops at `t3.medium`); the 8 GB-class node is **`m6g.large.search`**. `t3.small.search` is too small for sustained log ingestion (JVM ~80%, wedges) — size up.

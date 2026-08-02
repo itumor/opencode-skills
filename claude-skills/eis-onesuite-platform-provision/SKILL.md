@@ -185,24 +185,16 @@ approach-risk flag from Aleh→Viktoras to re-confirm reuse-vs-new). Locked valu
 `10.34.128.0/23` + Development `10.34.130.0/23`, **Private** access (WorkSpaces over TGW, no public
 ALB/WAF), full CAA toolchain fleet, ArgoCD backend = Secrets Manager, Vault path `secret2/data/axajp`.
 
-**Current status (2026-06-18):**
-- **P0** — root zone `axajp-eis.cloud` live on Route53 ✓; IdC SAML metadata received + wired (app
-  "AXAJP Lower Cognito" `ins-7223ce427d94d53c`) ✓; **`network-hub` MR !9 MERGED + APPLIED** (SaaS/
-  Lower `ou-mgtl-10u4x9xu` + SaaS/Upper `ou-mgtl-fhbvbnpo` added to TGW + DNS-resolver RAM shares →
-  Phase-3 TGW gate cleared) ✓; cost signed off ✓; Atlantis webhook created (hook id 14) ✓; Vault
-  `secret2/data/axajp` ⏳ (knowledge-gap on the population script — escalate).
-- **P1** — account **`586117079971`** (`AXA Japan Lower`, `eis-pnt-aws+axajp@eisgroup.com`) ACTIVE
-  in SaaS/Lower; StackSet baseline ran (state bucket `aws0axajptfstate`, bootstrap roles
-  `aws0iacdeveks01-atlantis-{plan,apply}-Role` present); my access = AdministratorAccess via
-  `oc-team` IdC; SSO profile `axajp`. Done (Markuss ran `CreateAccount` from mgmt acct
-  `455655288646`). ✓
-- **P2** — scaffolded + pushed: `projects/aws/axa-japan/terraform` (Copier v1.3.0, `/23` custom
-  Shared subnets, fmt clean); GitLab subgroup id 1992 + project id 1579; `atlantis.yaml` → 5
-  projects. **TODO:** add Markuss as reviewer; onboard Renovate. ✓ (scaffold)
-- **P3** — **NEXT**: apply via IaC Atlantis (local apply impossible — SSO can't assume the IaC
-  Atlantis role). Open Q to Markuss: canonical trigger for *initial* provisioning when the scaffold
-  is already on `main` with no MR diff (`atlantis plan -p <stage>` per order vs re-seed branch→MR).
-- **P4–P7** — pending P3.
+**Status — P0–P6 COMPLETE end-to-end (2026-06-29); first full validated run.**
+- **P0** ✓ — root zone `axajp-eis.cloud` on Route53; IdC SAML wired (original app `ins-7223ce427d94d53c` was deleted by Aurimas → **repointed to `ins-7223a6419755ad6e` / `apl-7223a6419755ad6e`** via targeted `module.cognito[0]` apply, see [[cognito_saml_idc_repoint]]); `network-hub` MR !9 MERGED+APPLIED (SaaS OUs → TGW + DNS-resolver RAM); cost signed off; Atlantis webhook; **Vault `secret2/data/axajp` populated by me** (16 paths, GENESIS-431062 reassigned — cloud team won't seed per data-leak policy); **EISHELP-110743 DNS forward DONE + verified laptop-side**.
+- **P1** ✓ — account **`586117079971`** ACTIVE in SaaS/Lower; StackSet baseline (state `aws0axajptfstate`); access via `oc-team` IdC, SSO profile `axajp`.
+- **P2** ✓ — `projects/aws/axa-japan/terraform` scaffolded + pushed; Atlantis wired. (Note: rendered v1.3.0 → inherited the merge-commit-lint bug; fix is template ≥v1.4.0, see [[coext105281_module_ci_merge_commit_fix]].)
+- **P3** ✓ — infra applied via IaC Atlantis: network + **9-host toolchain EC2 fleet** (git/jnk/nexus/sonar/grok/atlantis/sis/keycloak/bld); real **Let's Encrypt** certs live on all serving hosts.
+- **P4** ✓ — dev applied: **EKS 1.35** (upgraded 1.33→1.34→1.35), RDS pg16, MSK, internal ALB/NLB, S3, IRSA — 0-destroy.
+- **P5** ✓ — Ansible toolchain config: 6 docker-compose services UP (git 302/jnk 403→AD-SSO/nexus 200/sonar 25.9 UP/grok 401/atlantis 200) + Sisense RKE2 host + Keycloak cert-stub. Key fixes this run: `upgrade:false` trap, registry-mirror→docker.io then revert, **Jenkins CasC `myViewsTabBar` deprecated-key** (see [[eissaasdev302_axajp_env_state]] + skill `eis-ansible-project-template`). ⚠️ **Sisense PRODUCT activation pending** (oxygen `/get`=500 — app-layer, not Ansible).
+- **P6** ✓ — ArgoCD **18/18 Synced+Healthy**; first-sync cascade + istiod-packing fixed (MRs !298/!299, clusters !3/!4); **dashboard SSO (Grafana/Headlamp/gen-dashboard) WORKING** (AD groups → IdC app-assignment → fixed the IdC SAML default-attribute-mapping). ⚠️ small nits: Velero dev-workloads ns-misconfig (drop hub-only `iac` from includedNamespaces) + alertmanager seed-vs-drop.
+- **P7** 🟡 — handoff materials delivered to CICD3 (per-tool URL table, access notes); `PHASE7-HANDOFF.md` refreshed; delivery installs ref-impl 26.100. Gated on Sisense activation + the P6 nits.
+- **E2E** — verified twice via workflow `axajp-e2e-verify-all` (12 dims, adversarial): 8 clean PASS, dashboard-SSO now green, Velero/alertmanager WARN, Sisense FAIL (activation). See skill `eis-onesuite-e2e-verify`.
 
 ---
 
