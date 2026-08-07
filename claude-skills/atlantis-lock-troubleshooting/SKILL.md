@@ -7,6 +7,14 @@ description: Use when an Atlantis lock is stuck/orphaned and blocks plans — "d
 
 An Atlantis project/workspace lock is held in Atlantis's own BoltDB (NOT terraform state). A merged/closed MR, or a repo migrated to a different Atlantis instance, can leave the lock **orphaned** — blocking new plans for that dir. Clearing it discards only the stored plan + lock; it touches **no terraform state, no AWS, no infra**.
 
+## -1. Is it actually orphaned? Check the holder MR's real state first
+
+**Not every "locked by an unapplied plan from pull !N" is a bug.** By design, Atlantis holds a project's lock until the PR that ran the plan is **merged or closed** — even if that PR's `atlantis apply` already succeeded. A successful apply changes AWS; it does not release the lock, because until the PR merges, another PR could still plan against a stale base and diverge. Seen live on `credit-agricole/terraform` (COEXT-105977, 2026-08-05): MR !113 was blocked on `lower-test-services`, "locked by an unapplied plan from pull !110." !110's own history showed `atlantis apply -p lower-test-services` had succeeded 6 days earlier ("Apply complete!") with zero activity since — the lock was 100% expected, not stuck.
+
+Before touching anything, check the holder MR (`glab mr view <N>` + its notes for `Ran Apply`/`Apply complete`):
+- **Holder MR is open, active, and its plan already applied successfully** → not orphaned, this is normal Atlantis behavior. Resolution is social, not technical: ask the owner to merge (clears the lock cleanly) or, if you need to keep moving now, ask them whether it's OK to unlock temporarily (they re-plan/re-apply on their MR later). Don't silently discard another engineer's live lock — see the safety rules on shared state.
+- **Holder MR is merged, closed, or genuinely abandoned with no recent activity** → this is the orphan case this skill covers below. Proceed to step 0.
+
 ## 0. Which Atlantis holds the lock? (the migration trap)
 
 `atlantis unlock` commented on an MR routes to the repo's **current webhook target only**. If the repo was switched to a new Atlantis (e.g. shared → per-client EC2), a lock created on the OLD instance during early plans is now unreachable by comment — the bot will happily reply "All Atlantis locks for this PR have been unlocked" while the orphan survives elsewhere.
