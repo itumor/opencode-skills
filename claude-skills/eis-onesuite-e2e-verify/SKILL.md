@@ -92,6 +92,12 @@ aws eks update-cluster-config --name <c> --region <r> --profile <proj> --resourc
 ```
 zsh note: don't store the kubectl invocation in a var (`$K get ...` is NOT word-split in zsh → "command not found"); write `kubectl ...` literally. `timeout` is not on macOS — use `kubectl --request-timeout`.
 
+**The revert is incomplete — `publicAccessCidrs` keeps your `/32`.** Flipping `endpointPublicAccess=false` does NOT clear the CIDR list, so AWS keeps e.g. `publicAccessCidrs: ["94.30.232.121/32"]` forever. Harmless while public access is off, but it becomes Terraform drift: the next `services` plan (any MR, unrelated) shows `public_access_cidrs: "<your /32>" → "0.0.0.0/0"` because the repo config carries the module default, and it arms whoever next enables the public endpoint. Two things to do: pass `publicAccessCidrs=0.0.0.0/0` in the same revert call so state and config agree, and check for the leftover with
+```bash
+aws eks describe-cluster --name <c> --region <r> --profile <proj> --query 'cluster.resourcesVpcConfig'
+```
+before signing off. Reviewers: see [[feedback_tf-plan-read-change-lines]].
+
 ## 7. Sign-off checklist
 - [ ] account correct, all Atlantis projects applied (0 destroy)
 - [ ] TGW Active, DNS resolves

@@ -67,3 +67,7 @@ Leave locks belonging to **open** MRs alone — only discard orphans (merged/clo
 - State-lock (`.tflock` in S3) acquire 403 = plan/apply role missing `s3:PutObject` on `<prefix>tfstate/*` — a permission bug, not a stuck lock.
 
 Reference run: pto-reference !11 (merged 2026-01-16, "switch to EC2 atlantis") — lock orphaned on shared IaC Atlantis, cleared 2026-06-25. Memory: `atlantis_orphaned_lock_post_migration.md`.
+
+## Update 2026-08-10 (COEXT-108018): the happy path DOES work when webhook matches
+
+When the lock-holding MR is on the repo's **current** Atlantis (webhook matches), the `atlantis unlock` comment on that MR is the cleanest release: bot replies "All Atlantis locks for this PR have been unlocked and plans discarded" and ALL of the MR's locks drop at once. Discarded plans are cheap — one `atlantis plan` comment regenerates them later. Verified on the CAA per-client Atlantis (aws0caaatlantis01) releasing !117's lower/test/{services,core} locks so !121 could plan. Also useful there: targeted plans keep unrelated drift out of a surgical apply — `atlantis plan -p <proj> -- -target='<addr>'` then a plain `atlantis apply -p <proj>` applies the stored targeted plan. And remember the root-cause hygiene: a lock held by an applied-but-unmerged MR means the MR should usually just be MERGED (see memory `terraform-applied-unmerged-mr-trap` — its unmerged code also poisons every later plan on that dir with revert-destroys).
