@@ -41,6 +41,20 @@ Note MultiAZ (sets outage expectation) and the current parameter group. If it's 
 
 ## Step 1 — Terraform change (eis-rds custom parameter group)
 
+**First check the wiring exists at all** — `create_db_parameter_group`/`parameters` are eis-rds module inputs, but not every consumer project's wrapper passes them through. `grep -n "create_db_parameter_group" lower/<stage>/services/{rds.tf,variables.tf}` before touching tfvars. Credit-agricole has it (added directly to its rendered files for pgaudit/Fivetran, never promoted to the upstream Copier template — confirmed by `grep -rn create_db_parameter_group terraform/template/client` returning nothing), but sibling projects pinned at the **same module ref** (e.g. nnl-japan at `v2.1.0`, same as CAA) can still lack it (verified COEXT-108341). **axa-japan lacks it too** (verified 2026-08-18, module ref `v2.0.1` — different ref than nnlj/CAA, so this is not version-gated, it's just missing from every consumer except CAA). Assume it's missing until grep proves otherwise. If missing, add it first, with a CUSTOM marker since you're editing a template-owned file:
+```hcl
+# variables.tf, inside the rds object type
+# CUSTOM [RDS-CustomParamGroup] | <JIRA> | wire eis-rds custom parameter group passthrough
+create_db_parameter_group = optional(bool, false)
+parameters                = optional(list(map(string)), [])
+```
+```hcl
+# rds.tf, inside module "rds"
+# CUSTOM [RDS-CustomParamGroup] | <JIRA> | wire eis-rds custom parameter group passthrough
+create_db_parameter_group = each.value.create_db_parameter_group
+parameters                = each.value.parameters
+```
+
 The eis-rds module exposes `create_db_parameter_group` + `parameters` (a `list(map(string))`). In an EIS client project (e.g. credit-agricole), the instance lives in `lower/<stage>/services/terraform.tfvars` under the `rds` map. Mirror any existing custom-param sibling (e.g. dev's Fivetran CDC block). Example for pgaudit:
 
 ```hcl
@@ -157,6 +171,29 @@ resource "aws_cloudwatch_log_group" "rds_postgresql" {
 
 ## Gotcha: pgaudit.log perpetual no-op plan diff (RDS value normalization)
 RDS stores comma-list param values **normalized without spaces** — `pgaudit.log = "role, ddl"` is stored as `"role,ddl"`. Terraform then shows `aws_db_parameter_group ... will be updated in-place` on EVERY plan of that stage (config "role, ddl" → state "role,ddl"), forever — a benign no-op that pollutes every MR's plan there. **Import does NOT fix it** (param group already in state; it's a value-format mismatch, not a missing resource). Fix = align config to the stored form: `value = "role,ddl"` (no space). Dynamic param, in-place, no reboot (verified COEXT-105501 — after the fix the param shows zero diff). General rule: a param-group value that keeps re-planning usually means RDS normalized the stored value (spaces/case/order) — match config to it.
+
+## Gotcha: pg_cron silently no-ops unless `cron.database_name` matches the app's real DB
+`cron.database_name` (pg_cron's GUC for which DB its background worker lives in) defaults to **`postgres`** at the engine level. RDS instances commonly have `DBName` set to something else entirely (e.g. `aws06nnljdevrds01`, matching the instance name, not a `postgres` db) — check with `aws rds describe-db-instances --query 'DBInstances[0].DBName'`. If `cron.database_name` is left at default and the app schedules jobs from its own (non-`postgres`) database, `cron.schedule()` calls register in the wrong DB's pg_cron tables and the launcher bgworker (which only runs in `cron.database_name`) never picks them up — extension shows "loaded" but jobs silently never fire. Fix: add it as a second static param in the same `parameters` list (same reboot, no extra cost):
+```hcl
+{ name = "cron.database_name", value = "<actual DBName>", apply_method = "pending-reboot" }
+```
+Verify with `SHOW cron.database_name;` post-reboot, and confirm a real scheduled job executes (`SELECT * FROM cron.job_run_details` after a minute) — not just that the extension is present. Verified COEXT-108341 (nnl-japan, `aws06nnljdevrds01`).
+
+**Second confirmed instance (axa-japan, 2026-08-18, no ticket filed yet):** same gap, surfaced via a live env-recreate failure instead of a proactive audit. axajp's app-side `database_manager` tool drops+recreates the app DB on every env recreate, then tries `CREATE EXTENSION pg_cron` inside it — traceback:
+```
+psycopg2.errors.RaiseException: can only create extension in database postgres
+DETAIL:  Jobs must be scheduled from the database configured in cron.database_name, ...
+HINT:  Add cron.database_name = 'axajp_qaa_v20' in postgresql.conf to use the current database.
+```
+`axajp_qaa_v20` is a **versioned QA db name** (`_v20` suffix) — if `database_manager` bumps that suffix on future recreates, a hardcoded `cron.database_name = axajp_qaa_v20` in tfvars fixes this run and breaks again next one. Confirm with the app/delivery team whether the name is stable or incremented per recreate *before* wiring a static fix — if it's incremented, the durable fix belongs in `database_manager`'s own connection logic (always target the `cron.database_name`-configured DB for the extension-creation step), not in Terraform. Tracked in memory [[axajp-nnlj-rds-param-passthrough-gap]].
+
+## pg_cron specifics (no prior art in the iac tree as of 2026-08-18)
+Grepped the whole monorepo for `pg_cron` / `shared_preload_libraries` in `*.tf`/`*.tfvars` — zero pg_cron hits anywhere. The only worked `shared_preload_libraries` example in the tree is the pgaudit one above (CAA UAT). Same mechanism applies (static param, append-don't-clobber, pending-reboot), but pg_cron has its own extra param:
+```hcl
+{ name = "shared_preload_libraries", value = "pg_stat_statements,pg_tle,pg_cron", apply_method = "pending-reboot" },
+{ name = "cron.database_name", value = "<db>" }   # dynamic; pg_cron's bgworker only schedules jobs against THIS db
+```
+`cron.database_name` defaults to `postgres` — if the target app DB isn't `postgres`, set it explicitly or `cron.schedule()` calls made while connected to the app DB silently land in the wrong catalog. `CREATE EXTENSION pg_cron;` itself must be run while connected to whichever DB `cron.database_name` points at (same Step 5 ephemeral-pod trick, just point `dbname=` at that DB). Otherwise identical to pgaudit: reboot-gated, verify via `pg_extension` + `shared_preload_libraries` setting, plus `SELECT * FROM cron.job;` to confirm the bgworker is actually scheduling.
 
 ## Atlantis delivery order (do NOT deviate) [[feedback_atlantis_apply_before_merge]]
 `atlantis plan` (verify 0 destroy) → review/approval → **`atlantis apply` → confirm `Apply complete!` green → run the live verification above → THEN `glab mr merge` LAST**. Never merge before a verified-green apply — the open MR is your revert path if apply or verification fails. (SSO often expires mid-task; `aws sso login --profile <p>` is interactive/browser — if blocked, the apply output proves resources changed, but hold the merge until you can run the live value checks.)

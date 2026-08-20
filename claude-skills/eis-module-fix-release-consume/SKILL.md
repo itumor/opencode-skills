@@ -18,6 +18,28 @@ Shared eis-* modules are consumed at pinned tags by many customer projects. A mo
 | Release | `publish_release` on the main pipeline is `when: manual` — PLAY it (`glab api -X POST .../jobs/<id>/play`); merge alone produces NO tag |
 | **`publish_release` shows `skipped`, can't be played** | Its stage runs after `pre-commit`, so a red `pre-commit` on main blocks it. Usual cause is NOT your code — see the merge-commit lint bug below |
 | Manual tag fallback | see memory semantic-release-ci-fallback |
+| Consumer bump | edit ref in consumer, `terraform get` locally, validate, push → Atlantis replan |
+| Local module fetch | `terraform get` works without GITLAB_TOKEN if git creds cached; `terraform init -backend=false` may still hit state — prefer `get` |
+
+### Validating a consumer against a tag that doesn't exist yet
+
+Chicken-and-egg: the consumer MR pins `?ref=vX.Y.Z`, but the tag isn't cut until the module MR
+merges — so `terraform_validate` and `terraform_tflint` fail locally with
+`invalid ref` / `pathspec 'vX.Y.Z' did not match`, and tflint additionally reports **every** module
+in the directory as "not found" (one unresolvable source aborts the whole load).
+
+Use the local-path source that these repos already carry commented out, run the hooks, then flip
+it back before committing:
+
+```hcl
+# source = "git::https://...eis-backup.git?ref=v1.1.0"
+source = "../../../../../../../terraform/modules/aws/eis-backup"
+```
+
+`terraform init -backend=false` then `pre-commit run --files <changed>` passes clean. Re-point to
+the git ref before `git add` — and re-read the file afterwards, since `terraform fmt` realigns the
+`=` when the source line length changes. Run pre-commit from the **repo root**, not the stage
+directory, or every hook reports "no files to check" and silently does nothing.
 
 ### Post-merge `main` goes red and the release is skipped (merge-commit lint)
 
@@ -48,8 +70,6 @@ for f in $(grep -rln "rev-list" --include=".gitlab-ci.yml" terraform/modules/aws
   grep -q "no-merges" "$f" || echo "MISSING: $f"
 done
 ```
-| Consumer bump | edit ref in consumer, `terraform get` locally, validate, push → Atlantis replan |
-| Local module fetch | `terraform get` works without GITLAB_TOKEN if git creds cached; `terraform init -backend=false` may still hit state — prefer `get` |
 
 ## The consumer-bump plan review (the part that prevents outages)
 
@@ -71,4 +91,4 @@ terraform-aws-modules majors rename inputs silently — object conversion fills 
 | Trust "Plan: N add, 0 destroy" headline | Replacements count as add+destroy pairs; grep "must be replaced" explicitly |
 | Default a security attribute to `true` in a fix | Flips live resources → forced replacement; default `null`, opt in per caller |
 | Validate consumer with `pre-commit run --all-files` locally | Unrelated dirs fail on missing `.terraform`; scope to changed files |
-| README drift on module var changes | CI terraform-docs pinned (0.20) vs local; regen via `docker run quay.io/terraform-docs/terraform-docs:0.20.0 --config ci/.tf-docs.yml .` |
+| README drift on module var changes | CI terraform-docs is pinned in `ci/.tf-docs.yml` (`version: "0.20"`); a newer local binary fails the hook with `Error: current version: 0.24.0, constraints: '0.20'` and does NOT regenerate. Use the pinned version — `docker run quay.io/terraform-docs/terraform-docs:0.20.0 --config ci/.tf-docs.yml .`, or grab the matching binary into a scratch dir (`terraform-docs-v0.20.0-<os>-<arch>.tar.gz` from the GitHub releases) and run `./terraform-docs --config=ci/.tf-docs.yml .`. Adding a var changes the README's Inputs table, Resources table AND the Usage snippet's optional-vars list, so always regen rather than hand-editing |

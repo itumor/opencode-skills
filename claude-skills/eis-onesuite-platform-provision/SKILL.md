@@ -23,6 +23,29 @@ description: >-
 > drift) and the Vault `secret2/data/<project_code>` population script. Treat phase steps as a strong
 > guide, not gospel; cross-check against the CAA reference project as you go.
 
+## START HERE — generate the filled prompt, don't hand-fill anything
+
+The kit repo (`iac/solutions/onesuite-provisioning`) has a **Copier Q&A front door**. Run it FIRST:
+
+```bash
+copier copy toolkit/oneshot-template /tmp/onboard-<code>   # ~4 questions for a standard POC
+```
+
+It writes `ONESHOT-<code>.md` — a **fully resolved P0→P8 prompt** whose step 1 is a pre-filled
+`toolkit/scripts/onesuite-init.py …` command. That command is the ONLY thing that should ever create
+`intake/<code>.yaml` (it does the /21→two-/23 split, hand-sizes the infra subnets, applies the
+provision profile, and emits `gates.yaml`). Never hand-write the manifest and never let a second tool
+produce it.
+
+Safety built into the generator: `region_code` and `access_model` are **derived** (`when: false`), so a
+wrong region code or a private/public-WAF contradiction cannot be expressed; `project_code`,
+`account_id` and the `/21` are regex-validated at prompt time; advanced shapes (satellite / upper tier /
+Managed AD / custom toolchain) are `when:`-gated so a standard POC never sees them.
+
+Then: `bash intake/smoke-rehearsal.sh` must print "offline verification passed" before ANY phase work.
+Guide + option reference: `docs/ONESHOT-ONBOARDING-PROMPT.md`. Effort expectations:
+`docs/EFFORT-BY-PHASE.md` (measured basis in memory `onesuite_onboarding_cost_evidence`).
+
 This skill conducts the **end-to-end** provisioning of a new, isolated, full-blown EIS OneSuite
 client/POC Dev environment — its **own AWS account, own VPCs, own delivery toolchain (GitLab/
 Jenkins/Nexus/etc.), own EKS cluster**, modeled on **Credit Agricole (CAA) Dev**. It does not do

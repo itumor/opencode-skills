@@ -1,6 +1,6 @@
 ---
 name: eis-absence-catchup-report
-description: Build a full "what happened while I was away" report for the EIS DevOps/IaC role by sweeping every reachable source — GitLab group 1711 MRs, on-prem Jira (my issues, mentions, watched, worklogs), Gmail, Slack, Google Drive — then turn it into a prioritised action plan. Use when the user says "I'm back from vacation", "catch me up", "what happened this month/week", "I was out of office, give me a report", "what did I miss", or on the first day back from any absence. Also use for a Monday-morning or post-conference catch-up over a shorter window. Encodes the source-reachability matrix (what each connector can and cannot see), the exact glab/JQL/Gmail queries, and the four traps that silently produce an empty or wrong report.
+description: Build a full "what happened while I was away" report for the EIS DevOps/IaC role by sweeping every reachable source — GitLab group 1711 MRs, on-prem Jira (my issues, mentions, watched, worklogs), Gmail, Slack, Google Drive — then turn it into a prioritised action plan. Use when the user says "I'm back from vacation", "catch me up", "what happened this month/week", "I was out of office, give me a report", "what did I miss", or on the first day back from any absence. ALSO use for the reverse direction — a colleague is back from THEIR leave and left you a handover doc, and you owe them a delta on what moved: "update Markuss on what happened", "status update against his handover", "add our latest to the handover doc", "what did we do on his list" (Phase 7). Also use for a Monday-morning or post-conference catch-up over a shorter window. Encodes the source-reachability matrix (what each connector can and cannot see), the exact glab/JQL/Gmail queries, and the four traps that silently produce an empty or wrong report.
 ---
 
 # EIS — catch-up report after an absence
@@ -17,7 +17,7 @@ Get the absence window precisely (the user's stated dates are often wrong — se
 | Jira | `curl` + `JIRA_TOKEN` bearer, `jira.eisgroup.com/rest/api/2` | On-prem; cloud Atlassian MCP cannot reach it. See `eis-jira-rest-ops` |
 | Gmail | MCP `search_threads` / `get_thread` | Read + draft only, **no send, no settings** |
 | Slack | MCP `slack_search_channels` → `slack_read_channel` | See trap #2 |
-| Drive | MCP `search_files` with `modifiedTime >` | Returns org-wide docs; most will be other teams' |
+| Drive | MCP `search_files` with `modifiedTime >` | Returns org-wide docs; most will be other teams'. **Read-only in practice** — no comment-write, and `update_file` is metadata only. See `[[google-drive-docs-write-limits]]` |
 
 State the gaps in the report. Never imply coverage you don't have.
 
@@ -89,6 +89,22 @@ Cross-check the **OOO autoreply end date**, the **BambooHR leave booking**, and 
 - An action plan split by **who can do it**: only-the-user (human comms, merges, HR, approvals) vs. can-be-delegated. Respect `[[feedback_no_ai_jira_slack_comms]]` and `[[feedback_no_merge_or_apply_without_review]]` — draft, never send; propose, never merge.
 - Flag anything time-boxed (cert expiries, sprint ends, colleagues going on leave).
 
+## Phase 7 — the reverse direction: reporting back against someone else's handover
+
+The mirror image of this skill, and just as common: a colleague handed **you** a doc before *their* leave, and on their return you owe them a delta. Reference run: Markuss Zivarts' "Markuss Vacation (consolidated)" → a CAA prod status update, 2026-08-17 (`[[project_markuss-vacation]]`).
+
+- **Find their doc by content, not title.** A handover titled "<Name> Vacation" contains neither "handover" nor the section you want. `fullText contains 'Handover' and fullText contains '<name>'` finds it; a title search returns nothing.
+- **Mirror their numbering 1:1.** If their doc has a numbered "what needs to be done" list, key every update to those numbers. They diff their own list instead of reading your prose.
+- **Verify every claim against live source — never from session memory.** Three checks, and they disagree with each other often enough to matter:
+  - MR state → `glab api "projects/<id>/merge_requests?updated_after=<window-start>"`. Their "in flight, not applied" may be merged and applied.
+  - Ticket state → Jira REST (`eis-jira-rest-ops`). A blocker they flagged may already be Resolved.
+  - **Whether a flag actually flipped → grep the repo.** This is the one memory and MRs both miss. On the reference run the Atlantis cutover looked plausibly done from MR titles; `use_iac = true` was still sitting in `upper/share/bootstrap/terraform.tfvars`, so the item had not started at all.
+- **Say which items you could not verify** and why. A security-team review with no repo footprint is unverifiable from here — label it, don't guess.
+- **Close with a "how this was verified" table** (claim → source). It is what makes the update trustworthy to someone who was absent for all of it.
+- **Flag their stale sections.** Their doc froze when they left; other engagements moved. Note it separately rather than folding it into the section they asked about.
+- **Delivery:** you **cannot** post comments on their Google Doc, and cannot edit its body — the Drive MCP has no comment-write and `update_file` touches metadata only. Offer paste-ready comment text or a **new** doc in the user's own Drive. Get the content right on the first `create_file`: fixing it mints a new URL. Full trap list incl. the markdown-table mangling in `[[google-drive-docs-write-limits]]`.
+- **Never share it onward or @-mention the returning colleague without explicit say-so** — drafting is yours, sending is the user's.
+
 ## The four traps
 
 1. **Slack "old workspace" false alarm.** Permalinks render as `eisgroup-old.enterprise.slack.com`; that is a migrated-grid alias, *not* a dead workspace. Reads are live. Never conclude "wrong workspace" from the permalink host.
@@ -98,4 +114,4 @@ Cross-check the **OOO autoreply end date**, the **BambooHR leave booking**, and 
 
 ## Related
 
-`eis-jira-rest-ops` (Jira REST auth + worklogs) · `iac-workspace-refresh` (the natural next step once the report is written) · memories `[[gmail-mcp-limits-and-ooo-end-now-trap]]`, `[[slack-mcp-old-workspace]]`, `[[jira-psa-timesheet-sync]]`.
+`eis-jira-rest-ops` (Jira REST auth + worklogs — note `JIRA_TOKEN` is absent from a non-interactive shell) · `iac-workspace-refresh` (the natural next step once the report is written) · memories `[[gmail-mcp-limits-and-ooo-end-now-trap]]`, `[[slack-mcp-old-workspace]]`, `[[jira-psa-timesheet-sync]]`.

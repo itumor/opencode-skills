@@ -1,12 +1,12 @@
 ---
 name: eis-ansible-project-template
-description: Use when scaffolding a new per-customer EIS Ansible project (VM-level config — build hosts, Jenkins, GitLab, SonarQube, Atlantis, Selenoid, Sisense, Keycloak), when the user says "create the ansible project for <customer>", "generate a new ansible repo", "onboard a customer's ansible", "copier copy the ansible template", or when extending/maintaining the iac/ansible/template/client Copier template itself. Also use when an existing generated ansible project needs a `copier update`, or when adding/parameterizing a new customer-specific value into the template. Covers the custom-delimiter rule that keeps Ansible {{ }} intact, per-service enable_* gating, what is vs isn't templated, the GitLab push/CI gotchas, and the E2E parity-vs-CAA validation method.
+description: Use when scaffolding a new per-customer EIS Ansible project (VM-level config — build hosts, Jenkins, GitLab, SonarQube, Atlantis, Selenoid, Sisense, Keycloak), when the user says "create the ansible project for <customer>", "generate a new ansible repo", "onboard a customer's ansible", "copier copy the ansible template", or when extending/maintaining the iac/ansible/template/client Copier template itself. Also use when an existing generated ansible project needs a `copier update`, when **reviewing an MR that bumps the template version** (`_commit:` change in `.copier-answers.yml`) or that flips an `enable_*` answer, or when adding/parameterizing a new customer-specific value into the template. Covers the custom-delimiter rule that keeps Ansible {{ }} intact, per-service enable_* gating, what is vs isn't templated, the GitLab push/CI gotchas, and the E2E parity-vs-CAA validation method.
 ---
 
 # EIS per-customer Ansible project Copier template
 
 ## What it is
-`iac/ansible/template/client` (GitLab group `iac/ansible/template`, subgroup id 1717; sibling of `terraform/template/{client,module}`). A Copier template that scaffolds a per-customer Ansible project mirroring `projects/aws/<customer>/ansible`. **Reference impl + extraction source = the Credit Agricole repo** (`projects/aws/credit-agricole/ansible`, code `caa`, us-west-2). Built + shipped **v1.0.1** 2026-06-18, CI green, E2E-validated against CAA (zero unintended drift). **Current release: v1.1.0 (2026-06-29)** — adds the axajp/EISSAASDEV-302 fixes (upgrade:false default, run.sh SSO fallback, SonarQube 25.9, sisense /opt mount, Jenkins CasC myViewsTabBar drop); **render `--vcs-ref v1.1.0`** — v1.0.x predates all of them and produces a broken toolchain.
+`iac/ansible/template/client` (GitLab group `iac/ansible/template`, subgroup id 1717; sibling of `terraform/template/{client,module}`). A Copier template that scaffolds a per-customer Ansible project mirroring `projects/aws/<customer>/ansible`. **Reference impl + extraction source = the Credit Agricole repo** (`projects/aws/credit-agricole/ansible`, code `caa`, us-west-2). Built + shipped **v1.0.1** 2026-06-18, CI green, E2E-validated against CAA (zero unintended drift). **Current release: v1.4.0** (verified 2026-08-17; tags v1.0.0 v1.0.1 v1.1.0 v1.2.0 v1.3.0 v1.4.0) — adds the axajp/EISSAASDEV-302 fixes (upgrade:false default, run.sh SSO fallback, SonarQube 25.9, sisense /opt mount, Jenkins CasC myViewsTabBar drop); **render `--vcs-ref v1.1.0`** — v1.0.x predates all of them and produces a broken toolchain.
 
 Key insight that makes it small: the CAA repo is **already ~90% parameterized at Ansible runtime** via `{{ project_name }}` (Vault paths `secret2/data/{{ project_name }}/...`, S3 buckets, AD groups `jnk_{{ project_name }}_ssh`, ASG names). Copier only fills the literals Ansible **cannot** derive at runtime.
 
@@ -39,6 +39,62 @@ Only `roles/requirements.yml`, `roles/.gitignore`, and the committed `local_kern
 - **Validate locally**: `bash ci/mock-test.sh` — renders `ci/mock-answers.yml`, greps for leaked `[[`/`[%`/`[#` markers, parses all YAML. Needs the dir to be a git repo (uses `--vcs-ref HEAD`) → commit first.
 - Bump a tag for every release (`v1.0.x`); consumers pin `--vcs-ref`. Don't move a published tag.
 - Reviewer routing: **ansible → `--reviewer eramadan`** (see [[feedback_mr_reviewer_routing]]).
+
+## Reviewing (or performing) a `copier update` on a generated project
+
+Full method + traps: [[copier-template-update-review]]. The short version — **never read the raw MR
+diff on a generated repo**. Render the pinned version with the repo's own answers and diff:
+
+```bash
+git show <branch>:.copier-answers.yml | grep -v '^_\|^#' > /tmp/answers.yml
+copier copy -r v1.4.0 --data-file /tmp/answers.yml --defaults --trust <template-clone> /tmp/render
+git archive <branch> | tar -x -C /tmp/branch
+diff -ru --exclude=.git --exclude=.copier-answers.yml /tmp/render /tmp/branch
+```
+
+What is in the MR diff but *not* in that render-vs-branch diff is template-driven, not authored.
+Then, for every changed vault-path / role-source / role-version line, run
+`git log --oneline -S'<old value>' origin/main -- <file>` — a `fix(...)` commit with a ticket means
+the update is **reverting a deliberate per-client fix**. Two live examples on axajp
+([[project_coext108189_axajp_ta_onboarding]]): the `eis_build_user` Vault path (EISHELP-110634) and
+the `sisense_install` IaC fork v1.1.0 (which cv-devops v1.0.0 does not have — it is also a downgrade).
+
+**Per-client deviations this template will clobber — re-apply after every update:**
+
+| Repo value | Why it deviates |
+|---|---|
+| `all.yml` nexus_helm `eis_build_user` (axajp only) | EISHELP-110634; template + CAA/nnlj use `default_build_user` |
+| `requirements.yml` `iac/ansible/roles/sisense_install` v1.1.0 | `application_dns_name` + /opt EBS + auto update-mode; not upstream |
+| `all.yml` `nginx_ldap_name: bitnamilegacy/...` | only droppable together with the opengrok v1.1.0 bump |
+
+If you deliberately adopt only part of an update, `_commit` still records the new tag and copier
+diffs the *next* update from it — the skipped changes are never re-offered. Write an explicit
+"deliberately not adopted from vX.Y.Z" list into the README/MR description.
+
+**Flipping an `enable_*` answer runs a role's defaults, which are invisible in the diff.** Clone the
+newly-enabled role and read `defaults/main.yml` + `handlers/` before approving. Real hit:
+`enable_etcs_analytics: true` -> `docker_compose_etcs_analytics_v3` v1.0.1 defaults seed a hardcoded
+cv-devops individual (`etcs_users`) as an **active TA admin** on the customer instance, and point
+`ta_auth_initialusername` at a different Vault identity than the project fixed in `all.yml`.
+Corollary in the other direction: don't flag a var as undefined without checking role defaults first
+(`ta_auth_ad_host`, `build_user` both resolve there).
+
+### ⚠️ Known template bugs as of v1.4.0 (fix upstream)
+
+- `playbooks/etcs_analytics.yaml` still ships `hosts: all` **and** trailing whitespace — v1.4.0
+  narrowed gitlab/nexus/opengrok/sonar to their groups but missed this one. Should be `hosts: ta`.
+  Note the opposite failure once scoped: no instance tagged with that `Acronym` -> "no hosts matched"
+  and **exit 0**, a silent no-op. Verify with `ansible-inventory -i inventory --graph`.
+- `roles/requirements.yml` has **no `[% if enable_etcs_analytics %]` entry**, so the playbook renders
+  with no role to run it. Consumers must hand-add `docker_compose_etcs_analytics_v3`.
+- `playbooks/build_node.yaml` v1.4.0 orders roles `... cli_tools, docker_install, linux_joindomain`
+  — **wrong order**, see the play-order rule at the bottom of this skill (`docker_users` adds AD
+  users, so domain-join must come first). It also invokes `linux_joindomain` **without** the two
+  pre_tasks `playbooks/linux_joindomain.yaml` carries (delete
+  `/etc/ssh/sshd_config.d/50-cloud-init.conf`, set `ssh_pwauth: true`), so a standalone run joins the
+  domain but leaves AD password auth off — and cloud-init recreates the drop-in on reboot, silently
+  regressing a host the dedicated playbook had already fixed.
+- Generated projects have **no `.gitlab-ci.yml`** — pre-commit is the only gate. Worth adding one.
 
 ## GitLab push / CI gotchas (hit on first ship, 2026-06-18)
 1. **`glab repo create iac/ansible/template/foo` 404s** ("Could not find group ansible") — glab mis-parses the nested path, AND `iac/ansible/template` already exists as a **subgroup**, not a project. Create the project via the API with an explicit namespace id:
@@ -136,4 +192,4 @@ Per-service `docker_compose_*` roles on a fresh env — gotchas beyond the Vault
 - **Play order: `linux_joindomain` BEFORE `docker_install`** — `docker_install` `docker_users` adds AD users → needs SSSD/domain-join first.
 
 ## Related
-[[ansible_copier_template]] (memory), [[clusters_template_v107]] (copier conditional-dir gating tricks), [[eis-account-vending]] / generate-new-project (the terraform half of onboarding), [[ansible_docker_runner_macos]] (the docker/run.sh runner the generated project uses), [[gitlab_module_repo_bootstrap]].
+[[copier-template-update-review]] (render-and-diff review method + the four update traps), [[project_coext108189_axajp_ta_onboarding]] (axajp per-client deviations), [[ansible_copier_template]] (memory), [[clusters_template_v107]] (copier conditional-dir gating tricks), [[eis-account-vending]] / generate-new-project (the terraform half of onboarding), [[ansible_docker_runner_macos]] (the docker/run.sh runner the generated project uses), [[gitlab_module_repo_bootstrap]].

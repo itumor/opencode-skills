@@ -36,6 +36,18 @@ The collectors run in the **Lambda** (AWS side, no kube access), so anything tha
 2. eis-iac lambda role already has `sts:AssumeRole` on `arn:aws:iam::*:role/eis-inventory-readonly` (main.tf). 
 3. Add the account to `inventory-config.yaml` `accounts:` (`{name, role_arn, regions, project, stage}`) + dashboard `ACCOUNT_REGISTRY` (app.py + index.html). Until the role exists, that account is an **isolated `assume_role_failed`** — SFN still SUCCEEDS. pto-reference = `468381823127` (cluster `aws0prefdeveks01`).
 
+**Wiki publishing needs nothing extra for a new account** — see below, it's driven off the same `accounts:` map, zero per-account wiki config.
+
+## Confluence wiki publish (1.1.30+)
+Two independent publish paths, both best-effort (never fail the SFN — S3 snapshot already promoted before either runs):
+
+1. **Legacy org-wide combined page** — `stages.<name>.wiki: {page_id, page_title, anchor}` in `inventory-config.yaml`, filtered by `stage`. One page, e.g. `888048859` ("AWS Inventory — EIS IaC"), covers only accounts whose `stage` has a `wiki:` block (today: `dev` only — pto-reference's `pto-dev` stage has none, so it was **never** on this page).
+2. **Per-account child pages, auto-created** — project-level `wiki: {parent_page_id, space_key, anchor}` (separate key from `stages.*.wiki`, sibling to `accounts:`). `_publish_confluence` loops `configuration['accounts']`, and for each: `get_page_by_title` under `parent_page_id`/`space_key` → found: reuse; missing: `create_page` seeded with the anchor + placeholder table. Titled **`AWS Inventory — <name> (<account_id>)`** — the account-id suffix is load-bearing, not decoration: dropping it makes the eis-iac account's title collide byte-for-byte with the legacy combined page's own title (both are "AWS Inventory — EIS IaC"), so `get_page_by_title` would resolve to *that* page and silently overwrite it instead of creating a child. Verify with a **read-only** `get_page_by_title` precheck before ever calling `create_page` on a new naming scheme.
+
+Both paths filter the same merged `table` (the rendered rows, not `raw_rows`) via `update_wiki_table(..., filter_col, filter_val, ...)` — generalized from a hardcoded `stage` column to any column, because **`table` rows didn't carry `account_id`/`account_name` at all** until this version; `_run_plugins` now stamps both onto every rendered row (previously only `raw_rows`, the S3-bound rows, had them).
+
+**Body must be built as parsed nodes, not a formatted string** — `table.replaceWith(bs(html, 'html.parser'))` then `str(soup)`, never `soup.prettify(formatter=None)`. Root-caused after the wiki had **never once published successfully**: `prettify(formatter=None)` reformats every `ac:*` macro on the page (583 of them on the combined page), inflating the body +65% and triggering a 400 the library reports as a fixed, non-diagnostic string. Full story: [[confluence-prettify-corrupts-storage-format]].
+
 ## Grafana dashboard-as-code
 ConfigMap in the chart labeled `grafana_dashboard: "1"` (the kube-prometheus-stack Grafana sidecar runs `searchNamespace: ALL` → finds it in any ns); folder via annotation `eisgroup.com/dashboard-folder`. The template **globs** `grafana-dashboards/*.json` (`{{- range $path, $_ := .Files.Glob ... }}` keyed by `base $path`), so adding a board = one new file, no template edit.
 

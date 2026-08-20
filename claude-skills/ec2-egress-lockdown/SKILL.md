@@ -107,6 +107,19 @@ work (shows as deletions of resources you never touched; check `git log ..origin
 | `docker pull` docker.io / public.ecr.aws | pull through project Nexus :5000 instead; unqualified pulls HANG (no clear error) |
 | rhsmcertd background noise | known-benign connection-failure logs |
 
+## Phase 5 — Close-out comms (two audiences, drafts only — user sends)
+
+- **Engineer/Jira version**: what changed + verification evidence + operational notes
+  (break-glass, docker-via-nexus, /32 maintenance rule).
+- **Network-security version**: zero Terraform vocabulary. Two tables — CLOSED
+  (direction/port/was-open-to) and OPEN NOW (inbound table + outbound table with
+  destination/port/purpose). End with "net effect" one-liner. Anticipate their two
+  questions: DNS/NTP (link-local, bypasses SG filtering) and SSH return traffic
+  (SGs are stateful).
+- **Evidence format that lands**: replicate the stakeholder's own test verbatim
+  (same FQDN, same ports) and show before/after — `Ncat: Connected to X` vs
+  `exit=124 timeout`. Their test, inverted, is the most persuasive artifact.
+
 ## Common mistakes
 
 | Mistake | Reality |
