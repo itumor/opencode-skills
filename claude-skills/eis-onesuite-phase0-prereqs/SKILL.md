@@ -76,6 +76,29 @@ Below: how each is resolved.
 
 ---
 
+## 0.5 Workstation toolchain (every engineer who will run the flow)
+
+Before any hands-on session, each engineer installs and proves these locally. Missing any one of them
+fails silently later (see the Phase 2 "silent gates" table):
+
+| Tool | Why it's needed |
+|---|---|
+| **VPN** (OpenVPN) | `sfo-cvdevopsgit01…`, Vault, Atlantis, the AWS consoles are all VPN-only (NXDOMAIN without the tunnel) |
+| **AWS CLI v2** + SSO profiles | `aws sso login`, live verification |
+| **AWS Session Manager plugin** | `aws ssm start-session` into the toolchain EC2s (no SSH bastion) |
+| **glab** (GitLab CLI) | group/project/webhook/MR automation |
+| **copier** + **Python 3** | renders all three templates (TF / ansible / argocd clusters) |
+| **terraform** | `fmt`/`validate` locally; applies go through Atlantis |
+| **kubectl** + **helm** | cluster verification, `helm template` diffs |
+| **git**, **bash**, **jq** | baseline |
+| **docker** | pre-commit hooks + local template renders that shell out to containers |
+| **pre-commit** | ⚠️ **must be `pre-commit install`ed in every repo clone** — without it the first push lands an un-normalized tree and the CI pre-commit job goes red on "files were modified by this hook" |
+
+> Ownership note: the toolchain list is the platform team's onboarding doc (Ebrahim). The change team
+> (SAS) runs the flow themselves; platform owns tools + bugs, not the per-client execution.
+
+---
+
 ## 1. OU placement + account name + root-email convention
 
 New **lower-env** SaaS client accounts go under **`SaaS / Lower`**.
@@ -136,6 +159,24 @@ infra_tgw_subnets:                # TGW attachment, 2 AZs
 Development `/23` auto-subnets resolve inside `10.34.130.0/23` (public `…131.0/28`+`…131.16/28`,
 private `…130.0/26`+`…130.64/26`, eks `…130.128/26`+`…130.192/26`, tgw `…131.208/28`+`…131.224/28`).
 These exact answers feed **Phase 2** (`eis-onesuite-phase2-terraform-scaffold`).
+
+⚠️ **Allocation ORDER convention changed (AFA, 2026-08-20): give Shared services the LAST `/23`, not
+the first.** Shared services is the VPC that actually runs out of addresses (it accretes toolchain
+EC2s — All State hit IP exhaustion there), and a `/23` can only be grown into *adjacent* free space.
+Putting it at the top of the `/21` leaves the whole back half free to widen it later; putting it first
+(as axajp did) walls it in between `dev` and the block boundary.
+
+AFA layout (reserved **`10.34.104.0/21`**, single region `us-east-1`):
+
+| VPC / stage | CIDR |
+|---|---|
+| **Development** (`lower/dev`) | `10.34.104.0/23` |
+| reserved (future `test`) | `10.34.106.0/23` |
+| **Shared** (`lower/infra`) | `10.34.108.0/23` ← last, room to grow into `.110.0/23` |
+
+The `/23` still needs `lower_infra_auto_calculate: false` + hand-sized subnets (the trap above is
+about the mask, not the position). Sizing debate settled: ~500 IPs for shared services is deliberate
+over-provisioning — widening a live VPC later is far more painful.
 
 ---
 
@@ -303,8 +344,15 @@ IaC Atlantis so MRs autoplan. This is done during **Phase 2** repo onboarding.
 
 - Webhook URL: **`https://atlantis-iac.dev.aws0.iac.aws.eislab.cloud/events`**
 - Events: **Merge request + Note (comment) + Push**.
-- Secret: the `gitlab_secret` from Secrets Manager (`…/atlantis/atlantis/atlantis-vcs`).
-- (EISSAASDEV-302: hook id 14 created on `iac/projects/aws/axa-japan/terraform`.)
+- Secret: the `gitlab_secret` from Secrets Manager (`…/atlantis/atlantis/atlantis-vcs`), a.k.a. the
+  Vault entry literally named **`GitLab webhook secret`**.
+- ⚠️ **Wrong-secret trap:** the neighbouring **`gitlab token`** (the API PAT) is a decoy. Paste it and
+  GitLab still delivers the hook 200-OK, but Atlantis **silently ignores** every event — no plan
+  comment, no error anywhere in the MR. Symptom = "webhook configured, Atlantis never comments".
+  Fix the token, then **close and re-open the MR** (the corrected secret does not replay past events).
+- ⚠️ Also disable **instance runners** on the new project (Phase 2 Step 5d) or CI never runs correctly.
+- (EISSAASDEV-302: hook id 14 created on `iac/projects/aws/axa-japan/terraform`. AFA 2026-08-20 hit the
+  `gitlab token` decoy live in workshop #1.)
 
 ---
 
