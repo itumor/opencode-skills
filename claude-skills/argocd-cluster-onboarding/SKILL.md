@@ -28,6 +28,15 @@ copier copy ../template/clusters $CLUSTER --overwrite --defaults \
 
 After generation, verify EVERY per-component `secretPath:` (and `registrySecretPath:` in gen-dashboard) by `aws secretsmanager describe-secret --secret-id <path>`. Any 404 = blocker.
 
+**Newer alternative (once [MR !13](https://sfo-cvdevopsgit01.eqxdev.exigengroup.com/iac/argocd/template/clusters/-/merge_requests/13) merges):**
+`argocd/template/clusters/tools/answers.py` discovers `aws_account_id`, `target_group_arn`,
+`internal_alb_dns` and the fleet's `secret_path_base` convention (`<cluster_name>`, not the
+stale Vault path this phase warns about) straight from AWS instead of hand-typing `--data`
+flags, and `--preview-answers` renders the full resolved `.copier-answers.yml` for review
+before touching the real repo. See [[project_argocd_copier_answers_tool]] and the
+`argocd-clusters-template-change` skill. This skill's manual `copier copy --data ...` flow
+still applies as-is until that MR merges, or for anything the tool doesn't discover.
+
 ## Phase 1 — Discover real values via AWS CLI
 
 ```bash
