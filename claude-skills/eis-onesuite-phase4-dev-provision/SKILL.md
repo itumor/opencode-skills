@@ -1,6 +1,6 @@
 ---
 name: eis-onesuite-phase4-dev-provision
-description: Phase 4 of EIS OneSuite platform provisioning — provision the Development stage of a new client env via Atlantis (lower/dev/core exec-order 22 → lower/dev/services 23): eis-vpc Development /23 with secondary pod CIDR (no IGW), eis-eks K8s 1.35 (system/app/build node pools), eis-rds PostgreSQL, eis-msk Kafka, internal eis-alb, single-AZ static-IP eis-nlb, private eis-acm, eis-s3 (observascope + app), and EFS. Wires the bld build-host instance role into the EKS access_mapping and captures the EKS ARN / internal ALB target-group ARN+DNS / IRSA role ARNs that Phase 6 ArgoCD onboarding needs. Use when the user says "provision the dev stage", "apply lower/dev", "stand up the EKS cluster + RDS + MSK for <client>", "do Phase 4 of the OneSuite provisioning", or after Phase 3 (infra/toolchain) is green and the dev VPC + data plane + load balancers must come up. Private model only — NO public ALB, NO eis-waf, NO public ACM.
+description: WHEN provisioning the Development stage via Atlantis (lower/dev/core→services: EKS/RDS/MSK/internal ALB/NLB) after Phase 3 infra is green. Private model only — no public ALB, eis-waf, or public ACM.
 ---
 
 # EIS OneSuite — Phase 4: Development stage (EKS + data + LBs)

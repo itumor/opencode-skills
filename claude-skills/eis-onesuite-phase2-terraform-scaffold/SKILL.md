@@ -1,28 +1,9 @@
 ---
 name: eis-onesuite-phase2-terraform-scaffold
 description: >-
-  Phase 2 of EIS OneSuite platform provisioning — scaffold a new per-client Terraform
-  project from the iac/terraform/template/client Copier template (custom [[ ]] delimiters,
-  --vcs-ref: pin explicitly, canonical pin v2.5.0 = the AFA reference render, 2026-08-20), then
-  onboard it to GitLab + the IaC Atlantis webhook. Covers the seven silent gates (HTTPS-not-SSH
-  template URL, local pre-commit install, disabling instance runners, the 'GitLab webhook secret' vs
-  'gitlab token' decoy that makes Atlantis ignore every event, branch+MR instead of pushing main,
-  the STALE shipped atlantis.yaml that lists upper projects and omits the lower stages, and the
-  pre-commit hooks that only pass once their own edits are `git add`-ed) plus the v2.5.0 satellite
-  answer keys (lower_satellite / lower_parent_hub_region / lower_az_list /
-  lower_infra_enable_directory_service / enable_upper) and the full
-  copier answer set (global_project_code / global_project_name → repo path, lower_region,
-  global_domain_name, lower_account_id, the /23 Shared-VPC subnet trap requiring
-  lower_infra_auto_calculate=false, the dev /23 lower stage, and the cognito metadata_url
-  placeholder), the GitLab subgroup+project creation under iac/projects/aws (group 1724),
-  git init+push, atlantis.yaml regeneration via ci/generate-atlantis-projects.sh, and adding
-  the GitLab webhook pointing at IaC Atlantis. Use when the user says "scaffold the terraform
-  project for <client>", "generate the client IaC repo", "Phase 2 of <ticket>", "create the
-  terraform repo and wire Atlantis", "onboard the new client terraform to GitLab/Atlantis", or
-  after Phase 1 account vending hands you a 12-digit account ID and you need the repo stood up.
-  Complements the template-scoped generate-new-project skill (this is the OneSuite-master-flow
-  variant with the locked answer conventions baked in). Sits between eis-account-vending (P1)
-  and eis-onesuite-phase3-infra-provision (P3); the master flow is eis-onesuite-platform-provision.
+  WHEN scaffolding a new client Terraform repo from the Copier client template and
+  onboarding GitLab/Atlantis (Phase 2). Between eis-account-vending (P1) and
+  eis-onesuite-phase3-infra-provision (P3); master flow eis-onesuite-platform-provision.
 ---
 
 # Phase 2 — Terraform client project scaffold + GitLab/Atlantis onboarding

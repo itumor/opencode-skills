@@ -1,19 +1,9 @@
 ---
 name: eis-onesuite-phase7-app-handoff
 description: >-
-  Phase 7 (final) of EIS OneSuite platform provisioning — hand off a live, fully-provisioned EKS
-  cluster + delivery toolchain (GitLab/Jenkins/Nexus/SonarQube/Keycloak/ArgoCD) to the delivery
-  team so they can install the ref-impl 26.100 application stack. This skill does NOT do IaC-repo
-  work; it produces a self-contained handoff document with the cluster URL, kubeconfig/RBAC access,
-  GitLab/Jenkins/Nexus/SonarQube endpoints, the ArgoCD app-deployment path, and the
-  Asian-region/master-branch app-config note, then tracks the delivery-owned DoD app items.
-  Use when: "hand off the cluster to delivery", "write the platform handoff doc", "the toolchain is
-  live, give the app team access", "delivery team needs kubeconfig / GitLab / Jenkins endpoints",
-  "what does the app team install on the new env", "ref-impl 26.100 handoff", "Asian region / master
-  branch app config", or after argocd-cluster-onboarding finishes a new OneSuite env and someone asks
-  "what's left". Comes AFTER eis-onesuite-phase4-dev-provision (infra), eis-ansible-project-template
-  (toolchain config), and argocd-cluster-onboarding (cluster components). Reference run:
-  EISSAASDEV-302 (AXA Japan / axajp).
+  WHEN handing a fully-provisioned OneSuite env to delivery (cluster URL, toolchain
+  endpoints, ArgoCD path, handoff doc) after argocd-cluster-onboarding. Final phase of
+  eis-onesuite-platform-provision; does not do IaC-repo work.
 ---
 
 # Phase 7 — Application-layer handoff to the delivery team

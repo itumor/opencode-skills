@@ -1,6 +1,6 @@
 ---
 name: eks-managed-argocd-sso-and-rbac
-description: Use when changing who can log into the EIS hub Argo CD or with what role, or when someone proposes an SSO/IdP change for it — "give team X access to Argo CD", "add EDITOR/VIEWER roles", "wire CyberArk/Okta/Entra SSO into Argo CD", "map an AD or Identity Center group to Argo CD", "can we use our IdP with the EKS Argo CD capability". Also use before touching `argocd.tf` in eis-iac at all, because two lines in it can plan a destroy of the GitOps hub for all nine clusters. Encodes what the AWS-managed capability can and cannot do, the multi-role `rbac_role_mapping` Terraform pattern, the four silent footguns, and the CyberArk access-model decision matrix (endpoint/SWS vs proxy/PSM vs identity-source swap).
+description: Use when changing who can log into the EIS hub Argo CD or with what role, or when someone proposes an SSO/IdP change for it — "give team X access to Argo CD", "add EDITOR/VIEWER roles", "wire CyberArk/Okta/Entra SSO into Argo CD", "map an AD or Identity Center group to Argo CD", "can we use our IdP with the EKS Argo CD capability". Also use before touching `argocd.tf` in eis-iac at all, because two lines in it can plan a destroy of the GitOps hub for all nine clusters. Encodes what the AWS-managed capability can and cannot do, the multi-role `rbac_role_mapping` Terraform pattern, the five silent footguns (incl. VPCE-endpoint hosts-file requirement), and the CyberArk access-model decision matrix (endpoint/SWS vs proxy/PSM vs identity-source swap).
 ---
 
 # EKS managed Argo CD — SSO and RBAC
@@ -28,47 +28,73 @@ Application/ApplicationSet/AppProject CRs, deployment targets by **EKS cluster A
 `ADMIN` / `EDITOR` / `VIEWER`, uppercase, and `EDITOR`/`VIEWER` reach Applications only through
 AppProject roles.
 
-## 2. The Terraform pattern for more than one role
+## 2. The Terraform pattern for more than one role — live-verified 2026-09-01, `eis-iac!19`
 
-Default scaffold maps a single group to a single role. Generalize with a role→group map (keeps the
-group-lookup shape, no `aws_identitystore_user` needed) and **pin the IdC identifiers**:
+The scaffold you'll actually find in `eis-iac` starts with a **singular** `idc_group_name`/`rbac_role`
+pair per capability (one group, one role, hardcoded). Confirmed empirically via `terraform providers
+schema -json`: `rbac_role_mapping` is a **`set` of blocks**, so adding a second entry is a pure additive
+set-membership change (existing mapping untouched by identity, not just by intent) — no forced
+replacement of the capability. Generalize to N roles per capability with an index-flattened data source,
+not a `role_groups` map keyed by role name (a plain map can't express two groups mapped to the *same*
+role, and loses ordering):
 
 ```hcl
-# variables.tf
-role_groups = map(string)   # "ADMIN" => "argocd_admins@exigengroup.com"
-variable "identity_center_instance_arn" { type = string }
-variable "identity_center_identity_store_id" { type = string }
-
-# data.tf
-locals {
-  argocd_role_groups = merge([
-    for ck, c in var.argocd_capabilities : {
-      for role, group in c.role_groups :
-      "${ck}/${role}" => { capability = ck, role = role, group = group }
-    }
-  ]...)
+# variables.tf — was idc_group_name/rbac_role (singular), now a list
+variable "argocd_capabilities" {
+  type = map(object({
+    cluster_key                   = string
+    namespace                     = string
+    enable_ecr_access             = bool
+    enable_codeconnections_access = optional(bool, false)
+    role_mappings = list(object({
+      idc_group_name = string
+      rbac_role      = string
+    }))
+  }))
+  default = {}
 }
-data "aws_identitystore_group" "argocd" {
-  for_each          = local.argocd_role_groups
+
+# data.tf — flatten (capability_key, role_mapping_index) so each pair gets its own group lookup
+locals {
+  argocd_role_mapping_pairs = {
+    for pair in flatten([
+      for cap_key, cap in var.argocd_capabilities : [
+        for idx, rm in cap.role_mappings : {
+          key = "${cap_key}:${idx}", idc_group_name = rm.idc_group_name, rbac_role = rm.rbac_role
+        }
+      ]
+    ]) : pair.key => pair
+  }
+}
+data "aws_identitystore_group" "argocd_admins" {
+  for_each          = local.argocd_role_mapping_pairs   # was var.argocd_capabilities
+  identity_store_id = data.aws_ssoadmin_instances.this[0].identity_store_ids[0]
   provider          = aws.identity_center
-  identity_store_id = var.identity_center_identity_store_id
   alternate_identifier { unique_attribute {
-    attribute_path = "DisplayName", attribute_value = each.value.group } }
+    attribute_path = "DisplayName", attribute_value = each.value.idc_group_name } }
 }
 
 # argocd.tf
 rbac_role_mapping = [
-  for k, v in local.argocd_role_groups : {
-    role     = v.role
-    identity = [{ id = data.aws_identitystore_group.argocd[k].group_id, type = "SSO_GROUP" }]
-  } if v.capability == each.key
+  for idx, rm in each.value.role_mappings : {
+    role     = rm.rbac_role
+    identity = [{ id = data.aws_identitystore_group.argocd_admins["${each.key}:${idx}"].group_id, type = "SSO_GROUP" }]
+  }
 ]
 ```
+
+Key format `"<capability_key>:<index>"` (e.g. `"01:0"`, `"01:1"`) — this is a **data source**, so the key
+churning on every edit (old key drops, new key appears) is a harmless read, not a destroy/create like it
+would be on a managed resource. `terraform plan` after this change should show exactly one thing on the
+capability resource: a `+ rbac_role_mapping { ... }` block added inside `configuration.argo_cd`, with the
+pre-existing role's block appearing unchanged. Verify with `terraform show -json <planfile>` and diff
+`before`/`after` on `configuration[0].argo_cd[0].rbac_role_mapping` by exact group id — don't just eyeball
+the colored diff.
 
 IdC group DisplayNames carry the `@exigengroup.com` suffix. `SSO_USER` works too, but groups keep the
 lookup stable and the identity count low.
 
-## 3. Four footguns
+## 3. Five footguns
 
 1. **`arns[0]`** — `idc_instance_arn = data.aws_ssoadmin_instances.this[0].arns[0]` is order-dependent.
    The moment a second instance is visible from the account (an IdC *account instance*, for example) the
@@ -84,6 +110,18 @@ lookup stable and the identity count low.
    `https://<id>.eks-capabilities.<region>.amazonaws.com`. Anything pinned to it (Git webhooks, a
    CyberArk web app, an SWS policy) goes stale without an error. Also: never drop
    `network_access.vpce_ids` — that is the only thing keeping the URL private.
+5. **VPCE endpoint has no corp-DNS record.** Confirmed live 2026-09-09: VPN alone does not resolve the
+   `<id>.eks-capabilities.<region>.amazonaws.com` hostname — new users need static `hosts`-file entries
+   pointing it at the VPCE's ENI IPs, not just VPN connectivity. Get current IPs with `aws ec2
+   describe-network-interfaces --filters Name=description,Values="*<vpce-id>*"` (from
+   `network_access.vpce_ids` on the capability). Give the user **both** ENI IPs, one line each, same
+   hostname. `aws0iacdeveks01` ArgoCD hub example (`vpce-073c6400726c4aeca`):
+   ```
+   10.34.254.142 ed9bf53c873cffcfcc590dd58ea1acd916ce2624a733aebe0.eks-capabilities.us-west-2.amazonaws.com
+   10.34.254.66 ed9bf53c873cffcfcc590dd58ea1acd916ce2624a733aebe0.eks-capabilities.us-west-2.amazonaws.com
+   ```
+   These IPs are only stable as long as the VPCE isn't recreated — re-verify before handing to a new user
+   if it's been a while.
 
 ## 4. Someone proposes an IdP change — the decision matrix
 
@@ -109,13 +147,91 @@ aws identitystore list-groups --profile iac --region us-east-1 \
   --identity-store-id <d-xxxx> --filters AttributePath=DisplayName,AttributeValue=<group>@exigengroup.com
 aws eks describe-capability --profile iac --region us-west-2 \
   --cluster-name aws0iacdeveks01 --capability-name <name> \
-  --query 'capability.{status:status,url:configuration.argoCd.serverUrl,idc:configuration.argoCd.awsIdc,net:configuration.argoCd.networkAccess,rbac:configuration.argoCd.rbacRoleMapping}'
+  --query 'capability.{status:status,url:configuration.argoCd.serverUrl,idc:configuration.argoCd.awsIdc,net:configuration.argoCd.networkAccess,rbac:configuration.argoCd.rbacRoleMappings}'
 ```
+
+Field is `rbacRoleMappings` (**plural**) — the singular form silently returns `null` even when mappings exist.
 
 E2E after any auth change: log in as a member of each mapped group → the role actually differs (ADMIN
 can sync, EDITOR cannot change settings) → **all 9 clusters still listed** under Settings → Clusters →
 one Application syncs Healthy → and, if the org instance was touched at all, an AWS console login plus
 one Cognito dashboard (Headlamp) still work.
+
+## 6. AppProject-level custom roles (view/sync-only, no capability-role coupling)
+
+A capability-level `VIEWER`/`EDITOR` role only grants login — it does **not** surface any Applications by
+itself (fact in §1: EDITOR/VIEWER reach Applications only through AppProject roles). To give a group
+*view + sync* in one AppProject but *view-only* in another, add a second role block per `AppProject` CR
+(alongside the existing `CLI` role) — one block per permission level:
+
+```yaml
+roles:
+  - name: CLI
+    ...
+  - name: sync-refresh
+    description: View + sync/refresh only — no create/delete/edit, no cluster/repo/project mgmt
+    groups:
+      - 90676df1bc-44915912-caea-4bc7-830c-da386b8fa065  # cloud-platform_adm@exigengroup.com — IdC group ID, NOT the name
+    policies:
+      - p, proj:apps-allowed:sync-refresh, applications, get, apps-allowed/*, allow
+      - p, proj:apps-allowed:sync-refresh, applications, sync, apps-allowed/*, allow
+      - p, proj:apps-allowed:sync-refresh, clusters, get, *, allow
+```
+
+The role **name is arbitrary** and unrelated to the capability-level `ADMIN`/`EDITOR`/`VIEWER` name — Argo
+CD matches this policy purely by the caller's `groups` claim. Capability-level `VIEWER` plus this project
+role is what grants "see + sync" here, not a project role that happens to be spelled `VIEWER`.
+
+**Gotcha — `groups:` must be the IdC group ID, not the DisplayName.** Unlike the capability-level
+`rbac_role_mapping` in Terraform (§2, which resolves `idc_group_name` through a data source), the
+AppProject CR's `roles[].groups` is consumed directly by Argo CD with no name resolution — a
+`DisplayName`-style entry (`cloud-platform_adm@exigengroup.com`) silently never matches, and the group's
+VIEWER user sees zero Applications despite a correct capability-level role. Live in `iac/argocd/argocd`
+until `argocd!389`/`!391` (EISHELP-113018) — the pre-existing `CLI` role's `oc-team@exigengroup.com` entry
+has the same bug, masked because `oc-team` is mapped `ADMIN` globally and ADMIN bypasses project roles
+entirely (§1). Get the ID: `aws identitystore list-groups --identity-store-id <d-xxxx> --region us-east-1
+--filters '[{"AttributePath":"DisplayName","AttributeValue":"<group>@exigengroup.com"}]'`
+(`GroupId` in the result); confirm the target user is a member with `list-group-memberships
+--group-id <id>`.
+
+**Gotcha — capability-level VIEWER can never see Settings → Repositories or Settings → Clusters, and no
+project policy fixes it.** Per AWS docs (argocd-permissions.html): VIEWER "Cannot list clusters or
+repositories"; EDITOR "Cannot manage clusters or repositories directly" either — only ADMIN gets "List and
+access all clusters and repositories." A project-role `repositories, get, *, allow` policy only grants
+repo-credential *use inside an Application* (and only when the repo `Secret`'s `project:` label matches —
+repos are usually `project: default`, not the caller's project), it does not surface the standalone
+Settings page. Don't chase this with more project policy: it's a global-role ceiling. Tell the user the
+Applications list already shows `spec.source.repoURL` per app (no separate page needed), or that seeing
+the Repositories/Clusters admin page requires ADMIN — which is a real scope escalation, not a rounding
+error on "view-only."
+
+**Gotcha — `clusters` resource object format.** For every other resource (`applications`,
+`applicationsets`, `repositories`, ...) the object is `<project>/<name>`. For `clusters` it is the
+**cluster server URL**, not a project/name glob. A line like
+`p, proj:X:role, clusters, *, apps-allowed/*, allow` (copy-pasted from an `applications` line) never
+matches any real server and is silently a no-op — seen live in the pre-existing `CLI` role in both
+`apps-allowed-AppProject.yaml` and `apps-denied-AppProject.yaml`. Use `clusters, get, *, allow` (bare
+`*`) to actually grant cluster visibility.
+
+**Verifying the git→live path.** These CRs live under `bootstrap/clusters/<cluster>/manifest/`,
+continuously reconciled (`selfHeal: true`, `prune: true`) by the `bootstrap-<cluster>` Application from
+the `cluster-bootstrap` ApplicationSet. The capability has no `argocd` CLI (§1), but the standard
+Application-controller refresh mechanism still works via `kubectl` — use it instead of waiting on the
+default ~3 min poll interval:
+
+```bash
+kubectl --context iac-hub -n argocd annotate application bootstrap-<cluster> \
+  argocd.argoproj.io/refresh=hard --overwrite
+# then poll:
+kubectl --context iac-hub -n argocd get application bootstrap-<cluster> \
+  -o jsonpath='{.status.sync.revision} {.status.sync.status} {.status.health.status}'
+```
+
+Argo CD's RBAC engine reads the `AppProject` CR directly at request time, so once `status.sync.status`
+flips back to `Synced` the new policy is already enforced — no extra propagation delay to account for.
+
+Reference delivery: NOJIRA-000, `argocd!375` (this AppProject change) paired with `eis-iac!19` (the
+capability-level `VIEWER` role mapping) — merged and live-verified 2026-09-01.
 
 Related skills: `argocd-cluster-onboarding`, `eis-idc-scoped-ssm-access`, `cyberark-eis-install`,
 `headlamp-cyberark-oidc-integration`.

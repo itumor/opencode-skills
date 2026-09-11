@@ -90,6 +90,15 @@ ansible repo). Jump straight to that phase's skill below.
 | **P7** | App-layer **handoff** doc to the delivery team (ref-impl 26.100 on the new GitLab/Jenkins) — out of scope for the IaC monorepo | **`eis-onesuite-phase7-app-handoff`** (NEW) | invoke |
 | **P8** | **End-to-end verification / sign-off** — account/IAM, all TF stages applied, network/TGW, EKS + node groups + addons, RDS/MSK, internal ALB/NLB, Cognito SAML, and ArgoCD all-Synced+Healthy; the final health gate that closes the env | **`eis-onesuite-e2e-verify`** (NEW) | invoke last |
 
+> **P5.5 — Atlantis cutover (optional, usually rides with P5).** Once `aws0<code>atlantis01` is up and
+> Ansible-configured, move the project off the shared IaC Atlantis with the **`eis-client-atlantis-cutover`**
+> skill. It is a two-commit / two-apply sequence — doing it as one change fails. Prerequisite: a DNS
+> delegation ticket so the new Atlantis URL resolves from the GitLab server; file it early.
+>
+> **Delivering this as a live workshop?** (platform team provisions in front of a change team that must
+> later do it alone) — use **`eis-onesuite-kt-workshop`** for the session arc, the day-before pre-flight
+> gates, and the standing answers to the questions the change team always asks.
+
 > **Invocation rule:** at each phase, call the Skill tool with the exact skill name above. P1/P5/P6
 > already exist; P0/P2/P3/P4/P7 are the `eis-onesuite-phaseN-*` skills, and P8 is
 > `eis-onesuite-e2e-verify`. Do not recreate or rename them. The `eis-build-host-provision` skill is

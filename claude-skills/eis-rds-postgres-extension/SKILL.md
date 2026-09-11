@@ -172,6 +172,27 @@ resource "aws_cloudwatch_log_group" "rds_postgresql" {
 ## Gotcha: pgaudit.log perpetual no-op plan diff (RDS value normalization)
 RDS stores comma-list param values **normalized without spaces** — `pgaudit.log = "role, ddl"` is stored as `"role,ddl"`. Terraform then shows `aws_db_parameter_group ... will be updated in-place` on EVERY plan of that stage (config "role, ddl" → state "role,ddl"), forever — a benign no-op that pollutes every MR's plan there. **Import does NOT fix it** (param group already in state; it's a value-format mismatch, not a missing resource). Fix = align config to the stored form: `value = "role,ddl"` (no space). Dynamic param, in-place, no reboot (verified COEXT-105501 — after the fix the param shows zero diff). General rule: a param-group value that keeps re-planning usually means RDS normalized the stored value (spaces/case/order) — match config to it.
 
+## Gotcha: engine-default param → perpetual `apply_method` no-op diff
+Second flavour of the same disease, different mechanism — the *value* matches, the **apply_method** doesn't:
+```
+~ parameter { rds.force_ssl : apply_method "pending-reboot" -> "immediate" }
+```
+Cause: the value you set is **already the engine default**, so RDS never records the parameter as user-modified. `describe-db-parameters` keeps returning `Source: "system"` with the system's own `ApplyMethod: "pending-reboot"` — even for a `ApplyType: dynamic` param, and even right after a successful apply:
+```bash
+aws rds describe-db-parameters --db-parameter-group-name <pg-name> \
+  --query 'Parameters[?ParameterName==`rds.force_ssl`]'
+# ParameterValue "1", Source "system", ApplyType "dynamic", ApplyMethod "pending-reboot"
+```
+A tfvars entry with no `apply_method` resolves the **provider default `immediate`** into state, AWS reports `pending-reboot` back, diff regenerates on every plan. Applying it "succeeds" (`Apply complete! 0 added, 1 changed, 2 destroyed`) and the very next autoplan shows it again — that "1 changed" is the parameter group being rewritten, not convergence.
+
+Fix = state the apply_method AWS is already reporting:
+```hcl
+{ name = "rds.force_ssl", value = "1", apply_method = "pending-reboot" }
+```
+Preferred over deleting the entry (which also converges, since 1 is the PG17 default) — keeping it declared holds the security intent explicit (R-SEC-6 "assert TLS on every connection") against a future major-version upgrade changing that default. Verified CAA `upper/stage/services`, COEXT-109103 / MR !142 (2026-09-07), after !139 applied and !141 autoplan re-showed the diff.
+
+**General rule for both flavours:** a param that re-plans forever is Terraform arguing with what RDS *stores*, not a real change. Read `describe-db-parameters` for that one param and copy BOTH what it reports — the normalized value **and** the ApplyMethod — into tfvars. `Source: "system"` on a param you set is the tell.
+
 ## Gotcha: pg_cron silently no-ops unless `cron.database_name` matches the app's real DB
 `cron.database_name` (pg_cron's GUC for which DB its background worker lives in) defaults to **`postgres`** at the engine level. RDS instances commonly have `DBName` set to something else entirely (e.g. `aws06nnljdevrds01`, matching the instance name, not a `postgres` db) — check with `aws rds describe-db-instances --query 'DBInstances[0].DBName'`. If `cron.database_name` is left at default and the app schedules jobs from its own (non-`postgres`) database, `cron.schedule()` calls register in the wrong DB's pg_cron tables and the launcher bgworker (which only runs in `cron.database_name`) never picks them up — extension shows "loaded" but jobs silently never fire. Fix: add it as a second static param in the same `parameters` list (same reboot, no extra cost):
 ```hcl

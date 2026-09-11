@@ -1,11 +1,40 @@
 ---
 name: argocd-cluster-onboarding
-description: End-to-end playbook for onboarding an EKS cluster into the EIS multi-cluster ArgoCD hub (iac/argocd/argocd). Covers Copier secret-path verification, pre-merge safety audit, helm template vs live diff, blocker fixes (incl. chart-extension when live resources have no template), Velero+local backups, post-merge istio reset, verification, and rollback. Use when adding a new cluster, enabling more components on an existing cluster, or upgrading an ArgoCD-managed chart bundle.
+description: End-to-end playbook for onboarding an EKS cluster into the EIS multi-cluster ArgoCD hub (iac/argocd/argocd). Covers the tools/answers.py discovery fast path, Copier secret-path verification, pre-merge safety audit, helm template vs live diff, blocker fixes (incl. chart-extension when live resources have no template), Velero+local backups, post-merge istio reset, verification, and rollback. Use when adding a new cluster, enabling more components on an existing cluster, or upgrading an ArgoCD-managed chart bundle.
 ---
 
 # ArgoCD Cluster Onboarding — EIS hub-and-spoke
 
 Hub: `aws0iacdeveks01` (account 182399717428). ApplicationSet `all-components` matrix-generates per-cluster apps from `clusters/<name>/cluster-component-config.yaml` × `clusters/<name>/*` directory. Auto-sync **enabled with `prune + selfHeal + ServerSideApply`** — any drift between rendered chart and live cluster will be reconciled aggressively on first sync.
+
+## Phase 0.0 — Fast path: discover the answers instead of typing them
+
+`iac/argocd/template/clusters` ships **`tools/answers.py`** (on `main` since 2026-08-27). It discovers
+~20 of the ~39 Copier onboarding answers from **live AWS** (EKS, ELB, S3, IAM, Route53, Cognito,
+Secrets Manager, MSK) and can render + install the cluster tree. Use it instead of hand-answering:
+
+```bash
+cd ~/gitwork/iac/argocd/template/clusters
+python3 tools/answers.py --selftest                          # 8 offline checks
+# 1. hand-write ONLY what AWS cannot know (ticket keys, AD groups, per-cluster opt-outs):
+#    app.<env>.overrides.yaml
+# 2. dry run — resolves every answer against AWS and prints the full set, installs nothing:
+python3 tools/answers.py --profile <AWS_PROFILE> --cluster <prefix>deveks01 \
+  --overrides app.<env>.overrides.yaml --preview-answers --pretend
+# 3. render into the argocd repo, then review the diff by hand before committing:
+python3 tools/answers.py --profile <AWS_PROFILE> --cluster <prefix>deveks01 \
+  --overrides app.<env>.overrides.yaml --dest ~/gitwork/iac/argocd/argocd
+```
+
+Read the dry-run output like a plan: it names the bucket, the AD groups, the EKS/ALB/Cognito values it
+found. **`--preview-answers` is the review gate** — the copier answers and `cluster-component-config.yaml`
+still need human eyes before the MR. `--vcs-ref <TAG>` only changes which template renders; the
+discovery code always runs from your local checkout. Details + the deliberately-open gaps:
+[[iac-clusters-answers-tool]].
+
+Repo CI on the resulting MR runs security, version-compatibility and component-quality checks and
+takes **~20 min** (it used to take an hour). Renovate will pile bump MRs onto the same repo — triage
+them, don't let them queue.
 
 ## Phase 0 — Verify secret-path-base BEFORE running Copier
 
@@ -56,7 +85,7 @@ aws iam list-roles                  --profile $PROFILE | jq ".Roles[] | select(.
 aws s3 ls --profile $PROFILE | grep -i "velero\|loki"
 ```
 
-Verify the secret backend is what cluster-side ESO uses — **never assume**. Check live: `kubectl get clustersecretstore -o yaml | grep -A6 provider`. EIS clusters use HashiCorp Vault, mount = `<cluster>`, role = `genesis-default`. SecretsManager is rare.
+Verify the secret backend is what cluster-side ESO uses — **never assume**. Check live: `kubectl get clustersecretstore -o yaml | grep -A6 provider`. **As of 2026-08-27 the fleet is 8x `SecretsManager` vs 2x `vault`** (vault only on `aws0v20deveks01` and `aws0v20perfdeveks01`) — so SecretsManager is the norm, not the exception. Read `clusters/<cluster>/values.yaml` -> `secretBackend.backendType` rather than assuming either way; the `vaultMountPoint`/`vaultRole` keys are present even on SecretsManager clusters and mean nothing there. For the four monitoring secrets specifically (objstore/ldap/slack-api-urls + gen-dashboard/registry), see skill `observascope-monitoring-secrets` — objstore is Terraform-managed from client template v2.7.0 and must NOT be hand-created any more.
 
 ## Phase 2 — Pre-merge safety audit (zero data-loss guarantee)
 
@@ -343,11 +372,42 @@ freshly-provisioned env runs through the **`eis-onesuite-e2e-verify`** skill.
 dry-runs ServiceMonitor / PrometheusRule / SLO CRs **before** `observascope-oss` has installed the
 prometheus-operator CRDs → the dry-run fails because the CRD doesn't exist yet → the error
 **cascade-fails** every CRD-consumer: `oidc`, `gen-dashboard`, `observascope-eis`, and the exporters.
-- **Durable fix (merged):** `argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true` on the
-  CRD-consumer templates (**argocd repo MR !298**) + bump `observascope-oss` syncWave **3 → 2** so the
-  keystone installs the CRDs earlier (clusters template). Both ship in **clusters template tag V1.0.8**.
-- **Verify the fix is in effect:** the consumer templates carry the `SkipDryRunOnMissingResource=true`
-  annotation; on a V1.0.8-generated cluster these apps go Synced+Healthy without the dry-run error.
+- **⚠️ THE V1.0.8 FIX DOES NOT WORK. Both halves were falsified in production on 2026-08-31**
+  (`aws02afadeveks01` onboard). Do not rely on it and do not re-propose it:
+  - **`SkipDryRunOnMissingResource=true` is a placebo here.** It was already present on **100%** of
+    the CRs that failed. The real error is kubectl **RESTMapper resolution at APPLY**
+    (`resource mapping not found ... no matches for kind "ServiceMonitor"`), not a dry-run
+    rejection — so skipping the dry-run changes nothing.
+  - **The syncWave 3 → 2 bump does nothing.** ApplicationSet-generated `sync-wave` annotations do
+    **not** order Applications against each other; neither appset declares `spec.strategy`, so
+    generation is AllAtOnce. Measured: all **17** wave-carrying component apps started between
+    **10:22:04 and 10:22:24** — waves 0 through 9 inside a 20-second window. (The 18th,
+    `bootstrap-<cluster>`, is `cluster-bootstrap`-generated, has no sync-wave and has never run
+    an operation.) RollingSync is unavailable (AWS-managed control
+    plane exposes no controller flag; it also selects on Application *labels*, not this annotation,
+    and forces autoSync OFF on matched apps). See [[argocd-appset-sync-wave-inert]].
+- **Second half of the bug — why it is permanent:** a Failed automated sync is **never re-attempted
+  for the same revision**. `selfHeal` does not rescue it. So a transient cold-start race becomes a
+  permanently stuck Application needing a hand sync (`endpoint-status-check-aws0prefdeveks01` sat
+  `Failed` from 2026-05-11).
+- **The real durable fix — gate the CR on Helm Capabilities** (argocd repo MRs !374 merged /
+  !372 open):
+  ```gotemplate
+  {{- if and ($.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor") .Values.x.enabled }}
+  ```
+  ArgoCD **does** populate `.Capabilities.APIVersions` from the destination cluster — proven live on
+  `aws0prefdeveks01`. Missing CRD → renders nothing → **sync Succeeds** → the CR is applied on a
+  later reconcile once the CRD appears. Capability string must be the full `group/version/Kind`
+  (Helm's VersionSet is exact-match). See
+  [[argocd-capabilities-gate-from-destination-cluster]].
+- **Mitigation shipped alongside** (MRs !371/!373, merged): retry envelope `limit: 5 → 16`,
+  `maxDuration: 3m → 60s`, keeping `duration: 5s`/`factor: 2`. 795s of backoff over 17 attempts vs
+  the old 155s over 6.
+- **Verify the fix is in effect:** the consumer template's `if` contains
+  `Capabilities.APIVersions.Has`, and the generated Application shows
+  `.spec.syncPolicy.retry.limit == 16`.
+- **Full runbook for diagnosing/remediating this class:** the
+  **`argocd-crd-race-and-stuck-apps`** skill.
 
 **2. istiod packs onto one node → starves monitoring DaemonSets.** The `istiod` component default is
 **3 replicas × 2-core CPU request with no spread**, so all 3 istiod pods land on **ONE** system node
@@ -377,6 +437,23 @@ blocks on its own ExternalSecrets at `<c>/monitoring/observascope-oss/{ldap,objs
 - See [[argocd_fresh_cluster_smooth_install]] and the ExternalSecret-404 patterns in Phase 6.5 /
   [[argocd_post_onboarding_failed_hooks]].
 
+**5. `gen-dashboard` ImagePullBackOff — the image comes from the CLIENT's own Nexus.** The cluster
+`values.yaml` sets `image.registry`/`image.repository` to `<nexus_host>:5000` from the Copier answer
+`nexus_host` — i.e. **the client's own `<prefix>nexus01`**, not a shared EIS registry. If ArgoCD
+onboarding (P6) runs **before** the Ansible toolchain phase (P5) has stood that Nexus up and mirrored
+the image, `gen-dashboard-app-0` sits in `ImagePullBackOff` forever while all other components go
+Healthy, and the app shows **Synced / Progressing** on the hub (never Degraded — easy to miss).
+- Diagnose: `kubectl describe pod gen-dashboard-app-0 -n monitoring` → `Back-off pulling image
+  "<prefix>nexus01.infra.<region_code>.<domain>:5000/gen-dashboard-app:<tag>"`.
+- The `registry-secret` ExternalSecret being `SecretSynced=True` does **not** mean the image exists —
+  credentials sync fine against an empty registry.
+- Not a bug, an ordering consequence. Either finish P5 first, or accept one Progressing app and
+  re-check after the Nexus is seeded. Everything else onboards cleanly out of order.
+- Sibling residue on a fresh cluster: the `endpoint-status-check` PostSync Job fails with 404s on
+  `grafana/alertmanager/pyrra` until the ingress routes are actually live. Re-run it after the mesh
+  settles rather than chasing the 404.
+See [[argocd-gen-dashboard-needs-client-nexus]].
+
 **4. Private-cluster diagnosis access.** A spoke EKS API is **private** AND the hub kubectl is
 **RBAC-scoped to ArgoCD CRDs only** (you can list `applications/applicationsets/secrets -n argocd`
 but NOT pods/svc — and the `argocd-server` pods aren't on the hub cluster). So app-level health =
@@ -405,6 +482,9 @@ velero restore create restore-pre-mr --from-backup <backup-name> --kubecontext "
 
 ## Cross-references in memory
 
+- `iac-clusters-answers-tool.md` — `tools/answers.py` discovery fast path (Phase 0.0), what it does and does NOT cover
+- `argocd-gen-dashboard-needs-client-nexus.md` — P6-before-P5 leaves gen-dashboard in ImagePullBackOff (Phase 6.9 #5)
+- `project_afa_american_fidelity_lower.md` — AFA reference run: MR !370, 18 apps, onboarded 2026-08-31
 - `aws0v20perfdeveks01_mr230_backups.md` — real-world example (perf-dev cluster onboarding)
 - `aws0caadeveks01_premerge_validation.md` — real-world example (CAA dev, manual-deployed cluster requiring full live-config port + chart extension)
 - `gitops_adoption_caa_lessons.md` — 6 new adoption patterns surfaced by CAA work (secret-path mismatch, chart extension, ALB list/single, sub-chart enabling, dir-generator gate, bash 4)

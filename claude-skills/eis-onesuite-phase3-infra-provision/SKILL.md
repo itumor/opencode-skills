@@ -1,19 +1,9 @@
 ---
 name: eis-onesuite-phase3-infra-provision
 description: >
-  Phase 3 of the EIS OneSuite platform-provisioning chain — provision the Shared/infra stage
-  (network + toolchain EC2 fleet) of a new isolated client environment. Covers the network-hub RAM
-  MR that shares the hub TGW + DNS resolver into the new account's OU, then the infra
-  bootstrap→core→services applies driven through IaC Atlantis (NOT local terraform apply — the
-  Atlantis assume-roles are trust-locked). Use when the user says "provision the infra/Shared stage
-  for <client>", "apply infra bootstrap/core/services", "stand up the toolchain EC2 fleet
-  (gitlab/jenkins/nexus/atlantis/sonar/keycloak/grok/sis/selenoid)", "the new account can't see the
-  shared TGW", "add the SaaS OUs to ram_principals", "RAM-share the transit gateway / DNS resolver",
-  or "why can't I terraform-apply the EIS Atlantis role locally (AccessDenied)". Sibling phases:
-  eis-onesuite-phase0-prereqs (P0), eis-account-vending (P1), eis-onesuite-phase2-terraform-scaffold
-  (P2), eis-onesuite-phase4-dev-provision (P4), eis-ansible-project-template (P5),
-  argocd-cluster-onboarding (P6), eis-onesuite-phase7-app-handoff (P7); master:
-  eis-onesuite-platform-provision.
+  WHEN provisioning the Shared/infra stage (network + toolchain EC2) via Atlantis, or
+  fixing TGW/DNS RAM share into a new SaaS OU. Phase 3 of eis-onesuite-platform-provision;
+  follows phase2 scaffold, precedes phase4-dev.
 ---
 
 # Phase 3 — Provision the Shared / `infra` stage
@@ -296,6 +286,11 @@ The 7 things that bit (or nearly bit) the `infra/services` fleet apply, in apply
      --filters Name=is-public,Values=false --profile <client-sso-profile> \
      --query 'length(Images)'   # must be > 0
    ```
+   **Don't idle while it's chased.** `lower/dev/core` (exec-order 22) has **no EC2** and no dependency
+   on `infra/services`, so it can be planned + applied while the subscription ticket is open — that is
+   exactly what AFA workshop #2 did (2026-08-24) after the `infra-service` apply blocked on missing
+   RHEL subscriptions. Once the account lands in Cloud Access, `lower-infra-services` applies clean
+   (AFA: **206 resources added**, the full toolchain fleet). See [[redhat-cloud-access-account-gate]].
 
 7. **Re-add the deferred EKS access entries AFTER the fleet applies** (the fleet IAM roles must exist
    first): `jnk`/`bld`/`cicd-team` in dev/services. Before re-adding **cicd-team**, confirm the

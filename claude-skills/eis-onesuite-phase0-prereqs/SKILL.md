@@ -1,6 +1,6 @@
 ---
 name: eis-onesuite-phase0-prereqs
-description: Phase 0 of standing up a brand-new EIS OneSuite client/POC environment — the up-front coordination gates that must be nailed down (and the external-team asks kicked off) BEFORE any account vending or terraform apply. Covers OU placement, account name + root-email convention, CIDR sub-allocation from a reserved /21 (incl. the /23-breaks-infra-auto-calc trap), Route53 DNS zone, the IdC↔Cognito SAML chicken-and-egg (ACS URL + audience), the TGW RAM-share-into-SaaS-OUs gap, Vault secret2/data/<project_code> population, registry pull-secret reuse, the Selenoid golden-image role, cost/BoM sign-off, service quotas, Atlantis webhook, and the private (WorkSpaces) vs public+WAF access model. Use when the user says "stand up a new OneSuite/SaaS environment", "onboard a new client/POC env", "what do we need before vending the account", "start the Phase 0 prereqs", "kick off the coordination gates", or is at the very start of a full new-environment build and needs the checklist of who-owns-what + how each is resolved. This is the first phase of the master skill eis-onesuite-platform-provision; the next gated phase is eis-account-vending (Phase 1).
+description: WHEN starting a new OneSuite/SaaS env or asking what must be locked before account vending — Phase 0 coordination gates (OU, CIDR, DNS, IdC/SAML, TGW RAM, Vault, access model). First phase of eis-onesuite-platform-provision; next is eis-account-vending (Phase 1).
 ---
 
 # EIS OneSuite — Phase 0: Pre-reqs & Coordination Gates
