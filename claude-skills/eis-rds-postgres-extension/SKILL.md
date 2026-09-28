@@ -216,5 +216,45 @@ Grepped the whole monorepo for `pg_cron` / `shared_preload_libraries` in `*.tf`/
 ```
 `cron.database_name` defaults to `postgres` — if the target app DB isn't `postgres`, set it explicitly or `cron.schedule()` calls made while connected to the app DB silently land in the wrong catalog. `CREATE EXTENSION pg_cron;` itself must be run while connected to whichever DB `cron.database_name` points at (same Step 5 ephemeral-pod trick, just point `dbname=` at that DB). Otherwise identical to pgaudit: reboot-gated, verify via `pg_extension` + `shared_preload_libraries` setting, plus `SELECT * FROM cron.job;` to confirm the bgworker is actually scheduling.
 
+## Promoting the passthrough + defaults to the client template (do this once, not per-customer)
+Wiring `create_db_parameter_group`/`parameters` per-customer (Step 1 above) fixes one project but
+repeats the same gap for the next one (confirmed missing independently in nnlj, axa-japan, and
+originally CAA-only). Once you've done it twice, promote to `iac/terraform/template/client`
+(reference: MR !46, GENESIS-442705/COEXT-108341, merged 2026-09-21):
+
+1. **Storage headroom, made automatic:** add a `rds_max_allocated_storage_increment` variable
+   (default `200`, tunable) and compute in `rds.tf`:
+   `rds_max_allocated_storage = coalesce(each.value.max_allocated_storage, each.value.allocated_storage + var.rds_max_allocated_storage_increment)`.
+   This means a brand-new customer can never land in the `Max == Allocated` zero-headroom trap
+   (GENESIS-442705's storage half) even if they never touch the RDS block at all.
+2. **Parameters null-override trap:** eis-rds's own `parameters` variable ships sane defaults
+   (`rds.logical_replication=1`, `wal_sender_timeout=0`, etc.), but `rds.tf` passes the consumer's
+   value through unconditionally — since the module variable isn't `nullable = false`, an **explicit
+   `null`** (the natural default for an `optional(list(map(string)))` field nobody set) silently
+   *overrides* the module's defaults instead of falling back to them. Fix at the call site with
+   `coalesce()`, not by trying to change the variable default to match the module's list (that
+   list itself can drift from the module):
+   ```hcl
+   parameters = coalesce(each.value.parameters, [
+     { apply_method = "pending-reboot", name = "shared_preload_libraries", value = "pg_stat_statements,pg_tle,pgaudit,pg_cron" },
+     { apply_method = "pending-reboot", name = "cron.database_name", value = "${local.project_prefix}rds${each.key}" }
+   ])
+   ```
+3. **`cron.database_name` needs zero Copier work** — it's computed from `local.project_prefix` +
+   `each.key`, both already dynamic per-customer via plain Terraform (same expression `rds_name`
+   already uses two lines up). Don't reach for a Copier template variable for something Terraform
+   already resolves per-instance.
+4. **Default `create_db_parameter_group = true` template-wide only if you've confirmed every
+   consumer is Postgres** — pg_cron/pgaudit/shared_preload_libraries are Postgres-only; a template
+   default that assumes Postgres will misfire the day a MySQL consumer appears. Prefer keeping the
+   variable default `false` (safe, engine-agnostic) and rely on fix #2 to make the *opt-in* path
+   correct, rather than forcing pg_cron on every future customer by default.
+5. **Unrelated CI gotcha you'll likely also hit:** `core`-type template directories (no exact
+   provider version pin, only inherited `~> 2.3` via a module) float to whatever's newest in a
+   clean-room CI render, while your local machine's `~/.terraform.d/plugin-cache` silently reuses
+   an older cached version and hides the drift — `.terraform.lock.hcl` "files were modified by this
+   hook" failures that don't reproduce locally are this. See
+   [[precommit_lockfile_checksum_drift_blocks_all_mrs]].
+
 ## Atlantis delivery order (do NOT deviate) [[feedback_atlantis_apply_before_merge]]
 `atlantis plan` (verify 0 destroy) → review/approval → **`atlantis apply` → confirm `Apply complete!` green → run the live verification above → THEN `glab mr merge` LAST**. Never merge before a verified-green apply — the open MR is your revert path if apply or verification fails. (SSO often expires mid-task; `aws sso login --profile <p>` is interactive/browser — if blocked, the apply output proves resources changed, but hold the merge until you can run the live value checks.)

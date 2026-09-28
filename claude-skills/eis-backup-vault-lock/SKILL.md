@@ -165,4 +165,5 @@ If every cached token is expired the accurate statement is "the SSO session is e
 - `eis-module-fix-release-consume` — module MR → manual release → consumer bump
 - `customize-terraform` (client repo) — `_custom.tf` + ADR conventions
 - `atlantis-debug` — when the plan/apply itself misbehaves
+- `eis-worm-object-lock` — the broader WORM rollout (S3 Object Lock incl. existing buckets, eis-cloudtrail, BAM, evidence); RDS clusters enrol via `Backup` tag on `aws_rds_cluster` (COEXT-110091)
 - Reference run: COEXT-108349, `aws11caasharevault`, CAA prod `144905517910` / `eu-west-3`

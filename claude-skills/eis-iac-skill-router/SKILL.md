@@ -14,6 +14,7 @@ Pick **one** skill below from the trigger. Then open that skill’s `SKILL.md` a
 | Atlantis lock stuck / orphaned / “No lock found” / unlock fails | `atlantis-lock-troubleshooting` |
 | Atlantis plan segfault / “Text file busy” / broken terraform binary | `atlantis-iac-binary-recovery` |
 | CI `git::` module 403 job-token / “Failed to download module” | `unblocking-job-token-module-fetch` |
+| Writing any new TF in a consumer repo / no eis module for X / wrap a registry module / hook deny `eis-module-first` | `eis-module-first` (project skill) |
 | Fix `eis-*` module + bump consumer pin / forced replacement after bump | `eis-module-fix-release-consume` |
 | Same small change across many GitLab repos / fleet MR batch | `gitlab-fleet-mr-propagation` |
 | Park many review-ready MRs without merging / dirty-tree MR series | `parked-mr-series` |

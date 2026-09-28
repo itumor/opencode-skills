@@ -8,6 +8,8 @@ description: Use when fixing a shared eis-* terraform module (iac/terraform/modu
 ## Overview
 Shared eis-* modules are consumed at pinned tags by many customer projects. A module fix is only half the work — the release mechanics and the consumer-bump plan review are where outages hide. Core principle: **a green consumer plan is not enough; read WHY each resource changes, and treat any `# forces replacement` on a pre-existing resource as a stop signal.**
 
+No eis module exists yet for the resource? That's a new module, not a fix: use project skill `eis-module-first`, which covers the registry search, copier scaffold and repo bootstrap. This skill takes over from its release step.
+
 ## Quick reference
 
 | Step | Command / fact |
