@@ -9,6 +9,8 @@ description: Use when drafting a Slack/Teams DM reply to Girts (or any direct, s
 
 Girts reacts badly to uncertainty and long AI-style updates. He asks direct questions ("ready or not?", "correct role?", "where is the dockerhub user coming from?"). Answer like an engineer: **short, factual, evidence-based**. No big explanation unless asked.
 
+**Style:** write every draft in `/caveman full` (no articles or filler, fragments OK, ask on line 1, IDs/URLs/IPs exact). This is the global rule for all human-facing drafts (`~/.claude/CLAUDE.md`).
+
 **Core principle:** make him feel he has visibility without chasing you every hour. That reduces micromanagement without creating conflict. Long reassurance does the opposite — it reads as covering for uncertainty.
 
 ## When to use
