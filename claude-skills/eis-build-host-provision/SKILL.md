@@ -1,6 +1,17 @@
 ---
 name: eis-build-host-provision
-description: Use when provisioning a dedicated build/deploy/CI EC2 host into an EIS client account and granting it deploy access to an EKS cluster — "provision the build host for <client> <stage/UAT>", "deploy the same build node config to UAT", "add a build/deploy/jenkins/runner EC2", "give the build host kubectl access to the cluster", or wiring an EC2 instance role into an eis-eks access_mapping. Also use when the Jenkins controller can't connect to the bld agent node ("Key exchange was not finished, connection is closed", "No Known Hosts file was found", agent offline) or you need the Jenkins admin login for an EIS toolchain host. Covers the infra/services ec2-map pattern, UAT/stage-scoped IAM, the eis-eks ec2_group substring-matcher collision trap, ordered apply (host before access entry), the SSM headless E2E proof, and the manual Jenkins SSH-agent-node wiring + host-key-verification trap. Reference: COEXT-105506 (aws0caatestbld01 dedicated CAA UAT build host, in the UAT VPC); COEXT-106273 (axajp Jenkins→bld KEX fail).
+description: >-
+  Use when provisioning a dedicated build/deploy/CI EC2 host into an EIS client account and
+  granting it deploy access to an EKS cluster — "provision the build host for <client>
+  <stage/UAT>", "deploy the same build node config to UAT", "add a build/deploy/jenkins/runner
+  EC2", "give the build host kubectl access to the cluster", or wiring an EC2 instance role into
+  an eis-eks access_mapping. Also use when the Jenkins controller can't reach the bld agent node
+  ("Key exchange was not finished, connection is closed", "No Known Hosts file was found", agent
+  offline) or you need the Jenkins admin login for an EIS toolchain host. Covers the
+  infra/services ec2-map pattern, stage-scoped IAM, the eis-eks ec2_group substring-matcher
+  collision trap, ordered apply (host before access entry), the SSM headless E2E proof, and the
+  Jenkins SSH-agent wiring + host-key-verification trap. Reference: COEXT-105506
+  (aws0caatestbld01 CAA UAT build host); COEXT-106273 (axajp Jenkins→bld KEX fail).
 ---
 
 # EIS build/deploy host provisioning + EKS access

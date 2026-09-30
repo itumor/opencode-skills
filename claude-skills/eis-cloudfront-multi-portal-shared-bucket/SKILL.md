@@ -1,6 +1,17 @@
 ---
 name: eis-cloudfront-multi-portal-shared-bucket
-description: Use when wiring multiple eis-cloudfront distributions (portals, tenant sites, etc.) to share ONE eis-s3 bucket via origin_path isolation — the org's real convention (broker/member on aws0caadevportals/aws0caatestportals), not one bucket per distribution — AND when naming the portal hostname itself (p<role>-<tenant> convention, e.g. pbroker-caa-stage). Covers the bucket-policy grouping pattern, hostname naming, proving the design on eis-iac dev before a client env, the versioned-bucket-destroy trap when renaming an already-applied bucket, rebasing a dependent MR across the rename, and the full E2E verification recipe (WAF Bot Control UA spoofing, VPN split-horizon DNS workaround, bucket-policy inspection). ALSO use when a customer wants their OWN domain (hosted in their DNS, e.g. a .pt name) on a portal, when someone suggests a self-signed/placeholder cert for a CloudFront alias, or when a CSR/imported cert must front CloudFront. That part covers its own mirror distribution, the day-1 placeholder alias, the tfvars-only cutover, and the one-CSR rule. Reference: COEXT-108811, CAA upper/stage MR !161 (bucket rename) + MR !175 (hostname rename); COEXT-110386 MR !184 (customer-hosted .pt aliases).
+description: >-
+  Use when wiring multiple eis-cloudfront distributions (portals, tenant sites) to share ONE
+  eis-s3 bucket via origin_path isolation — the org's real convention (broker/member on
+  aws0caadevportals/aws0caatestportals), not one bucket per distribution — AND when naming the
+  portal hostname itself (p<role>-<tenant>, e.g. pbroker-caa-stage). Covers the bucket-policy
+  grouping pattern, hostname naming, proving the design on eis-iac dev first, the
+  versioned-bucket-destroy trap when renaming an applied bucket, rebasing a dependent MR across
+  the rename, and E2E verification (WAF Bot Control UA spoofing, VPN split-horizon DNS
+  workaround, bucket-policy inspection). ALSO use when a customer wants their OWN domain on a
+  portal (e.g. a .pt name), or a self-signed/placeholder/CSR-imported cert must front
+  CloudFront — mirror distribution, day-1 placeholder alias, tfvars-only cutover, one-CSR rule.
+  Reference: COEXT-108811 (MR !161/!175), COEXT-110386 (MR !184).
 ---
 
 # Multi-portal, one shared S3 bucket, `origin_path` isolation

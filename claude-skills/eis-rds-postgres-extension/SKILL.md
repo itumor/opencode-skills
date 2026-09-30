@@ -5,15 +5,13 @@ description: >-
   pg_stat_statements, pg_partman bgw, etc.) on an EIS RDS instance managed by the eis-rds
   Terraform module. Use whenever someone asks to "enable pgaudit", "turn on DB audit logging",
   "enable an RDS extension", set shared_preload_libraries / pgaudit.log, or hits the Postgres
-  error "<ext> must be loaded via shared_preload_libraries". ALSO use when an HDS / SOC2 / audit
-  certification ticket asks for database audit logs on RDS, or when a customer asks for the change
-  "with no downtime" (this skill explains why a reboot is unavoidable and how to minimize it).
-  ALSO use for the companion DB-log asks that usually follow an audit-logging request: changing
-  PostgreSQL on-instance log retention (rds.log_retention_period), publishing RDS logs to CloudWatch
-  (enabled_cloudwatch_logs_exports), or setting a CloudWatch log-group retention — these are
-  zero-downtime and don't need a reboot.
-  Covers the eis-rds custom-parameter-group flip, the Atlantis apply, the maintenance-window-gated
-  reboot, running CREATE EXTENSION against a private RDS from an EKS pod, and end-to-end verification.
+  error "<ext> must be loaded via shared_preload_libraries". Also use for HDS/SOC2/audit tickets
+  asking for DB audit logs on RDS, "no downtime" asks (explains why a reboot is unavoidable and
+  how to minimize it), and companion DB-log asks that follow: on-instance retention
+  (rds.log_retention_period), publishing logs to CloudWatch, CloudWatch log-group retention —
+  those are zero-downtime. Covers the eis-rds custom-parameter-group flip, Atlantis apply,
+  maintenance-window-gated reboot, CREATE EXTENSION against a private RDS from an EKS pod,
+  and E2E verification.
 ---
 
 # Enabling a shared_preload_libraries Postgres extension on EIS RDS

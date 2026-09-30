@@ -1,6 +1,16 @@
 ---
 name: eis-absence-catchup-report
-description: Build a full "what happened while I was away" report for the EIS DevOps/IaC role by sweeping every reachable source — GitLab group 1711 MRs, on-prem Jira (my issues, mentions, watched, worklogs), Gmail, Slack, Google Drive — then turn it into a prioritised action plan. Use when the user says "I'm back from vacation", "catch me up", "what happened this month/week", "I was out of office, give me a report", "what did I miss", or on the first day back from any absence. ALSO use for the reverse direction — a colleague is back from THEIR leave and left you a handover doc, and you owe them a delta on what moved: "update Markuss on what happened", "status update against his handover", "add our latest to the handover doc", "what did we do on his list" (Phase 7). Also use for a Monday-morning or post-conference catch-up over a shorter window. Encodes the source-reachability matrix (what each connector can and cannot see), the exact glab/JQL/Gmail queries, and the four traps that silently produce an empty or wrong report.
+description: >-
+  Build a full "what happened while I was away" report for the EIS DevOps/IaC role by sweeping
+  every reachable source — GitLab group 1711 MRs, on-prem Jira (my issues, mentions, watched,
+  worklogs), Gmail, Slack, Google Drive — then turn it into a prioritised action plan. Use when
+  the user says "I'm back from vacation", "catch me up", "what happened this month/week",
+  "I was out of office", "what did I miss", or on the first day back from any absence. ALSO use
+  for the reverse — a colleague back from THEIR leave left a handover doc and you owe a delta on
+  what moved: "update Markuss on what happened", "status update against his handover", "what did
+  we do on his list" (Phase 7). Also for Monday-morning or post-conference catch-ups over a
+  shorter window. Encodes the source-reachability matrix, the exact glab/JQL/Gmail queries, and
+  the four traps that silently produce an empty or wrong report.
 ---
 
 # EIS — catch-up report after an absence

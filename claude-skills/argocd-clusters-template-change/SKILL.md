@@ -1,6 +1,6 @@
 ---
 name: argocd-clusters-template-change
-description: "Safely change the EIS ArgoCD cluster-values Copier template (iac/argocd/template/clusters) — add or fix a question, absorb a cluster's hand-edits back into the template, or make copier update safe for a live cluster. Use when asked to 'add X to the clusters template', 'parameterize this per-cluster value', 'why does cluster Y differ from the template', 'backfill cluster Z to the current template version', or when reviewing an MR that touches copier.yml or template/{{ project_slug }}/. Also use before enabling any copier validator, and before any copier update against a live cluster. Encodes the two invariants that silently destroy config (config/dir lock-step, Helm list replacement), the Copier-9 gotchas that make a change look correct while doing nothing, the live-parity proof that measures coverage, and the four answers that change live state if left at their defaults. Reference run: GENESIS-429534 (MR !12, V2.2.0, 95 questions, all nine live clusters proven renderable)."
+description: "Safely change the EIS ArgoCD cluster-values Copier template (iac/argocd/template/clusters) — add or fix a question, absorb a cluster's hand-edits back into the template, or make copier update safe for a live cluster. Use when asked to 'add X to the clusters template', 'parameterize this per-cluster value', 'why does cluster Y differ from the template', 'backfill cluster Z to the current template version', or when reviewing an MR that touches copier.yml or template/{{ project_slug }}/. Also use before enabling any copier validator, and before any copier update against a live cluster. Encodes the two invariants that silently destroy config (config/dir lock-step, Helm list replacement), the Copier-9 gotchas that make a change look correct while doing nothing, the live-parity proof that measures coverage, and the four answers that change live state if left at their defaults. Reference run: GENESIS-429534 (MR !12 — 95 questions, all nine live clusters proven renderable — but CLOSED UNMERGED 2026-09-07; V2.2.0 was never released, latest tag V2.1.2)."
 ---
 
 # Changing the ArgoCD clusters Copier template
@@ -175,8 +175,12 @@ Then: **diff every rendered file**, not just the ones you expected to change.
 
 The answers file lives **inside** the cluster dir, so:
 
+> **V2.2.0 does not exist** (as of 2026-09-28 the latest tag is V2.1.2; MR !12 that would have cut it
+> was closed unmerged). Check `git ls-remote --tags origin` and substitute the real target tag — never
+> copy a version from this skill or a memory without confirming the tag exists.
+
 ```bash
-copier update --vcs-ref V2.2.0 --trust --defaults \
+copier update --vcs-ref <TAG> --trust --defaults \
   --data-file <cluster>.yml --answers-file <cluster>/.copier-answers.yml .
 ```
 

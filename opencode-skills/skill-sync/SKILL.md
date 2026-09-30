@@ -1,3 +1,12 @@
+---
+name: skill-sync
+description: >-
+  Back up all OpenCode/Claude/Cursor/Codex/Hermes agent skills to the public GitHub repo
+  itumor/opencode-skills via ~/.opencode-skills-backup/sync-skills.sh. Use when asked to sync
+  or back up skills, after any non-trivial skill edit, or when checking whether the skills
+  backup is current — daily cron plus manual trigger.
+---
+
 # Skill Sync — Backup all agent skills to git
 
 Backup all OpenCode/Claude/Cursor/Codex/Hermes skills to public GitHub repo.

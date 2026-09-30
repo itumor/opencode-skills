@@ -36,6 +36,17 @@ This file = decision-critical facts only.
 - **Secret charset check, value-blind**: `printf "%s" "$SECRET" | tr -d "A-Za-z0-9._~-"` — leftovers are what QueryEscape mangles.
 - Discovery doc = `https://<tenant>.id.cyberark.cloud/<app_id>/.well-known/openid-configuration` (also `/OAuth2/GetMeta?serviceName=<app_id>`); redirect whitelist is NOT visible there — probe /Authorize with candidate redirect_uris (no auth needed; `invalid redirect` = not whitelisted).
 
+## Colleague FAQ: "why the custom image / who is the build user / how do I pull it?"
+
+Answer from repo, not memory: `argocd/argocd` `clusters/aws0caatesteks01/headlamp/values.yaml` (comment block = the why; commit `c81c41a`).
+- **Why**: trap 1 above. Temporary until headlamp#7064 merges; then drop `headlamp.image.*` override.
+- **Image**: `691064586749.dkr.ecr.us-west-2.amazonaws.com/eis/headlamp:v0.40.0-eis.1`, upstream v0.40.0 + AuthStyleInParams at both sites.
+- **Build user: none.** Hand-built backend-only, no CI job, no service account. Cluster pull = node role `AmazonEC2ContainerRegistryReadOnly`. Cross-account pull policy on that ECR repo NOT verified: check before promising a colleague pull access.
+- **Best advice to other teams**: rebuild from the two patch sites and push to their own registry; do not hand out our ECR creds.
+- **Mirror**: also at `aws0caanexus01.infra.aws0.caa-eis.cloud:5002/eis/headlamp:v0.40.0-eis.1` (CAA Nexus hosted staging, same digest, amd64 only). Share that path + a Nexus read user instead of ECR creds.
+- **Mirror recipe** (ECR->Nexus 5002, digest-verified): memory `nexus_hosts_docker_ports_and_image_mirror`. amd64 only; user does `docker login` in Terminal panel, check `docker-credential-desktop list`. Scan image (docker export + grep internal strings) before any public push.
+- Refs: Jira COEXT-108018, https://github.com/kubernetes-sigs/headlamp/issues/7064
+
 ## Related
 
 Memories: `cyberark-oidc-go-client-secret-trap`, `project_coext108018_headlamp_caa_uat`, `reference_headlamp-oidc-fqdn-pattern`. Skills: `atlantis-lock-troubleshooting` (locks), repo skill `atlantis-debug` (credit-agricole). Upstream tracking: headlamp#7064 — retire the custom image when merged.
