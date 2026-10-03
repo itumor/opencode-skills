@@ -1,0 +1,68 @@
+---
+# E2E checks (read + proxy-cache only). Run: --limit <prod host> -e @e2e-vars.yml (run BEFORE upgrade = baseline, AFTER = compare)
+- hosts: nexus
+  gather_facts: false
+  vars:
+    u: "https://{{ nexus_fqdn }}"
+    nu: admin
+    np: "{{ lookup('community.hashi_vault.hashi_vault', 'secret=secret2/data/{{ project_name }}/automation/nexus:nexus_AdminPass') }}"
+    probes:
+      - {name: status_writable, url: "/service/rest/v1/status/writable"}
+      - {name: repos, url: "/service/rest/v1/repositories"}
+      - {name: blobstores, url: "/service/rest/v1/blobstores"}
+      - {name: syscheck, url: "/service/rest/v1/status/check"}
+      - {name: ldap_user_lookup, url: "/service/rest/v1/security/users?source=LDAP&userId={{ e2e_ldap_user }}"}
+      - {name: ldap_cfg, url: "/service/rest/v1/security/ldap"}
+      - {name: proxy_npm, url: "/repository/{{ e2e_npm_proxy }}/lodash"}
+      - {name: proxy_mvn, url: "/repository/{{ e2e_mvn_proxy }}/org/apache/commons/commons-lang3/maven-metadata.xml"}
+      - {name: proxy_helm, url: "/repository/{{ e2e_helm_proxy }}/index.yaml"}
+      - {name: group_npm, url: "/repository/{{ e2e_group_npm }}/lodash"}
+      - {name: hosted_components, url: "/service/rest/v1/components?repository={{ e2e_hosted_repo }}"}
+      - {name: docker_v2_5000, url: ":5000/v2/"}
+      - {name: docker_v2_5002, url: ":5002/v2/"}
+      - {name: docker_manifest_5002, url: ":5002/v2/{{ e2e_docker_image }}/manifests/{{ e2e_docker_tag }}"}
+      - {name: tasks, url: "/service/rest/v1/tasks"}
+  tasks:
+    - name: force fresh download
+      ansible.builtin.file: {path: /tmp/nexus-upgrade-asset.bin, state: absent}
+    - name: probe
+      ansible.builtin.uri:
+        url: "{{ u }}{{ item.url }}"
+        user: "{{ nu }}"
+        password: "{{ np }}"
+        force_basic_auth: true
+        return_content: true
+        status_code: [200, 204, 401, 403, 404, 500, 502, 503]
+        headers: {Accept: "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/json, */*"}
+        timeout: 60
+      loop: "{{ probes }}"
+      loop_control: {label: "{{ item.name }}"}
+      register: r
+      no_log: true
+    - name: first hosted asset download (S3 read)
+      vars:
+        comps: "{{ (r.results | selectattr('item.name','equalto','hosted_components') | first).json['items'] | default([]) }}"
+      ansible.builtin.uri:
+        url: "{{ comps[0].assets[0].downloadUrl }}"
+        user: "{{ nu }}"
+        password: "{{ np }}"
+        force_basic_auth: true
+        method: GET
+        status_code: [200, 404, 500]
+        dest: /tmp/nexus-upgrade-asset.bin
+      when: comps | length > 0
+      register: dl
+      no_log: true
+      ignore_errors: true
+    - name: summary
+      vars:
+        res: "{{ r.results }}"
+      ansible.builtin.debug:
+        msg:
+          - "{% for x in res %}{{ x.item.name }}={{ x.status }} {% endfor %}"
+          - "repos={{ (res | selectattr('item.name','equalto','repos') | first).json | default([]) | length }}"
+          - "blobstores={% for b in (res | selectattr('item.name','equalto','blobstores') | first).json | default([]) %}{{ b.name }}:count={{ b.blobCount | default('?') }}:bytes={{ b.totalSizeInBytes | default('?') }} {% endfor %}"
+          - "syscheck_unhealthy={{ ((res | selectattr('item.name','equalto','syscheck') | first).json | default({})) | dict2items | rejectattr('value.healthy') | map(attribute='key') | list }}"
+          - "ldap_users={{ (res | selectattr('item.name','equalto','ldap_user_lookup') | first).json | default([]) | map(attribute='userId') | list }}"
+          - "asset_download={{ dl.status | default('n/a') }} size={{ dl.size | default('n/a') }} url_path={{ (dl.url | default('')) | urlsplit('path') }}"
+          - "tasks={{ ((res | selectattr('item.name','equalto','tasks') | first).json['items'] | default([])) | map(attribute='type') | list | unique }}"

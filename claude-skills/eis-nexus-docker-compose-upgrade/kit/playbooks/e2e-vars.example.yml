@@ -1,0 +1,11 @@
+# per-client E2E inputs (CAA values shown). Also needs ticket, nexus_fqdn, project_name (from group_vars all).
+ticket: COEXT-106742
+nexus_fqdn: aws0caanexus01.infra.aws0.caa-eis.cloud
+e2e_group_npm: CAA-NPM
+e2e_hosted_repo: caa-release          # any hosted repo with components -> asset download = S3 read
+e2e_ldap_user: eramadan               # an AD user that exists
+e2e_npm_proxy: gennexus-npm-proxy
+e2e_mvn_proxy: gennexus-mvn-proxy
+e2e_helm_proxy: genesis-helm
+e2e_docker_image: eis/headlamp        # image present in a hosted docker repo that is a member of the :5000 group
+e2e_docker_tag: v0.40.0-eis.1

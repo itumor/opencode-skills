@@ -1,0 +1,15 @@
+---
+# Clone dry-run ONLY (-e clone_name=... -e nexus_fqdn=...). Targets the clone by Name tag; prod (aws0caanexus01) cannot match.
+- hosts: "{{ clone_name }}"
+  become: true
+  vars_files:
+    - inventory/group_vars/infra.yaml  # prod is in infra (Stage tag); clone is not
+    - inventory/group_vars/nexus.yaml
+  pre_tasks:
+    - name: Refuse unless prod FQDN is pinned to loopback on this host
+      ansible.builtin.command: getent hosts {{ nexus_fqdn }}
+      register: guard
+      changed_when: false
+      failed_when: not guard.stdout.startswith('127.0.0.1')
+  roles:
+    - docker_compose_nexus

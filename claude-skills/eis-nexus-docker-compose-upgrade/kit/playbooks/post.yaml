@@ -1,0 +1,63 @@
+---
+# {{ ticket }} post-upgrade: rebuild search index task + docker layer pull (S3 read) via group :5000
+- hosts: nexus
+  gather_facts: false
+  vars:
+    u: "https://{{ nexus_fqdn }}"
+    np: "{{ lookup('community.hashi_vault.hashi_vault', 'secret=secret2/data/{{ project_name }}/automation/nexus:nexus_AdminPass') }}"
+    mt: "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json"
+  tasks:
+    - name: existing tasks
+      ansible.builtin.uri: {url: "{{ u }}/service/rest/v1/tasks", user: admin, password: "{{ np }}", force_basic_auth: true, return_content: true}
+      register: tl
+      no_log: true
+    - name: create rebuild-search task
+      ansible.builtin.uri:
+        url: "{{ u }}/service/rest/v1/tasks"
+        method: POST
+        user: admin
+        password: "{{ np }}"
+        force_basic_auth: true
+        body_format: json
+        body: {type: "repository.rebuild-index", name: "{{ ticket }} Repair - Rebuild repository search", enabled: true, alertEmail: null, notificationCondition: "FAILURE", frequency: {schedule: "manual"}, properties: {repositoryName: "*"}}
+        status_code: [200, 201, 400, 404, 405, 422]
+        return_content: true
+      register: tc
+      no_log: true
+      when: tl.json['items'] | selectattr('type','equalto','repository.rebuild-index') | list | length == 0
+    - name: find task id
+      ansible.builtin.uri: {url: "{{ u }}/service/rest/v1/tasks?type=repository.rebuild-index", user: admin, password: "{{ np }}", force_basic_auth: true, return_content: true}
+      register: tf
+      no_log: true
+    - name: run task
+      ansible.builtin.uri: {url: "{{ u }}/service/rest/v1/tasks/{{ tf.json['items'][0].id }}/run", method: POST, user: admin, password: "{{ np }}", force_basic_auth: true, status_code: [204, 400, 404, 405, 409]}
+      register: tr
+      no_log: true
+      ignore_errors: true
+      when: tf.json['items'] | length > 0
+    - name: manifest via group 5000
+      ansible.builtin.uri: {url: "{{ u }}:5000/v2/{{ e2e_docker_image }}/manifests/{{ e2e_docker_tag }}", user: admin, password: "{{ np }}", force_basic_auth: true, return_content: true, headers: {Accept: "{{ mt }}"}, status_code: [200, 404]}
+      register: mf
+      no_log: true
+    - name: child manifest if index
+      ansible.builtin.uri: {url: "{{ u }}:5000/v2/{{ e2e_docker_image }}/manifests/{{ ((mf.content | from_json).manifests | selectattr('platform.architecture','defined') | selectattr('platform.architecture','equalto','amd64') | first).digest }}", user: admin, password: "{{ np }}", force_basic_auth: true, return_content: true, headers: {Accept: "{{ mt }}"}}
+      register: cm
+      no_log: true
+      when: (mf.content | from_json).manifests is defined
+    - ansible.builtin.set_fact:
+        img: "{{ (cm.content if cm is not skipped else mf.content) | from_json }}"
+    - name: pull first layer via group 5000 (S3 read)
+      ansible.builtin.uri: {url: "{{ u }}:5000/v2/{{ e2e_docker_image }}/blobs/{{ img.layers[0].digest }}", user: admin, password: "{{ np }}", force_basic_auth: true, dest: /tmp/nexus-upgrade-layer.bin, status_code: [200]}
+      register: lb
+      no_log: true
+    - name: layer digest check
+      ansible.builtin.shell: "echo sha256:$(sha256sum /tmp/nexus-upgrade-layer.bin | cut -d' ' -f1); rm -f /tmp/nexus-upgrade-layer.bin /tmp/nexus-upgrade-asset.bin"
+      register: ld
+      changed_when: false
+      when: lb is not skipped
+    - name: summary
+      ansible.builtin.debug:
+        msg:
+          - "task_found={{ tf.json['items'] | map(attribute='name') | list }} run={{ tr.status | default('n/a') }} run_msg={{ (tr.msg | default(''))[:120] }} state={{ (tf.json['items'] | first | default({})).currentState | default('?') }}"
+          - "manifest_5000={{ mf.status }} layer={{ lb.status | default('n/a') }} size={{ lb.size | default('n/a') }}"
+          - "digest_match={{ (ld.stdout | default('')) == (img.layers[0].digest | default('x')) }}"

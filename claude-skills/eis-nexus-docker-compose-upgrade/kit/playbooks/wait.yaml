@@ -1,0 +1,22 @@
+---
+- hosts: nexus
+  gather_facts: false
+  vars:
+    u: "https://{{ nexus_fqdn }}"
+    np: "{{ lookup('community.hashi_vault.hashi_vault', 'secret=secret2/data/{{ project_name }}/automation/nexus:nexus_AdminPass') }}"
+  tasks:
+    - name: wait rebuild task done
+      ansible.builtin.uri: {url: "{{ u }}/service/rest/v1/tasks?type=repository.rebuild-index", user: admin, password: "{{ np }}", force_basic_auth: true, return_content: true}
+      register: t
+      no_log: true
+      until: (t.json['items'][0].currentState | default('')) == 'WAITING' and (t.json['items'][0].lastRunResult | default('')) != ''
+      retries: 120
+      delay: 30
+    - name: nexus log errors since upgrade
+      ansible.builtin.shell: "docker logs --since 30m docker_compose_nexus-nexus-1 2>&1 | grep -E ' (ERROR|WARN) ' | sed -E 's/^[0-9-]+ [0-9:,+]+ //' | cut -c1-160 | sort | uniq -c | sort -rn | head -12"
+      register: lg
+      changed_when: false
+    - ansible.builtin.debug:
+        msg:
+          - "rebuild state={{ t.json['items'][0].currentState }} result={{ t.json['items'][0].lastRunResult }} lastRun={{ t.json['items'][0].lastRun }}"
+          - "{{ lg.stdout_lines }}"

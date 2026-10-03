@@ -1,0 +1,42 @@
+---
+# docker_compose_nexus v2.0.1 (COEXT-106742). Role defaults describe a fresh install;
+# values below pin what aws0caanexus01 already runs so a role run only upgrades images.
+
+nexus_version: "3.96.4"
+postgres_enabled: true
+postgres_version: "16"  # live 16.13; role default 16.11 would be a minor downgrade
+licensed: true
+skip_dependencies: true  # docker + vault-agent already on host; CAA pins older dep roles
+
+# LDAP stays as live (plain ldap:389, no truststore). LDAPS switch = separate change.
+nexus_ldap_protocol: "ldap"
+
+# Live S3 blob store CAAS3 -> s3://aws0caanexus01/nexus (role validates, never repoints)
+aws_s3_bucket: "aws0caanexus01"
+blob_storage: "CAAS3"
+nexus_s3_blobstore:
+  enabled: true
+  configuration:
+    name: "CAAS3"
+    softQuota: null
+    bucketConfiguration:
+      bucket:
+        region: "us-west-2"
+        name: "aws0caanexus01"
+        prefix: "nexus"
+
+# ponytail: live repos/roles/cleanup policies predate the role model (different names,
+# write policies, CAA-DOCKER on :5000, raw/helm repos, oc-team/ta_caa_r roles).
+# Empty lists = role leaves them alone. Model them here only when adopting them as code.
+nexus_repositories: []
+nexus_repositories_to_delete: []
+nexus_roles: []
+nexus_cleanup_policies: []
+
+# 3.92+ SSRF protection blocks private upstreams; every live proxy points at sfoeisgennexus01.
+nexus_ssrf_protection:
+  enabled: true
+  allowed_ips: []
+  allowed_domains:
+    - "sfoeisgennexus01.exigengroup.com"
+    - "sfoeisgennexus01-docker-group.exigengroup.com"
