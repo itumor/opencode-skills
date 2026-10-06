@@ -34,7 +34,7 @@ Two independent trust relationships must BOTH point at CyberArk:
 | Item | Owner | Notes |
 |---|---|---|
 | AD groups `headlamp_<env>_admin` / `_rw` / `_r` | AD team (Jira CV Support) | Plain names end up in the token — record exact spelling |
-| CyberArk OIDC app (`<env>_headlamp_oauth_client_oidc`) | CyberArk admin (Denys Z.) | See §3 for the exact settings to request |
+| CyberArk OIDC app (`<env>_headlamp_oauth_client_oidc`) | CyberArk admin (Denys Zvenyhorodskyi, `dzvenyhorodskyi`) | See §3 for the exact settings to request |
 | App access granted to the 3 AD groups | CyberArk admin | Users NOT in the groups get `access_denied — user not allowed access to app` |
 | Test user added to one AD group | AD team | Nothing is testable end-to-end without this |
 | SWS browser extension (if Step-recording policy on the app) | each end user | Chrome Web Store: "CyberArk Secure Web Sessions Extension" (`ohfinlfcbaehgokpmkjcmkgdcbgamgln`) — this is DIFFERENT from the CyberArk Identity extension; both coexist |

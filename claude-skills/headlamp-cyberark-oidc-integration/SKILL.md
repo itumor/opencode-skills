@@ -47,6 +47,10 @@ Answer from repo, not memory: `argocd/argocd` `clusters/aws0caatesteks01/headlam
 - **Mirror recipe** (ECR->Nexus 5002, digest-verified): memory `nexus_hosts_docker_ports_and_image_mirror`. amd64 only; user does `docker login` in Terminal panel, check `docker-credential-desktop list`. Scan image (docker export + grep internal strings) before any public push.
 - Refs: Jira COEXT-108018, https://github.com/kubernetes-sigs/headlamp/issues/7064
 
+## Colleague FAQ: "callback after sign-in times out" (ERR_CONNECTION_TIMED_OUT)
+
+Not an OIDC fault. A redirect-URI, secret or group problem shows a CyberArk error page (`access_denied`, `invalid_grant`), never a browser timeout. Timeout = DNS resolved, TCP hung. Triage in order: `dig +short <host>` (private 10.x = needs VPN/route), `curl -m10 -o /dev/null -w '%{http_code}' https://<host>/`, `nc -z -G4 <ip> 443`. All closed on VPN = ALB SG / spoke routing owned by whoever owns that account (e.g. BCIC, SaaS network account AWS02, not in our IaC). CyberArk app/redirect-URI questions go to Denys Zvenyhorodskyi. Memory: `bcic-headlamp-private-alb-timeout`.
+
 ## Related
 
 Memories: `cyberark-oidc-go-client-secret-trap`, `project_coext108018_headlamp_caa_uat`, `reference_headlamp-oidc-fqdn-pattern`. Skills: `atlantis-lock-troubleshooting` (locks), repo skill `atlantis-debug` (credit-agricole). Upstream tracking: headlamp#7064 — retire the custom image when merged.

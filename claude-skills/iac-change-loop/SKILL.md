@@ -34,10 +34,12 @@ failures seen: <error> -> <what fixed it>
 ## Failure table (retry once, then escalate with exact text)
 | Signal | Action |
 |---|---|
-| Atlantis `Plan Failed: locked by ... !N` | holder MR open+applied -> ask user to merge it; merged/closed -> skill `atlantis-lock-troubleshooting` |
+| Atlantis `Plan Failed: locked by ... !N` | holder MR open+applied -> ask user to merge it; merged/closed -> skill `atlantis-lock-troubleshooting`. The lock can pass to the NEXT open MR planned on the same dir (CAA stage services went !174 -> !183 -> !186 in one day): re-read the holder from the fresh note each time, then rebase + replan once it merges |
 | Apply `unexpected state 'FAILED'` on OpenSearch upgrade, domain unchanged | `check-only` again; fresh `atlantis plan` then apply once at a quiet time; if it repeats, console "View details" code (skill `eis-opensearch-engine-upgrade`) |
 | pre-push `exceeded 100s` | run `ci-local-scratch.sh`, give the user the exact `git -C <wt> push` |
-| Atlantis plan has extra changes/destroys | stop, tag MR-caused vs carried (CLAUDE.md rule 4), do not hand off apply |
+| Atlantis plan has extra changes/destroys | stop, tag MR-caused vs carried (CLAUDE.md rule 4), do not hand off apply. After a rebase, a `for_each`-wide attribute also hits entries other MRs added (COEXT-110321: expected 2 distributions, plan showed 4 incl. the `.pt` portals; fixed with `contains([...], each.key) ? x : null`) |
+| MR `pre-commit` CI job red with `early EOF` / `SSL_read: unexpected eof` on a module `git clone` | transient runner network: `glab api -X POST projects/<id>/jobs/<job>/retry`, watch the NEW job id; only dig in if it fails twice |
+| own Monitor/`glab api` poll loop times out silent while the event already happened | do not hand-roll it: use `gate-watch.sh mr-note <repo> <iid> 'Ran Plan' <since-utc>`. The hand-rolled loop piped `echo "$body"` into python under zsh (echo expands `\\n` in JSON strings -> invalid JSON) with errors swallowed by `2>/dev/null`, so a 2-minute plan was missed twice (10-min timeouts). Check the MR notes directly before re-arming |
 | SSO expired | ask user for `aws sso login --profile <p>` (only thing the loop cannot do) |
 | watcher timeout | report state with one command, do not poll in a tight loop |
 

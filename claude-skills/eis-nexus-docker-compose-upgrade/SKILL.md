@@ -85,6 +85,8 @@ Timebox: G3 not green by T+60 -> R1 (OS fine) else R2.
 ## Phase 6: dnf trap
 `dnf -y update` upgrades docker-ce/containerd and restarts the engine. Nexus gets SIGTERM (143) and is NOT restarted; after a reboot it stays down (dockerd restores only running containers) and nginx loops on `host not found`. Hence: **stop the stack BEFORE dnf**, and let the role bring it up after the reboot.
 
+Note: this kit patches the OS with its own `mw_os.sh` (plain `dnf -y update`), NOT the client repo's `playbooks/linux_kernel_patch.yaml` (COEXT-104202 pattern with preflight, EBS snapshots, SSM-safe reboot, kernel post-validation). That playbook is unsafe to run on a live Nexus stack for the same docker-restart reason. If a reviewer asks whether it ran, the answer for CAA (2026-10-02) is no; state that and the equivalent (own snapshot B2 + manual kernel/boot check).
+
 ## Phase 7: MW (prod), CAA actual timings
 1. `kit/playbooks/e2e.yaml` baseline (all 200 expected; record the blob count/bytes).
 2. `ssm.sh kit.env prod mw_backup.sh` (downtime starts) — 59 s
