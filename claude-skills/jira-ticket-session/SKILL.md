@@ -28,3 +28,8 @@ State dir: `~/.claude/change-runs/jira-routine/`. Files: `KEY.md` (state), `KEY.
 
 ## Final reply shape
 `KEY | verdict | Jira status now` / what changed (one line each, with evidence) / user gates with exact commands / draft block. Ticket not worth more than one session's effort? Say so in one line; do not pad.
+
+## Resume + vague tickets
+- `KEY.md` already `BLOCKED-ON-USER`: still re-run the live checks. State moves between runs (COEXT-110378: TG 0->6 healthy, 503->404 in 2 h). Compare against the stage/sibling env as baseline so "404" is read as parity, not proof.
+- AWS-backed E2E and SSO expired (`aws sts get-caller-identity --profile <p>` fails; see memory `aws_profiles`): run the real command first, then ask the user once for `aws sso login --profile <p>` and record the E2E as unproven (`NOT-DONE`/`BLOCKED-ON-USER`), never as PASS. On 10-05 three sessions burned time on this.
+- Ticket body is only "Similar to <KEY2>": read KEY2 (`jira-read.py KEY2`) to learn what closure meant (usually requester tested the URLs). Put that test request in the draft's Next.

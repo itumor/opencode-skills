@@ -109,3 +109,7 @@ Note: this kit patches the OS with its own `mw_os.sh` (plain `dnf -y update`), N
 - `uri` with `dest` + an existing file -> 304. Delete the file first for a real read.
 - boto3 inside the runner says "SSO expired" while the host CLI works (cached role creds) -> `aws sso login`. Check `~/.aws/sso/cache` `expiresAt` before the MW (need >= 2 h).
 - System check `Default Secret Encryption Key` was pre-existing on CAA; not caused by the upgrade.
+- replace-root-volume keeps the replaced root (`DeleteReplacedRootVolume=False`) -> orphaned 150 GB volumes. After the drills, list `describe-volumes --filters Name=status,Values=available` and delete them once snapshots cover them.
+- `create-snapshots --copy-tags-from-source volume` copies nothing when the source volume is untagged (a replaced root) -> the snapshot has no `Ticket` tag; tag it by hand so cleanup finds it.
+- Cleanup: schedule a one-time read-only reminder task (`scheduled-tasks`, fireAt = DeleteAfter + 1 day) that re-checks prod health and hands back deregister-AMI -> delete-snapshots -> rm host files. Never auto-delete.
+- Worklog: the harness R12 hook denies Jira POST; the user posts it (or the jira-routine ledger). Use `started` with `-0700`, and don't exceed 8 h/day.

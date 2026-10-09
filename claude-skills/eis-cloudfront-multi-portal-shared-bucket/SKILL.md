@@ -160,6 +160,10 @@ Reference: COEXT-110386, CAA upper/stage MR !184 (`pre.ca-caci-seguros.pt` / `pr
 
 **Expected first plan:** N× (distribution + OAC + spa-rewrite function + A/AAAA for the placeholder), `~` the bucket policy in place (it renders as all statements removed → `(known after apply)` because the new distribution ARNs are unknown; the real policy keeps every statement), and **zero** changes to the existing portal distributions.
 
+**ACM DNS-validation path (COEXT-110386 pivot, 2026-10-01; preferred when the customer agrees to publish CNAMEs):** no CSR, no key to store, no import. `aws acm request-certificate --region us-east-1 --validation-method DNS` with the `www.` hostnames (apex CNAMEs are illegal, so use `www.` and redirect the apex on the customer side). The customer publishes the validation CNAMEs in their zone. The cert goes ISSUED with no key on our side. Renewal is automatic. Wire it through Terraform with `eis-acm` (us-east-1 provider alias) only if its SAN and zone limits fit; see [[eis_module_contract_gaps_portals]].
+
+**Cutover check:** the cutover is ISSUED cert + tfvars swap (`external_alias`, `certificate_arn`), and it is done only when the MR is applied. Verify with `aws cloudfront get-distribution` `Aliases` and `ViewerCertificate`, then `curl --resolve` to the d* name. Plan shape should be `0 add / 4 change / 8 destroy` for a 2-portal + 2-DXP edge (4 distributions): 8 destroys are the placeholder A/AAAA records, and the d* targets don't change. Playbook and status: [[caa_customer_cutover_mr213_214]].
+
 ## Related
 
 - [[caa_pt_portals_csr_cloudfront]] — the live .pt instance of the customer-hosted-alias pattern

@@ -211,6 +211,7 @@ Goal: stop carrying the custom image. Strategy: **feature-request issue first (w
 
 | Symptom | Actual cause | Fix |
 |---|---|---|
+| `400 {"error":"invalid_request","error_description":"unknown app <app_id>"}` before any CyberArk login page | CyberArk tenant has no app with that ID (deleted/renamed/ID changed) - reproduce with `curl https://<tenant>.id.cyberark.cloud/<app_id>/.well-known/openid-configuration` (COEXT-111052, 2026-10-08) | CyberArk admin restores/recreates app; then update `issuer_url`+`client_id` in tfvars and the headlamp-oidc secret |
 | `{"error":"invalid_request","error_description":"invalid redirect"}` at /Authorize | redirect URI not whitelisted on the CyberArk app | register the exact `/oidc-callback` URL |
 | Callback `?error=access_denied&error_description=user not allowed access to app` | user not assigned to the CyberArk app / not in the AD groups | app assignment + group membership, wait for sync |
 | Headlamp log `invalid_grant "supplied code does not match known request"` after an access_denied callback | **red herring**: Headlamp ≤v0.44 never checks the `error` param and exchanges an EMPTY code | fix the access_denied; nothing is wrong with the exchange |

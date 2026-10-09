@@ -32,6 +32,7 @@ Pick **one** skill below from the trigger. Then open that skill’s `SKILL.md` a
 | OneSuite KT workshop / change-team walkthrough | `eis-onesuite-kt-workshop` |
 | Scaffold per-customer Ansible project | `eis-ansible-project-template` |
 | Cut client Terraform off shared Atlantis → EC2 Atlantis | `eis-client-atlantis-cutover` |
+| Change `argocd/argocd` `components/<c>/` (any component, all clusters) | `argocd-playground-first` |
 | Onboard EKS into multi-cluster Argo CD hub | `argocd-cluster-onboarding` |
 | Argo CD app stuck Failed / CRD race / hand-sync forever | `argocd-crd-race-and-stuck-apps` |
 | Red/slow `argocd` GitLab CI (render/pluto/checkov) | `argocd-ci-pipeline-diagnosis` |

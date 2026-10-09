@@ -20,6 +20,7 @@ Hard rules stay: the agent never applies, merges, pushes (guard) or posts to Jir
    `~/.claude/scripts/gate-watch.sh mr-note <repo> <iid> 'Ran Apply' <since-utc>` | `mr-merged <repo> <iid>...` | `domain <d> <profile> <region> <OpenSearch_X.Y>`.
 4. **On the watcher result, verify and continue without being asked**: run the verify commands for that service, diff against the before-state, write evidence to the state file, prepare the next step (branch, CI-local, MR), hand off the next sheet. Stop only at the next gate.
 5. **Update `~/.claude/change-runs/<ticket>.md`** after each step (template below) so a new session resumes from it. Tick the step `[x]` and REPLACE the single `next action:` line (never append a second one): `/next` (next-pane mod) reads exactly these; unticked steps showed COEXT-110747 as 0/7 after T1-T3 were done.
+   `change-runs/` is backed up to GitLab. Save raw command output (ansible, SSM, aws dumps) as `*.log`, `*.out` or `*.json`, which are gitignored there. Put only distilled evidence in the `.md`, and never paste an env block: an ansible role log carrying `NEXUS_DATASTORE_NEXUS_PASSWORD` stalled the backup on 2026-10-06.
 
 ## State file template
 ```

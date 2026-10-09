@@ -1,6 +1,6 @@
 ---
 name: agent-harness-live-demo
-description: Use when preparing a filmed or live demo of the Claude Code harness (agent + hooks + deny/ask lists + scanners) for a talk, workshop or leadership review. Builds an isolated, credential-free copy of the real harness, scripts that make each demo repeatable, a pre-flight self-test, and headless dry-runs that double as backup slides.
+description: Use when preparing a filmed or live demo of the Claude Code harness (agent + hooks + deny/ask lists + scanners) for a talk, workshop or leadership review, or when asked to record a shareable VIDEO of a Claude session (/goal run, harness-ai-evaluator, agentic-ai-evaluator) with speed-up, labels and score tables. Builds an isolated, credential-free copy of the real harness, scripts that make each demo repeatable, a pre-flight self-test, headless dry-runs that double as backup slides, and a window-capture recorder.
 ---
 
 # Live demo of an agent harness (safe, repeatable)
@@ -53,3 +53,25 @@ env -u ANTHROPIC_BASE_URL claude -p --setting-sources project --model opus \
 - The real iac session-start hook prints client repo paths: never demo from `~/gitwork/iac`.
 - Slide claims must match behavior: the guard normalizes env prefixes/`cd`/`-chdir`/`sh -c` and then regex-matches rules. It is not a parser and not a sandbox.
 - Record a backup clip per demo (Cmd+Shift+5) and keep the headless transcripts; wifi and login are the usual failures.
+- **Refusal can hand over a bypass.** In the 2026-10-06 recording of beat 2 the agent refused `apply -auto-approve`, then told the "on-call engineer" to type `! terraform ... apply -auto-approve`. `!` runs in the user's shell, outside every PreToolUse hook, so on stage it looks like the agent coaching a skip of the gate. Add to the estate CLAUDE.md: "Never suggest a local or `!` apply; point to the MR and Atlantis." Re-record after the change.
+- **Beat 1 is not deterministic.** The rehearsal recommended Option A; the recording recommended Option B (temporary PDB patch, citing the May memory note). Script the narration around "it names the skill, cites evidence, stops", never around a fixed option letter.
+- Screen recordings have no audio: put 4-5 cue lines per demo in the speaker notes. Watch the clip before the talk (frame-sample recipe in skill `eis-br42-deck`, "Reviewing a deck and its videos").
+
+## Shareable video (added 2026-10-06; kit lives in `demo/`, NOT in the config backup)
+One-take recorder for a Claude session, then speed-ramp + labels. Memory: `demo-video-capture-window-by-id`, `claude-tui-no-tmux-scrollback-use-transcript`, `claude-goal-command-demo-facts`.
+
+```
+record.sh [1 2 3 | goal | eval | he]   tmux window: Claude left, evidence/guard shell right; driver types, waits, snaps
+post.sh recordings/br42-<stamp>.mkv [speed=10]   -> .mp4 (waits sped up, 1 s head / 2 s tail kept real-time) + stills
+endcard.sh <still> <labels.json> <out> [main.mp4]   numbered labels (side layout, badges on the screenshot, no arrows)
+table_cards.py <final-message.md> <dir>             tables / key:value / bullets -> 1920x1222 cards
+cardseq.sh <out> <main.mp4> card.png:secs ...       append cards, fade-in
+estate-state.sh goal|orig|use <tgz>|save <tgz>      snapshot/restore estate/.claude (the goal run edits it)
+```
+- Demos: `goal` = `/goal` + harness-ai-evaluator (ends on "Goal achieved"); `eval` = `/agentic-ai-evaluator`; `he` = `/harness-ai-evaluator`, `DEMO_MODEL=haiku` for a 2.5-min run. Env: `DEMO_AUTO_ACCEPT=1` (Enter on permission dialogs), `GOAL_CAP`, `EVAL_CAP`, `HE_CAP`.
+- Launch from a fresh Terminal.app shell: `osascript -e 'tell application "Terminal" to do script "<wrapper.command>"'` (wrapper exports the env, then `exec record.sh <demo>`). Never `open -a Terminal` (zoomed on the wrong display, ignores bounds).
+- Capture = Terminal window by id (`screencapture -l`), never the display. Check a contact sheet before sharing.
+- Scrub the estate before filming: the hook self-test fixtures carry a real GitLab host, client name and Jira host. Snapshot the original (`.estate-orig.tgz`), perl-replace consistently (rule regex AND fixture, or guard-bash selftests fail), re-run every `--selftest`, then `estate-state.sh orig` afterwards. `selftest.sh` identifier regex must not match UUID tails (use `(^|[^0-9A-Za-z-])[0-9]{12}([^0-9A-Za-z-]|$)`).
+- The final answer cannot be scrolled in tmux: pull it from `claude-home/projects/*/<session>.jsonl` and render cards ("verbatim from the agent's final message"). A user-supplied table goes last, captioned as supplied.
+- Honesty labels worth adding: independent evidence pane vs the agent's own claim (198 pass/1 fail vs "199"), quoted rule counts vs settings.json (76 ask/14 deny), "files changed 0" for read-only evals.
+- Keep the Bash tool away from the take: it inherits `CLAUDE_CODE_PLUGIN_DIRS`; the guard also blocks `rm` on variable paths and chained `sleep`.

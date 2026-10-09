@@ -54,3 +54,12 @@ Not an OIDC fault. A redirect-URI, secret or group problem shows a CyberArk erro
 ## Related
 
 Memories: `cyberark-oidc-go-client-secret-trap`, `project_coext108018_headlamp_caa_uat`, `reference_headlamp-oidc-fqdn-pattern`. Skills: `atlantis-lock-troubleshooting` (locks), repo skill `atlantis-debug` (credit-agricole). Upstream tracking: headlamp#7064 — retire the custom image when merged.
+
+## Reverting a cluster to Cognito (CyberArk app removed/dead) - verified COEXT-111052, 2026-10-08
+
+Symptom: Headlamp login `400 unknown app <app>`; probe `https://<tenant>.id.cyberark.cloud/<app>/.well-known/openid-configuration` (tenant root 200, app 400). Three links must flip, in this order:
+1. **argocd** `clusters/<c>/oidc/values.yaml`: revert the CyberArk-names commit (bindings back to `exigengroup.com//S-1-5-21-...` SIDs).
+2. **infra/services secret**: TF does not see the out-of-band version, plan says "No changes" -> `atlantis plan -p lower-infra-services -- -replace='module.cognito[0].aws_secretsmanager_secret_version.this["<client>"]'`. Atlantis refuses commands on a merged MR: use a new MR with a comment-only tfvars change. Template `OIDC_SCOPES` must be `openid profile email` (Cognito rejects `groups` -> callback `invalid_scope`).
+3. **EKS IdP** (`lower/<stage>/services/terraform.tfvars`): `oidc_preset="cognito"` replaces the `oidc` block. Same trap 3 race in reverse: 409 leaves ZERO IdPs; wait for `aws eks describe-update` Successful, re-plan (1 add), re-apply.
+Then ESO force-sync annotation + `rollout restart deploy/headlamp` (deploy-guard needs the user's Proceed; use an isolated KUBECONFIG, default context may be another cluster).
+E2E without creds: `curl -I "https://<host>/oidc?cluster=main&dst=%2Fc%2Fmain"` -> 302 to Cognito with right client/redirect/scope; replay that URL -> 302 to `portal.sso...amazonaws.com/saml/assertion`; same URL with `groups` -> `invalid_scope` (negative control). User does the real login + pods page. Memories: `cyberark-unknown-app-headlamp-coext111052`, `cognito-client-scopes-no-groups`, `tf-secret-version-oob-drift-replace`.
