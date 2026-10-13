@@ -42,7 +42,8 @@ failures seen: <error> -> <what fixed it>
 | MR `pre-commit` CI job red with `early EOF` / `SSL_read: unexpected eof` on a module `git clone` | transient runner network: `glab api -X POST projects/<id>/jobs/<job>/retry`, watch the NEW job id; only dig in if it fails twice |
 | own Monitor/`glab api` poll loop times out silent while the event already happened | do not hand-roll it: use `gate-watch.sh mr-note <repo> <iid> 'Ran Plan' <since-utc>`. The hand-rolled loop piped `echo "$body"` into python under zsh (echo expands `\\n` in JSON strings -> invalid JSON) with errors swallowed by `2>/dev/null`, so a 2-minute plan was missed twice (10-min timeouts). Check the MR notes directly before re-arming |
 | SSO expired | ask user for `aws sso login --profile <p>` (only thing the loop cannot do) |
-| watcher timeout | report state with one command, do not poll in a tight loop |
+| watcher timeout | report state with one command, do not poll in a tight loop; a 4h `gate-watch.sh` cap expires overnight: re-arm with `GATE_MAX=2160` and chain the verifier (`gate-watch.sh ... && verify.sh`) so it only fires after the gate |
+| user marks the MR Draft / says "risky" | stop: comment the gate out of the gate sheet, set state-file `next action: WAIT for user decision`, offer minimal-scope / staged / skip options; never undraft or merge |
 
 ## Defaults instead of questions
 If a sensible default exists, take it and write `Assumed: X` in the reply and state file. Ask only if the answer changes cost, customer impact, scope or is irreversible. Questions this removes: scope/order, window (use `iac-apply-disruption-check` + owner approval pattern), branch/MR naming, which profile.

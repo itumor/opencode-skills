@@ -17,7 +17,7 @@ description: Use for ANY change to iac/argocd/argocd components/<component>/ (va
 3. **Gate: user merges MR1.** Arm `~/.claude/scripts/gate-watch.sh mr-merged <repo> <iid>` (skill `iac-change-loop`).
 4. **Wait for sync.** GitLab main -> CodeConnections mirror -> ArgoCD (~3 min + mirror lag). Proof = live object shows the new spec (args/env/image), not the MR state. Nudge only via the hub `app-of-apps` refresh annotation (rules/argocd.md).
 5. **E2E on pref-dev (T1).** Rollout complete, 0 restarts, no new errors in logs, the behavior itself works (metric/endpoint/log line that proves it), data inventory compare = PASS. Give time-based behavior a full cycle (e.g. Thanos: wait-interval + delete-delay, ≥60 min).
-6. **MR2, components/.** New worktree; apply the identical lines to `components/<c>/` (same render diff for one fleet cluster, e.g. aws0iacdeveks01). `git fetch` first so the guard sees MR1 on origin/main. MR2 description links MR1 + pref-dev E2E evidence. Disruption line names all clusters.
+6. **Fleet pre-check, then MR2.** Before MR2, run the data inventory `risk` on EVERY fleet bucket (context/profile/bucket map: memory `observascope-cluster-context-profile-bucket-map`) and put the per-cluster table in the MR. If the first sync does something irreversible (bulk purge, retention cut, storage delete), say so plainly, offer minimal-scope / 2-cluster-staged / skip options, and open MR2 as Draft until the user says go (GENESIS-428894: user held !464 Draft as too risky). **MR2, components/.** New worktree; apply the identical lines to `components/<c>/` (same render diff for one fleet cluster, e.g. aws0iacdeveks01). `git fetch` first so the guard sees MR1 on origin/main. MR2 description links MR1 + pref-dev E2E evidence. Disruption line names all clusters.
 7. **After MR2 merge:** spot-check 2 clusters live (one dev, one customer-facing) and record in the state file.
 
 FAIL at step 5 -> revert MR1, no MR2.
@@ -33,6 +33,9 @@ FAIL at step 5 -> revert MR1, no MR2.
 Thanos facts (from binary help, v0.39.2): `--delete-delay` only removes blocks already carrying `deletion-mark.json` (compaction sources with a replacement, or past retention); store-gateway `--ignore-deletion-marks-delay=24h` hides marked blocks from queries after 24h. `risk` before merge must report 0 marked in-retention blocks without replacement. Query probes need `storeMatch[]={__address__="<store addr>"}` or the sidecar's ~15d local TSDB masks bucket loss.
 
 ## Gotchas
+- `gate-watch.sh` caps at 4h (`GATE_MAX` polls x20s); overnight use `GATE_MAX=2160`. After the user merges by another route, the gate sheet prompt is stale: comment the gate out.
+- Post-merge verifier must take a FRESH pre-sync baseline (compaction runs overnight) right after the merge is detected, not reuse an old one.
+- GitLab pipeline flake `helm repo add https://charts.gitlab.io` on runner sfo-cvdevopsgitwork01: retry once (memory `argocd-ci-charts-gitlab-io-flake`).
 - Helm replaces lists: overriding any list (`extraFlags`, `args`, `tolerations`) in `components/<c>/values.yaml` must repeat the subchart defaults. Diff the rendered list, not the values file.
 - The two trees already differ in ~80 files; do not "sync" unrelated drift in either MR (scope rule). `scripts/ci/promote-playground-components.sh` copies the whole tree and would ship that drift: do not use it for a single change.
 - `render-all-helm.sh` locally: registry.scaleops.com 401 without `SCALEOPS_HELM_*`; park `clusters/*/scaleops` in the scratch clone only.

@@ -1,0 +1,11 @@
+{
+  "skillName": "twg",
+  "target": "global",
+  "installPath": "/Users/eramadan/.agents/skills/twg-confluence",
+  "binaryPath": "/Users/eramadan/.local/bin/twg",
+  "installedAt": "2026-10-12T09:55:48.639Z",
+  "installedVersion": "1.3.5",
+  "buildProfile": "external",
+  "buildCommit": "56b9b3472458",
+  "builtAt": "2026-10-02T10:24:09.523Z"
+}

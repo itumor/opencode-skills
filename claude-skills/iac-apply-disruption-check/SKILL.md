@@ -44,6 +44,7 @@ Watch/verify: `aws opensearch describe-domain-change-progress --domain-name <d>`
 | data node / UltraWarm node count | NONE (usually) | same doc |
 | **Engine version upgrade** | **BLIP** (Blue/Green; Dashboards may be unavailable for part or all of it) | same doc; no dry-run exists for upgrades — use `upgrade-domain --perform-check-only` for eligibility only |
 | service software update, instance type, dedicated master on/off, enable UltraWarm/cold, subnets/SG add-remove, advanced options, FGAC/encryption enable, audit logs enable | BLIP (Blue/Green) | same doc |
+| **Cognito options enable** (Dashboards sign-in) | BLIP (Blue/Green, 14m40s on 9-node aws11caashareos01) | live apply CAA !226 2026-10-09: change-progress "Creating a new environment / Copying shards"; not dry-run-able before the pools exist |
 | volume **shrink**, volume type change, **second** EBS change within 6 h of the last or while one runs | BLIP (Blue/Green) | same doc — space EBS edits >= 6 h apart |
 
 Single data node + no replicas (CAA UAT `aws0caatestos01`): AWS says search/index stay available during blue/green, but expect higher latency, some rejected requests and an endpoint cutover. State BLIP, schedule a quiet window, tell users of Dashboards (SAML login).
