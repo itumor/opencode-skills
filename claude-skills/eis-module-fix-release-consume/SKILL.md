@@ -74,6 +74,20 @@ for f in $(grep -rln "rev-list" --include=".gitlab-ci.yml" terraform/modules/aws
 done
 ```
 
+### `publish_release` fails with EGITNOPERMISSION (job token can't push to protected main)
+
+Log shows `Using Job Token for authentication` and `remote: You are not allowed to push code to this project` → 403 → `EGITNOPERMISSION`. Fix is a project token stored as `GL_TOKEN`, not code. Check first:
+
+```bash
+export GITLAB_HOST=sfo-cvdevopsgit01.eqxdev.exigengroup.com; unset GITLAB_TOKEN
+glab api "projects/<id>/variables" | python3 -c "import json,sys; print([(v['key'],v['protected'],v['masked']) for v in json.load(sys.stdin)])"
+```
+
+- No `GL_TOKEN` → a human creates it (Claude must not mint or store the token). Settings → Access tokens: role Maintainer, scopes `api` + `write_repository`, expiry set (GitLab default is ~1 month). Then Settings → CI/CD → Variables: `GL_TOKEN`, Protect ✔, Mask ✔, scope `*`. Link pattern: `<project-web-url>/-/settings/access_tokens` and `/-/settings/ci_cd`.
+- Job archived → `POST .../jobs/<id>/retry` returns 403. Start a new pipeline on main instead: `glab api "projects/<id>/pipeline" -X POST -f ref=main`. Its `publish_release` job runs once `pre-commit` passes; `play` may answer 400 "Unplayable Job" while the job is already running, so read the job log before retrying.
+- Log says `Found git tag vX.Y.Z ... Found 0 commits since last release` → nothing to release. Check `git ls-remote --tags origin`: the tag may already sit on HEAD. Not a failure.
+- Verify: log shows `Allowed to push to the Git repository`. Reference case: eis-lambda (id 1614), 2026-10-13.
+
 ## The consumer-bump plan review (the part that prevents outages)
 
 1. **Count adds/changes/destroys** and name every resource. Expected set only.
