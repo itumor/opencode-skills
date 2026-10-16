@@ -1,0 +1,21 @@
+{
+ "drop": ["D  Access-control", "E  Uncontrolled", "B  Loss of", "G  HW/SW", "Edge/application access logging", "CloudTrail (access/admin trace)"],
+ "drop_delta": ["B loss of control", "E uncontrolled interventions", "D access-control failure", "G HW/SW", "Lambda inventory", "CloudTrail event selectors", "Control Tower org trail", "Third-party processors/links"],
+ "add": [
+  ["REQ05", "B  Loss of control of media", "P", 85, "T L",
+   "EBS default encryption ON; all 54 RDS snapshots, the EBS snapshot and 2 instance snapshots encrypted and not shared; S3 public access blocked on 14/14; EKS Secrets envelope-encrypted with a CMK per cluster.",
+   "Core stores on AWS-managed keys (aws/rds, aws/ebs, SSE-S3 on 10/14 buckets, backup vault, 41/52 secrets). 1 unencrypted stage volume (prometheus PVC). Cross-region copies not checked (SSO expired mid-run).", "prod stage share"],
+  ["REQ05", "D  Access-control failure", "N", 80, "T L",
+   "0 IAM users, SSO + CyberArk SCA/SIA roles, both EKS endpoints private-only, RDS IAM auth, pod/node egress restricted.",
+   "MSK Unauthenticated enabled on prod AND stage (live). Jenkins role holds prod EKS cluster-admin and IMDS hop limit 2 lets containers reach its credentials. SSH/RDP from 10/8 + 192.168/16; 0/18 hosts under SSM. No Config recorder.", "prod stage share"],
+  ["REQ05", "E  Uncontrolled interventions", "N", 75, "T L",
+   "CloudTrail validated with Object Lock 365 d, GuardDuty, EKS audit logs; Atlantis needs approved+undiverged.",
+   "Detection is absent: 0 metric filters, 12 alarms (10 OpenSearch alarms with no action), 1 SNS topic with 0 subscribers, no GuardDuty/SecHub EventBridge routing, no Access Analyzer. GitLab allows self-approval and direct push to main. Prod Admin applied from a us-west-2 Atlantis host; its trust uses a weak \"*-*\" session-name condition.", "prod stage share"],
+  ["REQ05", "G  HW/SW failure vs BCP", "P", 75, "T L",
+   "Multi-AZ RDS, MSK 3 brokers, OpenSearch zone-aware with dedicated masters, 3+3 EKS nodegroups per env, deletion protection, backups 35 d / 90 d / 3 y.",
+   "Single region, no DR copy, 0 restore jobs ever, no Velero on prod EKS, upper clusters not in the ArgoCD repo. Share hosts atl01 / jnk03 / psm01 are single instances. Stage node groups lag prod by 2 minor releases.", "prod stage share"],
+  ["REQ15/16", "CloudTrail (access/admin trace)", "P", 90, "T L",
+   "aws11caasharetrail: multi-region, validated, CMK, Object Lock COMPLIANCE 365 d, delivering; org Control Tower trail also on.",
+   "Management events only: S3 and Lambda data events OFF (confirmed via get-event-selectors), S3 server access logging off 14/14, so no record of who read or deleted a backup or portal object. Org trail not CMK-encrypted. 365 d only.", "prod stage share"]
+ ]
+}

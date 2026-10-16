@@ -56,3 +56,10 @@ opensearch_cognito_options = each.value.cognito != null ? {
 ## 4. Module release traps
 - eis-cognito / eis-opensearch main pipeline goes red on the merge-commit lint after every MR merge -> `publish_release` skipped. Fix per run: `glab api -X POST "projects/<id>/pipeline?ref=main"` then play publish_release (memory gitlab-merge-commit-lint-ff-fix).
 - Local terraform-docs 0.24 vs pin 0.20: `python3 ~/.claude/scripts/tfdocs-regen-020.py`; the user sends eis-* module branches (agent pre-push hook fails terraform_docs).
+
+## 5. Verified 2026-10-09 (reference run)
+- Logins: eramadan 11:31, mzivarts 12:37 (pool users `sso_<email>`, EXTERNAL_PROVIDER). Aliaksei pending as of 10-14.
+- Blue/green on enable took 14m40s on the 9-node domain; plan it as BLIP.
+- Scripts used: `COEXT-109331-110965.cognito-appclient.sh`, `...indomain-cognito.sh`, `...verify-cognito.sh` (0 FAIL expected).
+- After login works, the shipper is a separate track: CI/CD (Jenkins, Aliaksei Kudzko). See memory [[caa-jenkins-hosts]].
+

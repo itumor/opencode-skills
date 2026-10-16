@@ -164,6 +164,8 @@ of the AWS console.
 Four answers change live state if left at their defaults. Pin them in
 `.copier-answers.yml` **first**:
 
+> **Check they exist first (2026-10-14):** none of these four keys is in `copier.yml` on main (V2.1.2). They came from the closed, unmerged MR !12. `grep -nE '^(image_registry|velero_deploy_node_agent|alb_use_target_group_list|grafana_ldap_enabled):' copier.yml` before you rely on this table. Same for `ci/check-lockstep.py` / `ci/check-duplicate-keys.py`: they are not on main. Main CI only renders `ci/mock-answers.yml` (unrendered markers + YAML parse). Also on main: three inert `validate:` keys (`copier.yml` lines ~31/60/100).
+
 | Answer | Risk |
 |---|---|
 | `image_registry` | Six clusters use the shared `sfoeisgennexus01-docker-group.exigengroup.com`, not the per-client Nexus. Default repoints **every image pull**. |
@@ -227,6 +229,8 @@ one workstation, and it carries five answers that no longer exist
 - Open the MR, **do not merge** — hand off for review (standing IaC gate).
 
 ## Related
+
+- Root `AGENTS.md` (MR !18, 2026-10-14): context for AI reviewers. Outside `_subdirectory: template`, so it is never rendered into clusters. Keep it in sync when review traps change.
 
 - [[argocd-clusters-template-lockstep]] — the hub-side mechanics
 - [[copier-validate-keys-inert]] — the Copier-9 validation trap
