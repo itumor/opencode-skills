@@ -44,3 +44,12 @@ Business app (e.g. policy-generic-app) busy hours = real test activity. Flat hea
 
 ## 5. Hand back
 Jira draft (caveman full): status line, checked list with numbers, reading, ask requester for: runner host/job URL, target base URL, start/end per run, per-test durations or stuck-test log. Never post it.
+
+## 6. "Deploy stuck / slower than onprem" variant (GENESIS-447154, 2026-10-22)
+Onprem Helm values can leak into AWS (`nfs-csi-sc` PVCs; AWS RWM class is `efs-sc`). Check before blaming nodes:
+```bash
+k get sc; k get pods -A --no-headers | grep -v -E 'Running|Completed'; k get pvc -A --no-headers | grep -v Bound
+k get sts,deploy,job,cronjob,pod -A -o json | grep -c 'nfs-csi'   # 0 = value comes from the deploy job's rendered values, not the cluster
+k get events -A --sort-by=.lastTimestamp --field-selector type=Warning | tail -15
+```
+Also compare like with like: a from-scratch AWS rebuild (DB prep, postgres, solr, deployer jobs) is not an onprem re-run. Jira read: `zsh -ic 'curl ... $JIRA_TOKEN ... -o file'` (memory `jira-token-location`).

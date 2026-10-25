@@ -134,7 +134,8 @@ lookup stable and the identity count low.
 
 CyberArk specifics live in memory `cyberark-sws-endpoint-vs-psm`: SWS + the Identity extension is the
 **endpoint** model (the laptop needs the route, recording happens in-browser, TOTP can be injected) and
-works with **any app type incl. third-party-IdP apps**; PSM is the **proxy** model (the PSM host needs
+works with third-party-IdP apps, **but CyberArk's docs name only Okta/PingFederate as supported IdPs,
+not IAM Identity Center** (re-checked 2026-10-21; IdC-fronted recording is UNPROVEN); PSM is the **proxy** model (the PSM host needs
 the route). Two limits to raise early: recording only covers portal-launched sessions, and **Argo CD API
 tokens bypass session recording entirely**.
 
@@ -232,6 +233,18 @@ flips back to `Synced` the new policy is already enforced — no extra propagati
 
 Reference delivery: NOJIRA-000, `argocd!375` (this AppProject change) paired with `eis-iac!19` (the
 capability-level `VIEWER` role mapping) — merged and live-verified 2026-09-01.
+
+## 7. New account or region (upper environments): facts checked 2026-10-21 (COINT-21561 / COINT-21577)
+
+- **Region:** the capability exists in every commercial EKS Region. Live endpoints `com.amazonaws.{eu-west-3,ap-northeast-1}.eks-capabilities` were checked.
+- **Price** (AWS Price List API, eu-west-3): $0.043299 per capability-hour + $0.002164 per Application-hour. That is about $126/month per customer at 2 clusters × 20 apps. The public pricing page shows us-east-1 only.
+- **Upgrades:** the lower hub ran `3.4.6-eks-1` while upstream was v3.5.5. AWS lags upstream by a minor version.
+- **Token cap and features:** admin account tokens max out at 5 per account, 12 h each, and cannot be disabled (`admin.enabled`/`accounts.*` are not supported keys). `argocd login --sso` is unsupported. syncWindows ARE supported.
+- **IdC account instance:**
+  - Our org instance `ssoins-7223b6f6cff32a78` was created 2021-07-20, before 2023-11-15. The IdC admin (EISHELP) must enable account instances, and no SCP may block them.
+  - No AWS doc says an account instance can use an external IdP; the identity-source-change procedure assumes an org instance. Treat CyberArk-on-account-instance as UNPROVEN, spike it first.
+  - CAA upper 144905517910 had no account instance on 2026-10-21.
+- **If CyberArk login is mandatory, the fallback is self-hosted Argo CD with OIDC direct to CyberArk** (Headlamp pattern, skill `headlamp-cyberark-oidc-integration`). Use an alphanumeric client secret, a PKCE CLI client on `localhost:8085`, and `admin.enabled=false`.
 
 Related skills: `argocd-cluster-onboarding`, `eis-idc-scoped-ssm-access`, `cyberark-eis-install`,
 `headlamp-cyberark-oidc-integration`.

@@ -11,7 +11,10 @@ import argparse, json, os, subprocess, sys, time, datetime
 PID = int(os.environ.get("ARMS_PID", "1630"))
 BASELINE = os.environ.get("ARMS_BASELINE", "pr-agent-tuned-coder")
 JOBS = {"S0": "pr-agent-tuned", "S1": "pr-agent-tuned-skills-org", "S2": "pr-agent-tuned-skills-org-argocd",
-        "S3": "pr-agent-tuned-skills-org-argocd", "S4": "pr-agent-tuned"}   # S3/S4 run with the rules blanked by temp project vars
+        "S3": "pr-agent-tuned-skills-org-argocd", "S4": "pr-agent-tuned",
+        "V1": "pr-agent-tuned-skills-v1-all", "V2": "pr-agent-tuned-skills-v2-all",
+        "V2R": "pr-agent-tuned-skills-v2-relaxed",
+        "EV": "pr-agent-evidence"}   # V2 + tools-first evidence block (2026-10-20)   # skills v1 vs v2 (2026-10-20)   # S3/S4 run with the rules blanked by temp project vars
 HERE = os.environ.get("ARMS_DIR", os.getcwd())
 ENV = {**os.environ, "GITLAB_HOST": "sfo-cvdevopsgit01.eqxdev.exigengroup.com"}
 ENV.pop("GITLAB_TOKEN", None)
@@ -45,6 +48,7 @@ def main():
     ap.add_argument("--mrs", required=True)
     ap.add_argument("--wave", type=int, default=5)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--restore-cfg", help="last wave: PUT this ci_config_path back once every arm job has started")
     a = ap.parse_args()
     job = JOBS[a.arm]
     mrs = json.load(open(a.mrs))
@@ -76,6 +80,15 @@ def main():
             if job not in c["jobs_at_creation"]:
                 print(f"  WARN pipeline {c['pipeline']} (MR {c['mr']}) has jobs {c['jobs_at_creation']}, not {job}")
         deadline = time.time() + 25 * 60
+        last = w is waves[-1]
+        while a.restore_cfg and last and time.time() < deadline:   # temp ci_config_path window (cfgwin pattern)
+            js = [j for c in created for j in glab(f"projects/{PID}/pipelines/{c['pipeline']}/jobs?per_page=50") if j["name"] == job]
+            if all(j["status"] not in ("created", "pending", "waiting_for_resource") for j in js):
+                glab(f"projects/{PID}", method="PUT", fields={"ci_config_path": a.restore_cfg})
+                out["cfg_restored"] = now()
+                print(f"{now()} last arm jobs started; ci_config_path restored, GET = {glab(f'projects/{PID}')['ci_config_path']!r}")
+                break
+            time.sleep(15)
         while time.time() < deadline:
             states = []
             for c in created:

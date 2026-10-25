@@ -32,3 +32,16 @@ Image shapes need `image.url` (https) and a top-level `stroke`. Verify each URL 
 - Don't put secret-looking text in labels (`token = X`): Bash output masks it and you must type the JSON into the call; grep the spec for `REDACT` before copying.
 - The share link is a separate call (`lucid_create_document_share_link`); documents are private until the user asks.
 - Posting the link to Jira is the user's job (hard rule); hand back a paste-ready comment.
+
+## Kubernetes + product icons (verified 2026-10-19, Nexus diagram 8821c7fa)
+- Lucid has NO Kubernetes or product library. Use image shapes (all checked 200 image/png):
+  - k8s resources: `https://raw.githubusercontent.com/kubernetes/community/master/icons/png/resources/labeled/<pod|sts|pvc|secret|job|sa|svc|ns|cm|pv>-128.png`
+  - CNCF: `https://raw.githubusercontent.com/cncf/artwork/main/projects/<kubernetes|argo|helm|istio>/icon/color/<name>-icon-color.png`
+  - products: `https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/<nexus|postgresql|hashicorp-vault|gitlab|docker|jenkins|microsoft-windows>.png` (check names in `.../metadata.json`; `nexus` alias nexus3 = Sonatype Nexus)
+  - External Secrets `https://raw.githubusercontent.com/external-secrets/external-secrets/main/assets/eso-logo-large.png`, Atlantis `https://raw.githubusercontent.com/runatlantis/atlantis/main/runatlantis.io/public/hero.png`
+- AWS: CodeConnections has no shape; use `ArchAWSCodeStarAWS2024` (CodeConnections = renamed CodeStar Connections). RDS PostgreSQL = `ResAmazonAuroraPostgreSQLInstanceAWS2024`, TGW `ArchAWSTransitGatewayAWS2024`.
+- One caption text shape per icon (title 15 px bold + detail 12 px) halves the shape count; attach DOWNWARD lines to the caption's bottom (`<id>t`), not the icon, or the arrow runs through its own caption.
+- `containerTitle` draws a tab ~50 px ABOVE the container (footprint y = box y - 50): keep headings above that or they get covered.
+- Line ids share the namespace with shapes (`p1_s3` line vs `p1_s3` shape = duplicate-id 400): prefix lines (`p1_L...`).
+- ~45 KB spec is fine to pass inline; fix small things after creation with basecanvasediting (moveBlock, resizeBlock, editLineEndpoint) instead of recreating.
+- Example generator: `gen_nexus_eks_example.py` (3 pages: architecture, sync order, identity/secrets).

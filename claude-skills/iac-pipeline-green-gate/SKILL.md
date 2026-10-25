@@ -13,7 +13,8 @@ description: >-
 **Rule.** An MR is not "ready" until its newest pipeline shows every job `success` and the MR reports
 `detailed_merge_status: mergeable`. Green Atlantis plan, green local `gitlab-ci-local`, or "only a known
 local failure" do NOT count. Never hand back an apply, ask for merge, or say "done" on a red or still-running
-pipeline. Name the pipeline id and job ids in the hand-back.
+pipeline. Same for unread bot feedback: PR-Agent Reviewer Guide + Code Suggestions for the head SHA must be read and
+triaged first (skill `mr-bot-feedback-loop`). Name the pipeline id and job ids in the hand-back.
 
 ## Loop (repeat until green)
 ```bash
@@ -49,4 +50,4 @@ pipeline (new sha), re-check. Poll with a loop that matches the real terminal va
   race) and written down.
 
 ## Hand-back line
-`Pipeline #<id> success (all <n> jobs), MR mergeable, head <sha7>.`
+`Pipeline #<id> success (all <n> jobs), MR mergeable, head <sha7>. PR-Agent: <n> items, <f> fixed, <r> rejected, <h> for you.`
