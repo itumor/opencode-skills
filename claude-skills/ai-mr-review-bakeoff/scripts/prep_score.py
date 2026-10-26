@@ -2,7 +2,11 @@
 """Blind the arm notes for the scorer: random cell letters, run-detail footers stripped (token counts would reveal
 which arm has skills). Writes score-input/cell-<L>.json + a PRIVATE blind-map.json (never given to the scorer) and
 metrics.json (tokens/time per arm from footers + job durations). usage: prep_score.py"""
-import json, os, random, re, glob
+import glob
+import json
+import os
+import random
+import re
 
 R = os.environ.get("ARMS_DIR", os.getcwd())
 os.makedirs(f"{R}/score-input", exist_ok=True)

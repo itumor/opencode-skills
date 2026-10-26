@@ -4,7 +4,11 @@ blanked by TEMPORARY project variables (project vars override job YAML vars); th
 usage: ARMS_DIR=<dir> run_norules.py
 EDIT the (arm, label, mrs) tuple in the `try:` block to the arms you need; the variable cleanup in `finally` is the point of this script.
 Keep the machine awake: `caffeinate -i python3 -I run_norules.py` (a sleep once stranded the temp vars for 45 min)."""
-import json, os, subprocess, sys, time
+import json
+import os
+import subprocess
+import sys
+import time
 
 R = os.environ.get("ARMS_DIR", os.getcwd())
 PID = int(os.environ.get("ARMS_PID", "1630"))

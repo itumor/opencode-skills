@@ -9,8 +9,12 @@ Runs the v1 core (analyze_v1_core.py) against raw payloads in RUN_DIR, then appl
 console overlay (live nodes, spot truth, STALLED detection, OOM note) and emits both
 cast_optimise_data.json and accuracy.json (numeric claims for scoring).
 """
-import argparse, json, os, runpy, sys
-from datetime import datetime, timezone
+import argparse
+import json
+import os
+import runpy
+import sys
+from datetime import UTC, datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 V1 = os.path.join(HERE, "analyze_v1_core.py")
@@ -90,7 +94,7 @@ def main():
         rows = rows if isinstance(rows, list) else [rows]
         c = next((r for r in rows if r.get("rank") == args.rank), None) or \
             next((r for r in rows if r.get("name") in (args.cluster, args.cluster.replace(" ", "-"))), None)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if c:
         es = data.setdefault("exec_summary", {"critical": [], "high": [], "medium": []})
         med, high = es["medium"], es["high"]

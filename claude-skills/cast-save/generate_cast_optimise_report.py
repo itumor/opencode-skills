@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
-import json, sys, os
+import json
+import os
+import sys
 from html import escape
-from datetime import date
-from reportlab.lib.pagesizes import letter
+
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.platypus import (
-    BaseDocTemplate, Frame, PageTemplate, PageBreak,
-    Paragraph, Spacer, Table, TableStyle, HRFlowable, KeepTogether,
+    BaseDocTemplate,
+    Frame,
+    PageBreak,
+    PageTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
 )
-from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
 # ── Brand palette (matches CAST AI cluster-readiness reports) ──────────────────
 CAST_BLUE   = colors.HexColor("#0669FD")

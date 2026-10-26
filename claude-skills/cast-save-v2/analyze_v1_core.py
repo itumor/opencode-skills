@@ -4,12 +4,15 @@ Reads raw CAST AI REST responses from the run dir and produces:
   1) console digest per skill sections (degraded where snapshot/loki unavailable)
   2) cast_optimise_data.json in the skill's Step-9a schema (for the PDF generator)
 """
-import json, math, os, re, sys
+import json
+import os
+import re
+import sys
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 RUN = sys.argv[1] if len(sys.argv) > 1 else "."
-NOW = datetime.now(timezone.utc)
+NOW = datetime.now(UTC)
 CLUSTER_ID = os.environ.get("CAST_SAVE_CLUSTER_ID", "1ad1a0bf-defe-4f51-acea-cbebb3d3fc3f")
 CLUSTER_NAME = os.environ.get("CAST_SAVE_CLUSTER_NAME", "ngm-integ-eks")
 
@@ -129,7 +132,7 @@ for w in workloads:
                       "node": node_refs[0] if node_refs else "—", "reason": "Not schedulable elsewhere"})
 
 evictor = {"window_start": "n/a (REST live view — Loki not accessible)",
-           "window_end": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+           "window_end": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
            "reconcile_cycles": 0, "blocked_nodes": blocked, "top_blockers": top_blockers,
            "evictions_completed": node_deletions, "cross_matches": cross}
 
@@ -438,7 +441,7 @@ print(f"  last: {lr.get('last_rebalance_date','-')} nodes {lr.get('nodes_before'
       f"cost ${lr.get('cost_before_hourly')}→${lr.get('cost_after_hourly')}/hr "
       f"≈ ${lr.get('cost_savings_monthly')}/mo ({round(lr.get('cost_savings_pct') or 0,1)}% cluster)")
 print(f"Old on-demand CAST nodes ≥30d (plan scope): {len(old_od)}")
-print(f"Health findings: " + ", ".join(f"{f['severity']}:{f['type']}" for f in findings))
+print("Health findings: " + ", ".join(f"{f['severity']}:{f['type']}" for f in findings))
 print(f"WOOP: managed={woop['total_checked']} ok={woop['ok']} warnings={woop['warnings']}")
 print(f"Exec: {len(critical)} critical / {len(high)} high / {len(medium)} medium")
 print("JSON written.")

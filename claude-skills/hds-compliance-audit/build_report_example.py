@@ -1,4 +1,8 @@
-import json, html, os, re
+import html
+import json
+import os
+import re
+
 SP = os.path.dirname(os.path.abspath(__file__))
 reqs = {r['REQ #'].replace(' ', ''): r for r in json.load(open(f'{SP}/hds_reqs.json'))}
 E = html.escape

@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """Collect the CI-bot notes of one arm: notes created in [arm start, arm end + 90 s] by the CI-job bot on each MR.
 usage: collect_arm.py arm-<label>.json mr-iids.json   -> arm-notes-<label>.json"""
-import json, os, re, subprocess, sys, datetime
+import datetime
+import json
+import os
+import re
+import subprocess
+import sys
 
 PID = int(os.environ.get("ARMS_PID", "1630"))
 CI_BOT_PREFIX = os.environ.get("ARMS_CI_BOT", "project_1630_bot_bf0327")      # CI-job reviewer bot (webhook bot is 36cf...)

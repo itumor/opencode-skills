@@ -9,15 +9,18 @@ savings) and reads v2 claims from accuracy.json. Scores both against truth-round
 Usage: score_accuracy.py --base BASE --manifest accuracy/runs.json \
         --truth console/truth-round2.json --out accuracy [--only RANK]
 """
-import argparse, json, os
-from datetime import datetime, timezone
+import argparse
+import json
+import os
+from datetime import UTC, datetime
+
 
 def pdt(s):
     if not s:
         return None
     for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %I:%M %p", "%Y-%m-%d %H:%M"):
         try:
-            return datetime.strptime(str(s), fmt).replace(tzinfo=timezone.utc)
+            return datetime.strptime(str(s), fmt).replace(tzinfo=UTC)
         except (ValueError, TypeError):
             continue
     return None
@@ -46,7 +49,7 @@ def v1_claims(rd, cluster_id):
     scheds = [s for s in (load(rd, "rb-schedules.json", {"schedules": []}).get("schedules") or [])
               if any(j.get("clusterId") == cluster_id for j in (s.get("jobs") or []))]
     events = ok + gplans
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     last_dt = pdt((ok[0] if ok else {}).get("finishedAt"))
     # v1 displayed "healthy" when the visible 10-event window had successes
     healthy = bool(ok and scheds) or bool(ok and len(events) <= 10)
@@ -91,7 +94,7 @@ def main():
         v1 = v1_claims(rd, m["cluster_id"])
         v2p = os.path.join(rd, "accuracy.json")
         v2 = json.load(open(v2p)) if os.path.exists(v2p) else None
-        t_age = ((datetime.now(timezone.utc) - pdt(t.get("lastWhen"))).days if pdt(t.get("lastWhen")) else None)
+        t_age = ((datetime.now(UTC) - pdt(t.get("lastWhen"))).days if pdt(t.get("lastWhen")) else None)
         t_healthy = bool(not t.get("never") and t_age is not None and t_age <= 3)
 
         def grade(claims):
@@ -124,7 +127,7 @@ def main():
     def pct(v):
         return f"{v * 100:.0f}%" if v is not None else "—"
     lines = ["# Accuracy score — cast-save v1 vs v2 (console = truth)",
-             f"Truth source: console.eu.cast.ai UI scrape (2026-10-21, second pass)",
+             "Truth source: console.eu.cast.ai UI scrape (2026-10-21, second pass)",
              "",
              "| # | Cluster | v1 accuracy | v2 accuracy | v1 misses |",
              "|---|---------|------------|------------|-----------|"]
