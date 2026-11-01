@@ -43,6 +43,12 @@ aws wafv2 get-logging-configuration --region us-east-1 --resource-arn <acl-arn>
 ```
 `WAFNonexistentItemException` = **no logging configured** (expected on all four ACLs as of 2026-10-08). That is a valid answer, not an access error.
 
+After COEXT-110654 (credit-agricole/terraform !262) is applied, expect `LogDestinationConfigs` = `arn:aws:s3:::aws-waf-logs-aws11caa<stage>waf-logs` and CloudFront standard logging v2 to `aws11caa<stage>cloudfront-logs` (eu-west-3):
+```bash
+aws logs describe-deliveries --region us-east-1   # CloudFront v2 vended-log deliveries
+```
+Also report `RedactedFields`: empty = `authorization`/`cookie` headers stored in S3 for 365 days (raised on !262 2026-10-26).
+
 ## 6. Report
 Give a table: ACL, rules and modes, geo, logging. Cite the command output. Mention doc drift: `docs/terraform/custom/portals-cloudfront-waf-shield.md` says 28 geo entries.
 

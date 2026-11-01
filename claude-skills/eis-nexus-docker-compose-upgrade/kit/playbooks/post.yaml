@@ -1,12 +1,23 @@
 ---
 # {{ ticket }} post-upgrade: rebuild search index task + docker layer pull (S3 read) via group :5000
-- hosts: nexus
+- hosts: "{{ target_hosts | default('nexus') }}"
   gather_facts: false
   vars:
     u: "https://{{ nexus_fqdn }}"
     np: "{{ lookup('community.hashi_vault.hashi_vault', 'secret=secret2/data/{{ project_name }}/automation/nexus:nexus_AdminPass') }}"
     mt: "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json"
   tasks:
+    # 3.97.0+ Pro: unacked or failing telemetry -> read-only after 45-day grace. 404 = endpoint absent (<3.97).
+    - name: acknowledge mandatory telemetry (3.97+)
+      ansible.builtin.uri: {url: "{{ u }}/service/rest/v1/system/mandatory-telemetry-acknowledgement", method: POST, user: admin, password: "{{ np }}", force_basic_auth: true, body_format: json, body: {acknowledgement: true}, status_code: [204, 404]}
+      register: ta
+      no_log: true
+    - name: status check (Baseline Telemetry)
+      ansible.builtin.uri: {url: "{{ u }}/service/rest/v1/status/check", user: admin, password: "{{ np }}", force_basic_auth: true, return_content: true}
+      register: sc
+      no_log: true
+    - ansible.builtin.debug:
+        msg: "telemetry_ack={{ ta.status }} baseline_telemetry={{ sc.json | dict2items | selectattr('key','search','(?i)telemetry') | items2dict }}"
     - name: existing tasks
       ansible.builtin.uri: {url: "{{ u }}/service/rest/v1/tasks", user: admin, password: "{{ np }}", force_basic_auth: true, return_content: true}
       register: tl

@@ -45,3 +45,16 @@ Image shapes need `image.url` (https) and a top-level `stroke`. Verify each URL 
 - Line ids share the namespace with shapes (`p1_s3` line vs `p1_s3` shape = duplicate-id 400): prefix lines (`p1_L...`).
 - ~45 KB spec is fine to pass inline; fix small things after creation with basecanvasediting (moveBlock, resizeBlock, editLineEndpoint) instead of recreating.
 - Example generator: `gen_nexus_eks_example.py` (3 pages: architecture, sync order, identity/secrets).
+
+## Method comparison deck (verified 2026-10-27, COINT-21594 doc aa6b9666)
+- Example generator `gen_methods_comparison_example.py`: page 1 = Standard Import `table` (rowCount/colCount/flat `cells` with per-cell fill) + recommendation boxes; one page per method via a `method_page()` helper (icons row + Result/Pros/Cons/Verdict boxes); last page = side path (image pulls).
+- Rectangle text is vertically centred: size note boxes to the text (~170 px for 3-4 lines at 13 px), or they look empty.
+- Keep a flow's actor next to its IAM role; a line that runs past another icon on the same row crosses it. Put the Secret/actor/consumer in an L, not one row.
+- A `containerTitle` tab (~50 px above) covers captions of icons placed just above the container: leave 60 px or move the container down.
+- Bash output also redacts `SecretSynced=False`-style text (word + `=`), and the redaction leaks into JSON you copy from it. Reword before generating; grep `REDACT` after.
+- Export each page PNG into the repo docs folder for Jira; build the doc as HTML with relative `<img>` and print to PDF with headless Chrome (`--print-to-pdf`, `--no-pdf-header-footer`).
+
+## Identity / SSO diagram (verified 2026-10-29, COINT-21591 doc 3e6180a4)
+- Icons (200 image/png): Keycloak `https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/keycloak.png`, Active Directory stand-in `.../png/windows-11.png` (`microsoft-windows.png` is 403; no AD icon), Entra `.../png/entra-id.png`, user `https://raw.githubusercontent.com/kubernetes/community/master/icons/png/resources/labeled/user-128.png` (no AWS "user" class in aws-2024/common).
+- Remove a colliding line label in place: `basecanvasediting.setText({itemId: '<line id>', text: ''})`. Add a missing arrow: `createLine({from:{kind:'block',blockId,connection:{x,y}}, to:{kind:'block',blockId:'<container id>',...}, label, shape:'diagonal'})` (containers are valid endpoints).
+- `resizeBlock` on a `table` widens all columns evenly (ColumnWidths not settable via basecanvasediting): keep evidence text short or accept clipping and put the full table in the PDF.

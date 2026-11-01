@@ -1,6 +1,6 @@
 ---
 name: harness-hardening-loop
-description: Use when asked to raise or re-score the iac Claude Code harness ("improve 88 to 90", "harden the guards", "run harness-ai-evaluator again", "work for an hour and send the score"). Runs a fan-out of file-disjoint subagents that fix reproducible gaps, then independent neutral + skeptic evaluators, with a fixed integration gate. Not for scoring other vendors (use harness-ai-evaluator alone).
+description: Use when asked to raise or re-score the iac Claude Code harness ("improve 88 to 90", "harden the guards", "run harness-ai-evaluator again", "work for an hour and send the score"), or to cut permission prompts without loosening gates ("iac needs babysitting", "always need to allow commands", "too many prompts", "trade off safety vs prompts"). Runs a fan-out of file-disjoint subagents that fix reproducible gaps, then independent neutral + skeptic evaluators, with a fixed integration gate. Not for scoring other vendors (use harness-ai-evaluator alone).
 ---
 
 # Harness hardening loop (iac harness at ~/.claude/harness/iac)
@@ -17,3 +17,15 @@ description: Use when asked to raise or re-score the iac Claude Code harness ("i
 7. **Report independent numbers**, list open items honestly (sandbox, indirection, allowlists). Slack: guard-mcp M1 denies sends and drafts even to self; hand back a file or paste-ready text instead.
 
 Details and the 2026-10-08 results: memory `harness-eval-20261008-independent-75-81`, `feedback-harness-hardening-subagent-pattern`.
+
+## Prompt-reduction pass (user: "too many prompts / babysitting")
+
+Lead the answer with one pick and one yes/no; the user re-asked 4 times on 10-28 when given menus.
+
+1. **Measure, don't guess.** MCP asks: `grep -oE '\] ASK(-MCP)? [A-Z][0-9]+' state/harness.log | sort | uniq -c | sort -rn`. Settings-rule asks are NOT in harness.log: count permission decisions in recent session transcripts (`~/.claude/projects/-Users-eramadan-gitwork-iac/*.jsonl`), group by command prefix. Expect a few bursty patterns to dominate.
+2. **Probe the hook layer offline:** `printf '%s\t%s\n' "$HOME/gitwork/iac" '<cmd>' | bash hooks/guard-bash.sh --decide-batch` -> deny|ask|allow. Include gate-bypass probes every time: `/merge` note body, `glab api ... -fbody=`, Bash write to `~/.claude/scripts/*`, write to `state/guards-off.*`.
+3. **Probe the settings layer:** headless `claude -p --permission-mode dontAsk --output-format json --model claude-opus-5-5` (JEV router override per memory `jev-router-breaks-headless-claude`), read `.permission_denials`.
+4. **Order:** close write-protection and quick-action holes first, then replace each repeated prompt pattern with a validated wrapper script (argv lists, no shell, path/flag denylist) + one exact-path allow. Never a generic "read-only" auto-allow hook (`sort -o`, `jq -n env`, `kubectl --server=` pass as reads), never Bash sandbox (breaks aws/kubectl/glab).
+5. **Live-fire both directions** for every rule: the wanted command no longer prompts, a bypass variant still denies. Update selftest rows in the same change so `selftest.ok` stamps.
+
+Memory: `permission-tradeoff-analysis-2026-10-28`, `claude-permission-modes-semantics`, `gitlab-quick-action-notes-bypass-merge-gate`.

@@ -1,6 +1,6 @@
 ---
 name: eis-account-vending
-description: Vend a new AWS account for an EIS client/POC environment using solutions/account-vending (Vending.py + StackSet_Management.py) — the "step 0" before scaffolding a Terraform project. Use when the user asks to "vend an account", "create a new AWS account", "onboard a new customer/POC", "account vending", or needs the 12-digit account ID that the generate-new-project / client copier template requires. Covers the EIS Org topology, the management-account-only CreateAccount gotcha, account.env setup, the venv requirement, IdC access grant, and the hand-off when you lack management-account creds.
+description: Vend a new AWS account for an EIS client/POC environment using solutions/account-vending (copier questionnaire + one idempotent vend.py since COINT-21667; legacy Vending.py + StackSet_Management.py) — the "step 0" before scaffolding a Terraform project. Use when the user asks to "vend an account", "create a new AWS account", "onboard a new customer/POC", "account vending", or needs the 12-digit account ID that the generate-new-project / client copier template requires. Also use for "run the account vending e2e tests", "--rename", "wrong prefix/OU after bootstrap", "SSO access pairs". Covers the EIS Org topology, the management-account-only CreateAccount gotcha, account.env setup, the venv requirement, IdC access grant, and the hand-off when you lack management-account creds.
 ---
 
 # EIS AWS Account Vending
@@ -12,6 +12,31 @@ only output that matters downstream is the **12-digit `account_id_default`** tha
 
 Reference run: **EISSAASDEV-302** (AXA Japan POC, `axajp`, 2026-06-17). See memory
 `account-vending-org-topology` for the canonical Org facts.
+
+## NEW FLOW (COINT-21667, MR !2 `feat/COINT-21667-single-idempotent-vend`; master after merge) — use this first
+
+Repo root `iac/solutions/account-vending`; operator doc = `RUNBOOK.md` there.
+```bash
+copier copy --trust "$PWD" accounts/<slug>                 # questionnaire -> accounts/<slug>/account.env (gitignored)
+python3 vend.py accounts/<slug>/account.env --dry-run      # read-only; checks prefix bucket name is free
+python3 vend.py accounts/<slug>/account.env                # account + OU + IdC SSO pairs + bootstrap StackSet
+```
+- Questions: org (eis|eis-pnt), customer (max 44), environment Lower/Upper (OU `SaaS/<env>`), email slug
+  (suggested `<customer>-<env>`, max 39 = AWS email 64 minus `eis-pnt-aws+`/`@eisgroup.com`), prefix, AWS profile,
+  region, SSO access pairs `GROUP:name=PermissionSet,...`, advanced (issue, account name, IdC region, OU, SSO on/off, role_default).
+- EIS default pairs (Markuss 2026-10-27): oc-team=AdministratorAccess, oc-team=ReadOnlyAccess,
+  aws_pnt_devops-support=CICDAccess, cloud-platform_adm=AdministratorAccess. Unknown group/set -> warning, skipped.
+- Runner auto-granted ONLY in eis-pnt; EIS org = must be in a granted group. CALL_AS=AUTO.
+- Guards (exit 1): prefix/BucketSuffix change after bootstrap (unless `--rename` and both buckets EMPTY),
+  RoleDefault change, OU move after bootstrap (auto-deployment would delete the stack), taken bucket name.
+- Recovery of a broken bootstrap: `CleanupStackSet.py --yes`, `DirectCleanup.py --yes` with a profile INSIDE the
+  account, then `vend.py`. Cleanup refuses blank ACCOUNT_ID (blank after `copier recopy`; run vend.py first).
+- Fix answers: `copier recopy --trust -d k=v accounts/<slug>`; advanced answers need `-d advanced=true` too.
+- Tests: `python3 vend.py --selftest` (stubbed); real E2E `tests/e2e.py` ONLY in eis-pnt (23 cases, ~12 min,
+  report accounts/e2e/report.md) — login + command in memory `eis_pnt_org_vending_testbed`.
+- First real EIS-org vend: Markuss or Aurimas (mgmt 455655288646 admin), `--dry-run` first.
+
+Sections 0-7 below = legacy two-script flow (still works with old env files).
 
 ## 0. The one gotcha that blocks everyone — read first
 

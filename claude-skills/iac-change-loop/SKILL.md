@@ -11,7 +11,7 @@ description: >-
 
 # Closed loop around human gates
 
-Hard rules stay: the agent never applies, merges, pushes (guard) or posts to Jira/Slack. The loop automates everything BETWEEN gates and makes each gate one cheap action for the user.
+Hard rules stay: the agent never applies, pushes (guard) or posts to Jira/Slack. Merge is allowed only via `python3 -I ~/.claude/scripts/mr-merge-gate.py merge <project> <iid>` after the user reports the apply done (approved + plan + `Apply complete!` + green pipeline + mergeable, else it merges nothing). An apply handoff needs an `Approval: APPROVED by <who> — !N — <evidence>` line (handoff-gate) and is proposed only once the MR is Approved on the current head. The loop automates everything BETWEEN gates and makes each gate one cheap action for the user.
 
 ## The loop (per step)
 1. **Do** all non-gated work (code, local CI, MR open, plan read). Cite evidence.

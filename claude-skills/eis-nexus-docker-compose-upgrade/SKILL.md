@@ -1,6 +1,6 @@
 ---
 name: eis-nexus-docker-compose-upgrade
-description: Runbook + kit to upgrade a Sonatype Nexus running as docker compose on an EIS EC2 host (aws0<code>nexus01, role cv-devops docker_compose_nexus) to a new 3.x version, with OS dnf update + reboot, for ANY client. Use when a ticket says "Nexus security update / update to 3.9x+", "Sonatype Nexus Upgrade <client> <quarter>", "patch Nexus", or a client must adopt docker_compose_nexus v2.x. Ships IID-guarded SSM scripts (backup, OS, verify, restore), clone/E2E/post-task playbooks and a group_vars example. Covers recon, upgrade path, role v2 default traps, isolated clone dry-run, backup/restore drills, dnf docker-upgrade outage trap, MW execution, E2E proof. Reference: COEXT-106742 (CAA 3.91.1 -> 3.96.4, done 2026-10-02, MR !17).
+description: Runbook + kit to upgrade a Sonatype Nexus running as docker compose on an EIS EC2 host (aws0<code>nexus01, role cv-devops docker_compose_nexus) to a new 3.x version, with OS dnf update + reboot, for ANY client. Use when a ticket says "Nexus security update / update to 3.9x+", "Sonatype Nexus Upgrade <client> <quarter>", "patch Nexus", or a client must adopt docker_compose_nexus v2.x. Ships IID-guarded SSM scripts (backup, OS, verify, restore), clone/E2E/post-task playbooks and a group_vars example. Covers recon, upgrade path, role v2 default traps, isolated clone dry-run, backup/restore drills, dnf docker-upgrade outage trap, MW execution, E2E proof. Reference: COEXT-106742 (CAA 3.91.1 -> 3.96.4, done 2026-10-02, MR !17); COEXT-112039 (CAA 3.96.4 -> 3.97.3, done 2026-10-30, MR !23, ~11 min downtime).
 ---
 
 # Nexus (docker compose) upgrade: runbook
@@ -24,6 +24,7 @@ kit/playbooks/wait.yaml        waits for the rebuild task; summarises Nexus ERRO
 kit/playbooks/e2e-vars.example.yml   per-client repo names, image, LDAP user
 kit/group_vars.nexus.yaml.example    CAA overrides (start here, adapt to the live inventory)
 ```
+e2e/post/wait take `-e target_hosts=<inventory host>` (default group `nexus`); clone = its sandbox host name, prod = `--limit`-style host name.
 Put the playbooks in the client ansible repo root, but git-exclude them (`.git/info/exclude`); they are not for the MR. Run them with `-e @e2e-vars.yml`.
 
 ## Gates and roles
@@ -44,6 +45,9 @@ Put the playbooks in the client ansible repo root, but git-exclude them (`.git/i
 ## Phase 2: Version
 - Release notes: help.sonatype.com/en/nexus-repository-2026-release-notes.html. Paths: .../nexus-repository-upgrade-paths.html. 3.91 -> 3.96 is direct; Java 21 from 3.87. Pick the latest patch (3.96.4 on 09-30).
 - Skip 3.94.x (NEXUS-54717). 3.92+ = SSRF protection: private upstreams break without an allowlist.
+- 3.97.x (2026-10): 3.97.2+ drops eMudhra root trust (CA-compromise tickets want >= 3.97.3). Skip 3.97.0 (PG `deleted_on` migration bug). 3.97.1+ stops audit-event persistence (fixes 3.96 `audit_events` growth).
+- **3.97+ Pro mandatory telemetry:** admin ack `POST /service/rest/v1/system/mandatory-telemetry-acknowledgement {"acknowledgement":true}` -> 204, AND egress to `nxrm.telemetry.sonatype.com`; else 45-day grace then READ-ONLY. Recon: `curl` that host from the nexus container (any HTTP code = reachable). `kit/playbooks/post.yaml` does the ack + prints `status/check` "Baseline Telemetry" (expect Active). Before the ack, e2e syscheck lists 'Baseline Telemetry' unhealthy: expected.
+- Patch bump with no role-default change (same role tag): role run is `changed=3`, diff = image tag only.
 
 ## Phase 3: Role v2.x overrides (`inventory/group_vars/nexus.yaml`, see kit example)
 v2 reconciles everything on every run, and its defaults describe a FRESH install:
@@ -111,5 +115,7 @@ Note: this kit patches the OS with its own `mw_os.sh` (plain `dnf -y update`), N
 - System check `Default Secret Encryption Key` was pre-existing on CAA; not caused by the upgrade.
 - replace-root-volume keeps the replaced root (`DeleteReplacedRootVolume=False`) -> orphaned 150 GB volumes. After the drills, list `describe-volumes --filters Name=status,Values=available` and delete them once snapshots cover them.
 - `create-snapshots --copy-tags-from-source volume` copies nothing when the source volume is untagged (a replaced root) -> the snapshot has no `Ticket` tag; tag it by hand so cleanup finds it.
-- Cleanup: schedule a one-time read-only reminder task (`scheduled-tasks`, fireAt = DeleteAfter + 1 day) that re-checks prod health and hands back deregister-AMI -> delete-snapshots -> rm host files. Never auto-delete.
+- `create-snapshots --copy-tags-from-source volume` + a `Name` key in `--tag-specifications` fails `InvalidParameterCombination: Tag (Name) is already defined` when the volume is Name-tagged: drop `--copy-tags-from-source`.
+- Host backup dir = `/root/${TICKET,,}` (e.g. `/root/coext-112039`; 106742 used `/root/coext106742`). Holds dump (~580M), /opt tgz, dnf log, boot_id.pre.
+- Cleanup default: one-time read-only reminder task (`scheduled-tasks`, fireAt = DeleteAfter + 1 day) that re-checks prod health and hands back deregister-AMI -> delete-snapshots -> rm host files. Never auto-delete **unless the user asks**; then copy `~/.claude/change-runs/COEXT-112039/cleanup.sh` (`--dry-run|--apply`; guards: SSO valid, prod nexus 3.97.x Up + writable 200, each resource still `Ticket`-tagged, clone Name match; deletes clone -> AMI -> snaps -> host files non-recursively), dry-run it now, schedule a one-time task that dry-runs then applies. SSO will be expired at fire time: task pushes "aws sso login, then Run now".
 - Worklog: the harness R12 hook denies Jira POST; the user posts it (or the jira-routine ledger). Use `started` with `-0700`, and don't exceed 8 h/day.

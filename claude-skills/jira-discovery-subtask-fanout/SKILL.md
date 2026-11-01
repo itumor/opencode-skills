@@ -58,5 +58,15 @@ Say this up front so nobody expects Claude to write the issues. Memory: `feedbac
 - **Agents' facts beat the brief:** they re-verify live. Merge their corrections into the parent (e.g. D-21 PrivateLink replaced, GitLab CE has no enforced approvals).
 - **Parallel agents:** 7 ran in parallel without conflicts. Each took 10-23 min and 250-370k tokens.
 - **`chk-*.png` and other helper files** in `P<n>/` are not attached, because only `P<n>.md`, `P<n>.pdf` and `P<n>-*.png` are picked up.
+- **Versioned docs:** `P<n>-v2.md` / `.pdf` are picked up too (`P<n>-v*.md/pdf`, added 2026-10-21).
+- **Never hard-code N in a publisher.** A scratch copy looped `range(1, 8)` and silently skipped P8–P10 while reporting "payloads missing: none". Use `jira-subtask-publish.py`, which enumerates `P\d+` dirs. Check the dry-run count against what you expect.
+- **Changing what was published (decisions arrive later):**
+  - Prepend a dated block (`h2. Decision <date>: ...`, newest on top, "below is history") instead of rewriting the analysis.
+  - Use exact-string, idempotent scripts with a `.bak-<tag>` copy per round.
+  - Read the file fully BEFORE `open(p, "w")`: `open(p,"w").write(f(open(p).read()))` truncates first and reads empty. This emptied the parent description once; it was rebuilt by hand.
+- **Subagents over-research:** 3 POC agents ran 2.5 h with zero deliverables. A "stop, write what you have, mark gaps UNPROVEN, done in 25 min" message unstuck them. Put a timebox and "write the doc skeleton first" in the brief.
+- **After the discovery: running sessions per sub-task.** The wayfinder local-markdown map works: `iac/.scratch/<effort>/map.md` + `issues/NN-*.md`, with Jira as a mirror the user publishes, because R12 blocks claim/comment/close in Jira. Decided sub-tasks go under "Decisions so far". Only frontier tickets get sessions; external requests are HITL task tickets for the user.
+  - **The map goes stale.** Sessions that work a sub-task without being pointed at the map never update it (COINT-21561: 5 tickets were done outside it, 10-21..27). Put "update `.scratch/<effort>/issues/NN` + map Decisions-so-far when done" in every brief. Before answering "what's next", reconcile from memory notes, Jira statuses, MR states and live checks.
+  - **Answer check gotcha:** ticket bodies say "recorded in `## Answer`", so `"## Answer" in text` is always true. Match the heading line: `re.search(r"^## Answer\s*$", t, re.M)`.
 
 Related: `lucid-aws-architecture-diagram`, `eis-jira-rest-ops`, memory `coint21561_argocd_upper_discovery`.

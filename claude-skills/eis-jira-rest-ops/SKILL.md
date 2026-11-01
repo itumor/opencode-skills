@@ -24,6 +24,7 @@ description: Use when transitioning, logging or editing worklog time, commenting
 | Delete a worklog | `DELETE /issue/{KEY}/worklog/{worklogId}` → 204 |
 | Find own worklogs by date | `GET /search?jql=worklogAuthor = currentUser() AND worklogDate >= 2026-06-06 AND worklogDate <= 2026-06-08` → issues; then GET each issue's worklog list and filter `author.name` |
 | Attach file | `POST /issue/{KEY}/attachments` multipart, header `X-Atlassian-Token: no-check`, field `file` → 200 |
+| Attach file once (replay-safe) | `~/.claude/scripts/jira-attach-once.sh KEY file...` skips names already attached; attach BEFORE the comment that links `[^name]` |
 | **Total effort on an epic/story** | `GET /issue/{KEY}?fields=timespent,aggregatetimespent` — `timespent` = that issue only; **`aggregatetimespent` = issue + all sub-tasks** (the number you want when quoting a whole workstream) |
 | **Who burned the hours** | `GET /search?jql=parent={KEY} AND timespent>0 ORDER BY timespent DESC&fields=summary,timespent,status` — splits OUR hours from other teams' sub-task hours |
 

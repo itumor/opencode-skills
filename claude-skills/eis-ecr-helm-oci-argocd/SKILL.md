@@ -1,6 +1,6 @@
 ---
 name: eis-ecr-helm-oci-argocd
-description: Use when Helm charts must come from private Amazon ECR instead of Nexus (OCI artifacts), when the EKS-managed Argo CD capability must pull an `oci://` chart or chart dependency, or when GitLab CI helm jobs fail on an ECR dependency (`no basic auth credentials`, `helm repo add` on oci://) or GitLab OIDC to AWS returns InvalidIdentityToken. Covers repo creation, chart push, playground wrapper chart, E2E proof, CI login with a pull-only IAM user, key rotation. Reference GENESIS-429536 (iac !27/!28/!29, argocd !467).
+description: Use when Helm charts must come from private Amazon ECR instead of Nexus (OCI artifacts), when the EKS-managed Argo CD capability must pull an `oci://` chart or chart dependency, or when GitLab CI helm jobs fail on an ECR dependency (`no basic auth credentials`, `helm repo add` on oci://) or GitLab OIDC to AWS returns InvalidIdentityToken. Covers repo creation, chart push, playground wrapper chart, E2E proof, CI login with a pull-only IAM user, key rotation. Also: self-hosted Argo CD ECR auth methods (ESO generator, CronJob, helper, proxy, CMP), multi-source ECR chart + git values, node-role image pulls and ECR pull-through cache (PullOnly, creation role). Reference GENESIS-429536 (iac !27/!28/!29, argocd !467); COINT-21594.
 ---
 
 # Helm charts in ECR for Argo CD capability and GitLab CI
@@ -40,6 +40,17 @@ Package into the scratchpad, never the repo. Never print the token.
 - Push for the publisher, no key from us: managed policy `aws0iacdevhelm-charts-ecr-push` (push + verify, NO delete, immutable tags) + push-only user `aws0iacdevhelm-charts-ci-ecr-push-user` (0 keys; publisher mints into masked + protected vars of their chart pipeline, rotates ~90d). Person route: OPS attaches the managed policy to their Identity Center permission set (EISHELP; no people/groups in Terraform). `aws_iam_policy` is raw with `# eis-raw-ok` (aws_iam_ gap). Hand the publisher: registry login + `helm push <chart>-<ver>.tgz oci://<acct>.dkr.ecr.us-west-2.amazonaws.com`, one push per version.
 - Verify live after apply: repos IMMUTABLE/KMS/lifecycle, push policy has no delete action, push user 0 keys, pull role + user list all repo ARNs.
 
+### 5a. Publisher CI push step (oac/helm dual publish, designed 2026-10-20)
+- Reference: handover doc https://claude.ai/code/artifact/9ae3fcfd-065b-4994-b339-85951b6721fb, working CI in `eramadan/oac-helm-ecr-test` on dev2eisgengit02 (memory `oac-helm-ecr-push-handover-2026-10-20`). Append to the existing publish template AFTER the Nexus upload; never replace Nexus.
+- Step = one YAML anchor `.push_ecr: &push_ecr |` running in a `( ... )` subshell, used as `- *push_ecr`. Rules it encodes:
+  - **Allowlist `ECR_HELM_CHARTS`**, not error sniffing: the push policy grants `DescribeImages` only on listed repo ARNs, so a chart without a repo returns `AccessDeniedException`, not `RepositoryNotFound`.
+  - **Immutable tags:** `aws ecr describe-images --image-ids imageTag=$VER` success = skip; `ImageNotFoundException` = push; any other error = exit 1 (bad key must fail loud, never skip).
+  - No creds visible (unprotected branch) = skip, exit 0.
+  - Shell runners are shared hosts: `helm registry login/push --registry-config $(mktemp)` + trap rm; AWS env exported only inside the subshell.
+  - Chart name/version from `helm show chart "$TGZ_FILE"`; repo name = chart name, `helm push "$TGZ_FILE" oci://<registry>`.
+- Key: minted by us straight into the publisher's masked + protected vars (`aws iam create-access-key ... | python3 -I` -> `glab variable set NAME --masked --protected -R <proj>` via stdin), never printed or sent in chat. Test the stdin path first with a dummy var.
+- Before the first real push: runner probe (helm >= 3.8, `aws` v2 or docker fallback `amazon/aws-cli`, curl api.ecr / `<registry>/v2/` 401 / s3 us-west-2), and lint the whole patched CI via `POST projects/<id>/ci/lint`.
+
 ## 6. Keyless CI (BUILT 2026-10-13, preferred; key path kept as an option)
 GitLab is an on-prem VM (not on AWS), so OIDC fails; the keyless route is IRSA on a runner inside the hub EKS.
 - Pieces: eis-iac !31 (IRSA role `aws0iacdeveks01-gitlab-ci-ecr-pull-Role`, `irsa_custom` entry + `iam/eks/gitlab-ci-ecr-pull.json`), argocd !472 (SA `gitlab-ci-ecr-pull`, `ciEcrPull` values), !474 (project runner component `gitlab-runner-argocd`), !475/!476 (`ecr-login.sh` prefers web identity; jobs `tags: [eks-irsa]`).
@@ -52,6 +63,15 @@ GitLab is an on-prem VM (not on AWS), so OIDC fails; the keyless route is IRSA o
 - Docs: Claude Doc (above) + markdown copy `argocd/argocd` `docs/ecr-helm-charts-access.md` (MR !478; the repo `.gitignore` allowlists docs one by one, add `!/docs/<name>.md`). Keep both in sync; the user wants the old zone-style architecture diagram (memory `feedback-architecture-diagram-zone-layout`).
 - Diagrams: Claude Doc diagram (zone layout) and a Lucid AWS-icon version https://lucid.app/lucidchart/5be91c12-0af1-47c4-b548-cba238bfce20/view (recipe: skill `lucid-aws-architecture-diagram`). User posts the Jira comment; hand back paste-ready text.
 - Pull-key + key variables are KEPT as an option (user decision 2026-10-13); do not delete them without an explicit go.
+
+## 7. Self-hosted Argo CD + ECR methods and image cases (COINT-21594 POC-D, pref-dev, 2026-10-23..26)
+- Methods green on every chart case (a git wrapper + oci dep, b Helm source, c `oci://`, C4 multi-source ECR chart + git `$values`): **E1 ESO ECRAuthorizationToken generator (recommended; Markuss agreed 2026-10-27, manager approval asked)**, E2 CronJob refresher (plan B), E4 loopback proxy (not recommended). Diagram: Lucid aa6b9666-f5d6-42c1-94d4-6f37136e6965 (private: share before linking). ESO has no CodeCommit generator (upstream ask external-secrets#7191), so this pattern does not cover CodeCommit git repos. E3 credential helper fails case c (no Docker-config fallback for OCI source). E8 CMP = case a only. Page https://claude.ai/artifact/3TdEw4LHtRbDHRnixX8kh7, evidence iac/docs/COINT-21594-poc-d-evidence.md.
+- C4 per method: `sources[0]` = that method's case-b `repoURL` + `helm.valueFiles: [$values/<path>]`, `sources[1]` = git repo with `ref: values`.
+- Container images are pulled by kubelet with the node role (not Argo). Same-account private image: ReadOnly is enough. ECR pull-through cache (e.g. `ecr-public` -> public.ecr.aws): node roles need **AmazonEC2ContainerRegistryPullOnly** (BatchImportUpstreamImage), and eis-ecr `pull_through_cache` needs `repository_creation_role_arn` (template sets KMS/tags). Proof: CloudTrail CreateRepository by `<role>/ECRPullThroughCacheWithTemplate`, BatchImportUpstreamImage without error.
+- Expected-fail test resources go in the LAST sync wave, else the hub stalls before later waves.
+- After a credential outage, case-a apps keep Argo's manifest-error cache (pause after 3 fails, up to 60 min): hard refresh. Cases b/c heal on next reconcile.
+- A new app on an already-pulled chart version may render from the repo-server cache with no registry call: don't count it as credential proof.
+- Seed pushes to CodeCommit over HTTPS: `git -c credential.helper= -c credential.helper=<aws helper>` (keychain helper 403).
 
 ## Gotchas
 - **Vendored charts (pyrra, observascope-*):** if `components/<c>/charts/<dep>/` is committed, Argo renders the vendored copy. Switching only `repository:` to `oci://` is then a CI-only change (`helm dependency build` source), with zero render diff. To really move the chart to ECR, also delete the vendored dir in the same playground MR, then prove Argo fetched from ECR (app Synced/Healthy, render diff = 0). Check first: `git ls-tree -r --name-only origin/main components/<c>/charts | head`.

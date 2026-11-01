@@ -1,6 +1,6 @@
 ---
 name: ec2-idle-host-decommission
-description: Prove an EC2 instance is unused, then decommission it safely (snapshot, terminate, Route53 cleanup, rollback record, Jira cost-change fields). Use when someone asks "do you need this EC2?", "X has been running since <date>, can we decommission?", "is anyone using this sandbox/clone/upgrade host?", flags an idle/forgotten instance, or a ticket asks to terminate a non-Terraform host. Covers read-only AWS + on-host evidence, stop-then-wait, shared-SG trap, stale DNS of sibling hosts, and savings math. Not for Terraform-managed stages (use fv-cluster-decommission).
+description: Prove an EC2 instance is unused, then decommission it safely (snapshot, terminate, Route53 cleanup, rollback record, Jira cost-change fields). Use when someone asks "do you need this EC2?", "X has been running since <date>, can we decommission?", "is anyone using this sandbox/clone/upgrade host?", flags an idle/forgotten instance, or a ticket asks to terminate a non-Terraform host. Covers read-only AWS + on-host evidence, stop-then-wait, shared-SG trap, stale DNS of sibling hosts, and savings math. Not for Terraform-managed stages (use tf-ec2-host-decommission for a Terraform-managed host, fv-cluster-decommission for a whole stack).
 ---
 
 # EC2 idle host decommission

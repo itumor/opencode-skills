@@ -1,6 +1,6 @@
 ---
 # E2E checks (read + proxy-cache only). Run: --limit <prod host> -e @e2e-vars.yml (run BEFORE upgrade = baseline, AFTER = compare)
-- hosts: nexus
+- hosts: "{{ target_hosts | default('nexus') }}"
   gather_facts: false
   vars:
     u: "https://{{ nexus_fqdn }}"

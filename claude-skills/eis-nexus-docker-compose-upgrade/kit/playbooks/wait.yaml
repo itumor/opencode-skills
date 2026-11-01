@@ -1,5 +1,5 @@
 ---
-- hosts: nexus
+- hosts: "{{ target_hosts | default('nexus') }}"
   gather_facts: false
   vars:
     u: "https://{{ nexus_fqdn }}"
