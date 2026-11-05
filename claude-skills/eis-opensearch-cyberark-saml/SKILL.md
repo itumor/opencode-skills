@@ -57,15 +57,16 @@ In-domain check (master role): `req GET /_plugins/_security/api/securityconfig` 
 
 ## 5. FGAC roles (in-domain, master role, runbook - not Terraform)
 - Admin: nothing to do; SAML `master_backend_role` maps the admin group to `all_access` (+ security_manager).
-- Readers (client + developers): one role per stage, app logs only. Shipper must write `<stage>-<cluster>-app-*` and `<stage>-<cluster>-infra-*`; template/ISM/shipper roles on `<stage>-<cluster>-*` cover both.
+- Readers (client + developers): one role per stage, app logs only. **Take the pattern from live index names, not from a design doc**: `_cat/indices?h=index` (strip the date). The cd-common Logstash writes `<stage>-<cluster>-<ns>-application-*`, `<ns>-dependency-*`, `infrastructure-*`; CAA shipped `-app-*` (matched nothing, readers saw 0 logs until 2026-11-03, MR !281). Check the new pattern against the families (fnmatch) before PUT. Template/ISM/shipper roles on `<stage>-<cluster>-*` cover all families.
 ```json
 {"cluster_permissions":["cluster_composite_ops_ro"],
- "index_permissions":[{"index_patterns":["stage-<cluster>-app-*"],"allowed_actions":["read","indices:admin/mappings/get","indices:admin/resolve/index"]}],
+ "index_permissions":[{"index_patterns":["stage-<cluster>-*-application-*"],"allowed_actions":["read","indices:admin/mappings/get","indices:admin/resolve/index"]}],
  "tenant_permissions":[{"tenant_patterns":["global_tenant"],"allowed_actions":["kibana_all_read"]}]}
 ```
-  Map `log_reader_<stage>` -> `{"backend_roles":["elk_<proj>-<stage>_r"]}` and both read groups to `opensearch_dashboards_read_only` (read-only UI). **Not** `opensearch_dashboards_user` (grants `kibana_all_write` on global tenant).
+  Map `log_reader_<stage>` -> `{"backend_roles":["elk_<proj>-<stage>_r"]}` and nothing else. **Never** map readers to `opensearch_dashboards_read_only`: on AWS it is the `readonly_mode` role, security-dashboards-plugin marks every app except home/dashboards/overview `inaccessible` (Discover only with `allow_discover`, not settable on AWS) -> readers see only "Dashboards" in the nav (CAA 2026-11-04). Read-only global tenant comes from `kibana_all_read` in the role itself. **Not** `opensearch_dashboards_user` either (grants `kibana_all_write` on global tenant).
 - Apply with `req PUT /_plugins/_security/api/roles/<name> <file>`; read back (server adds empty `fls`/`masked_fields`). Keep the JSON + runbook step in the repo (CAA: `docs/terraform/custom/opensearch/`, runbook step 7) - docs MR, no Atlantis plan.
 - The auto-mode classifier may deny in-domain writes ("Modify Shared Resources"): hand the exact command to the user.
+- **Index patterns** (readers have `kibana_all_read`, cannot create them): create in the global tenant via `POST _dashboards/api/saved_objects/index-pattern/<id>` (`osd-xsrf: true`, `securitytenant: global`), one admin pattern `<stage>-<cluster>-*` + one reader pattern = the reader role's pattern (else Discover hits forbidden indices). An API-created pattern has **no saved field list** -> Discover "Could not locate that index-pattern-field (id: @timestamp)", no histogram; the UI "Reload field list" did not persist. Fix: `GET _dashboards/api/index_patterns/_fields_for_wildcard?pattern=<pat with * as %2A>&meta_fields=_source&meta_fields=_id&meta_fields=_index` -> `PUT saved_objects/index-pattern/<id>` `{"attributes":{"fields":"<.fields|tojson>"}}`, then hard-reload the browser. CAA runbook step 7 has the `d()`/`f()` helpers.
 
 ## 6. Remove Cognito (follow-up MR)
 - tfvars `cognito = null` -> plan: ~10 destroys, all in `module.opensearch_cognito[...]`, no domain change (disabled block stays, ignored).
@@ -76,10 +77,26 @@ In-domain check (master role): `req GET /_plugins/_security/api/securityconfig` 
 ## 7. E2E (before "done")
 1. Data plane: `_cluster/health` green, `securityconfig` saml on, mappings read back.
 2. User logs in **from the portal**; Dev Tools `GET _plugins/_security/authinfo` -> `backend_roles` has the group, `roles` has `all_access` / `log_reader_<stage>`. No SAML errors in ES_APPLICATION_LOGS after the login time.
-3. Reader check once shipping starts: `_r` user sees `-app-*`, not `-infra-*`.
+3. Reader check once shipping starts: `_r` user sees `-*-application-*`, not `-infrastructure-*` / `-dependency-*`.
+
+## Reaching the domain (in-domain API)
+- `opensearch-fgac.py` needs `--role-arn` = the FGAC master role (CAA: `arn:aws:iam::144905517910:role/aws11caashareos01`, profile `CAA-Upper-Admin`). Without it the script crashes (`RoleArn ... None`).
+- CAA domain SG `sg-06ae2bbfdb51fada8` allows 443 only from the EKS subnets 10.70.35/37 + the PSM SG. The EIS VPN (10.31.252.x) times out, there are no SSM instances, and the EKS endpoints are private (2026-11-04). Do not widen the SG.
+- Working path: Claude in Chrome on the user's session -> CyberArk portal "SAML CAA Opensearch" tile -> page JS (needs admin group in the assertion):
+```js
+const p = async (path, method='GET', body) => (await fetch(`/_dashboards/api/console/proxy?path=${encodeURIComponent(path)}&method=${method}`,
+  {method:'POST', headers:{'osd-xsrf':'true','content-type':'application/json'}, body: body && JSON.stringify(body)})).text();
+```
+  Check `authinfo` roles = `all_access` first. Through the gateway `_dashboards/api/saved_objects` returns 500: check index patterns in the UI (`app/management/opensearch-dashboards/indexPatterns?security_tenant=global`). Proof screenshots: `app/security-dashboards-plugin#/roles/view/<role>/mapuser`.
 
 ## Gotchas
+- Reader-visible "only Dashboards in nav" = the reader is mapped to `opensearch_dashboards_read_only` (readonly_mode). Fix = empty that mapping, keep `log_reader_<stage>`. The CAA docs JSON `rolesmapping-dashboards-read-only.json` still holds the old mapping (= rollback, do not apply). The user wants payload files kept untouched.
+- The global default index pattern is admin-only (`stage-aws11caastageeks01-*`), so a reader's first Discover load errors until they pick their `-application-*` pattern and the Global tenant.
 - pip botocore can't read the CLI SSO cache (UnauthorizedSSOTokenError while `aws sts` works) - the script uses `aws configure export-credentials`.
-- SigV4 fails on paths with `,` (e.g. `_cat/indices/stage-*,prod-*`): one pattern per call.
+- SigV4 (`curl --aws-sigv4`) fails with a signature mismatch on `,` or `*` in the URL **path** (`_cat/indices/stage-*`): list all (`_cat/indices?h=index`) and grep, or put the wildcard in a query string as `%2A`.
+- After SAML login the browser lands on the CyberArk gateway host `<id>-gw.gateway.id.cyberark.cloud/_dashboards/...`, not the custom endpoint; build Discover links on that host with `?security_tenant=global`.
 - `describe-domain` returns `MasterBackendRole: null`; prove the admin mapping via `rolesmapping/all_access`.
 - Jira wiki: `-...-` in index names renders as strikethrough; wrap them in `{{ }}`.
+- Reader-only failure triage (CAA COEXT-112355, 2026-11-04): readers mapped to `opensearch_dashboards_read_only` can also get "Something went wrong / Internal Server Error" right after portal login; DevTools shows `/_dashboards/api/core/capabilities` -> gateway `Error tunnelling to <endpoint>: Unable to process HTTP header section after 21 reads in 45000 ms`. AUDIT_LOGS show one `MISSING_PRIVILEGES` `anonymous` `GET /_plugins/_security/authinfo` (header `x-opensearch-product-origin: opensearch-dashboards`) per attempt. Admins fine. Fix = the read-only mapping rule in step 5, not the `log_reader_*` mapping.
+- AUDIT_LOGS forensics with default AWS audit config (`AUTHENTICATED`/`GRANTED_PRIVILEGES` disabled): successful logins are invisible, but `MISSING_PRIVILEGES`, `FAILED_LOGIN` and `COMPLIANCE_INTERNAL_CONFIG_READ/WRITE` (doc id `rolesmapping`/`roles`/`audit` + version + effective user) are logged - use them to time user attempts and prove who changed a mapping. `PATCH _plugins/_security/api/audit` returns 200 but AWS rewrites the audit doc ~4 s later (v3 -> v4): audit categories cannot be changed over REST on a managed domain.
+- Data plane from a Mac (CAA): EIS corporate VPN -> 443 connect timeout (domain SG admits only shipper subnets, PSM SG and the network-hub break-glass Client VPN SG). Connect the **AWS VPN Client** (hub Client VPN, IdC SAML) first, then `opensearch-fgac.py` works.

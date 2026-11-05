@@ -8,6 +8,7 @@ description: Use when asked to draw an architecture diagram in Lucid (lucid.app 
 Memory: `lucid-mcp-setup`, `feedback-architecture-diagram-zone-layout`. Example output: ECR Helm charts access (GENESIS-429536).
 
 ## Flow
+0. **Search before you build.** "Give me the Lucid diagram" usually means one already exists (2026-10-20: started a new ECR diagram, user said "we have one somewhere", it was 5be91c12). Run the Lucid `search` tool with topic keywords (it lists `OLD DRAFT n (delete)` copies too, skip those) and grep memory for `lucid.app/` + the ticket key. Hand back the existing link; build only if none fits or the user asks for new.
 1. Load the Lucid tools with ToolSearch (`get_mcp_resource`, `lucid_create_diagram_from_specification`, `lucid_validate_diagram_specification`, `lucid_export_document_as_PNG`, `lucid_update_document`).
 2. Read `lucid://skills/readme` and `lucid://skills/diagram-specification` BEFORE the first create (the create tool requires it). AWS class names: `lucid://shape-libraries/aws-2024/common` and per category (`containers`, `security-identity-and-compliance`, ...). Do not guess class names.
 3. Generate the Standard Import JSON with `gen_lucid_aws_diagram.py` (this folder; edit the rows, boxes, lines, then `python3 -I gen_lucid_aws_diagram.py > spec.json`). Computing coordinates in a script keeps arrows level and the ECR attach points (fractions of the target box height) correct.
@@ -58,3 +59,10 @@ Image shapes need `image.url` (https) and a top-level `stroke`. Verify each URL 
 - Icons (200 image/png): Keycloak `https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/keycloak.png`, Active Directory stand-in `.../png/windows-11.png` (`microsoft-windows.png` is 403; no AD icon), Entra `.../png/entra-id.png`, user `https://raw.githubusercontent.com/kubernetes/community/master/icons/png/resources/labeled/user-128.png` (no AWS "user" class in aws-2024/common).
 - Remove a colliding line label in place: `basecanvasediting.setText({itemId: '<line id>', text: ''})`. Add a missing arrow: `createLine({from:{kind:'block',blockId,connection:{x,y}}, to:{kind:'block',blockId:'<container id>',...}, label, shape:'diagonal'})` (containers are valid endpoints).
 - `resizeBlock` on a `table` widens all columns evenly (ColumnWidths not settable via basecanvasediting): keep evidence text short or accept clipping and put the full table in the PDF.
+
+## Two-method side-by-side page (verified 2026-11-01, COEXT-111852 doc dd1467bc)
+- One page, two `rectangleContainer` panels (A orange, B green), each with user icon + AWS cloud `namedContainer` + note box, comparison `table` below, recommendation box last.
+- AWS classes: WorkSpaces `ArchAmazonWorkSpacesAWS2024`, Managed AD `ResAWSDirectoryServiceAWSManagedMicrosoftADAWS2024`, AD Connector `ResAWSDirectoryServiceADConnectorAWS2024`, Simple AD `ResAWSDirectoryServiceSimpleADAWS2024`, S2S VPN `ArchAWSSitetoSiteVPNAWS2024`, Directory Service `ArchAWSDirectoryServiceAWS2024`.
+- A line label at 0.5 on a line that crosses a container border lands ON the border: leave that hop unlabeled (`setText` '' on the line) or move the label.
+- Rectangle text renders centered even with `text-align:left` in the HTML; accept it or use a `text` shape inside.
+- Preflight warns icon-vs-own-caption (<60 px) and container-padding <80 px on every icon: expected with this layout, judge by the PNG export.

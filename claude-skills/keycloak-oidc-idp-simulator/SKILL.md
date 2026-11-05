@@ -9,6 +9,9 @@ Proves the APP side (login flow, PKCE, groups claim, RBAC, CLI SSO, logout, time
 
 Reference: `iac/argocd/argocd` `components-playground/cyberark-sim` (+ `components-playground/argo-cd` oidc.config), MRs !578 !579 !580 !582, doc `iac/docs/COINT-21591-poc-b-keycloak-sim.md`, memory `coint21591-poc-b-cyberark-oidc`.
 
+## Scope: apps that do their own OIDC only
+Fits self-hosted apps (Argo CD, Headlamp, Grafana...). Does NOT fit AWS-managed apps that authenticate only via IAM Identity Center (EKS Argo CD capability, Q Business): there, Keycloak can only act as the IdC's external SAML IdP. That needs an ORG instance you own whose current source is the built-in directory. Check the source first (memory `aws-idc-identity-source-check-before-switch`); eis-pnt and the EIS org do not qualify. COINT-21592 option B was dropped on 2026-10-29 for this reason.
+
 ## Build (one MR, playground first)
 1. Component = wrapper chart, dependency codecentric `keycloakx` (7.4.0 -> Keycloak 26.8.1; pin `image.digest`, get it from the quay registry API, not memory).
    - `command: [/opt/keycloak/bin/kc.sh, start-dev, --import-realm]`, `database.vendor: dev-file`, `cache.stack: custom` (default jdbc-ping needs a DB), `proxy.mode: xforwarded`, `http.relativePath: "/"`, `KC_HOSTNAME=https://<host>` (literal: subchart `tpl` cannot see parent values).

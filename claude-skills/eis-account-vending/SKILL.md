@@ -15,26 +15,46 @@ Reference run: **EISSAASDEV-302** (AXA Japan POC, `axajp`, 2026-06-17). See memo
 
 ## NEW FLOW (COINT-21667, MR !2 `feat/COINT-21667-single-idempotent-vend`; master after merge) — use this first
 
-Repo root `iac/solutions/account-vending`; operator doc = `RUNBOOK.md` there.
+Repo root `iac/solutions/account-vending`. User doc = `USER_GUIDE.md`; engineer doc = `RUNBOOK.md`.
 ```bash
-copier copy --trust "$PWD" accounts/<slug>                 # questionnaire -> accounts/<slug>/account.env (gitignored)
-python3 vend.py accounts/<slug>/account.env --dry-run      # read-only; checks prefix bucket name is free
-python3 vend.py accounts/<slug>/account.env                # account + OU + IdC SSO pairs + bootstrap StackSet
+git clone ssh://git@sfo-cvdevopsgit01.eqxdev.exigengroup.com:2224/iac/solutions/account-vending.git
+cd account-vending
+./vend                          # new account: questions -> preview (dry-run) -> y/N -> create/update -> prints id
+./vend accounts/<prefix>-<env>  # rerun same account, no questions (idempotent: update only)
+./vend ... --yes                # no confirm (used by e2e E24)
 ```
-- Questions: org (eis|eis-pnt), customer (max 44), environment Lower/Upper (OU `SaaS/<env>`), email slug
-  (suggested `<customer>-<env>`, max 39 = AWS email 64 minus `eis-pnt-aws+`/`@eisgroup.com`), prefix, AWS profile,
-  region, SSO access pairs `GROUP:name=PermissionSet,...`, advanced (issue, account name, IdC region, OU, SSO on/off, role_default).
+- `./vend` builds `.venv` itself (requirements.txt: boto3 + copier), runs `copier copy` into `accounts/.new-<ts>`,
+  renames to `accounts/<prefix>-<env>` (refuses if exists), logs in (`aws sso login --profile` if sts fails).
+- Questions (manager calls 2026-10-30): customer (max 44), project prefix (`^[a-z0-9]{3,5}$`), environment
+  Lower/Upper, AWS profile (default AdministratorAccess-455655288646), region (default us-west-2), advanced? = no.
+  Generated: account name `<customer> <env>`, email `eis-pnt-aws+<prefix>-<env>@eisgroup.com` (AWS max 64,
+  slug max 39), OU `SaaS/<env>`, IdC us-east-1.
+- Advanced (testing only): org eis|eis-pnt, Jira issue, account name, email slug, IdC region, OU, parent id,
+  SSO on/off + pairs `GROUP:name=PermissionSet,...`, role_default.
 - EIS default pairs (Markuss 2026-10-27): oc-team=AdministratorAccess, oc-team=ReadOnlyAccess,
   aws_pnt_devops-support=CICDAccess, cloud-platform_adm=AdministratorAccess. Unknown group/set -> warning, skipped.
+- EIS org group names END IN `@exigengroup.com` (`GROUP:oc-team@exigengroup.com=...`); plain `oc-team` only
+  exists in eis-pnt. Symptom: `Principal 'GROUP:oc-team' not found in Identity Center` -> account vended with NO
+  SSO grants (first EIS vend 2026-11-04, fixed fa9903b). Check a name live before using it:
+  `aws identitystore list-groups --profile Audit --region us-east-1 --identity-store-id d-90676df1bc
+  --filters AttributePath=DisplayName,AttributeValue=<name>` (exact match; `[]` = wrong name).
+  Audit cannot list permission sets; read `AWSReservedSSO_<PermSet>_*` IAM role names in a member account instead.
+- Fix grants on an already-vended account: `./vend accounts/<folder>` reuses that folder's `account.env`, so edit
+  its `IDENTITY_CENTER_ASSIGNMENTS` line first (a changed template default does not reach it), then re-run.
+- Testing helpers: `import Vending` runs module-level code that needs `account.env` (exits "account.env not
+  found"); import `utils` only, or copy `parse_assignments` (rpartition on `=`).
 - Runner auto-granted ONLY in eis-pnt; EIS org = must be in a granted group. CALL_AS=AUTO.
 - Guards (exit 1): prefix/BucketSuffix change after bootstrap (unless `--rename` and both buckets EMPTY),
   RoleDefault change, OU move after bootstrap (auto-deployment would delete the stack), taken bucket name.
+- Lower-level: `python3 vend.py accounts/<slug>/account.env [--dry-run|--rename]`; old hand-written account.env works.
 - Recovery of a broken bootstrap: `CleanupStackSet.py --yes`, `DirectCleanup.py --yes` with a profile INSIDE the
   account, then `vend.py`. Cleanup refuses blank ACCOUNT_ID (blank after `copier recopy`; run vend.py first).
-- Fix answers: `copier recopy --trust -d k=v accounts/<slug>`; advanced answers need `-d advanced=true` too.
-- Tests: `python3 vend.py --selftest` (stubbed); real E2E `tests/e2e.py` ONLY in eis-pnt (23 cases, ~12 min,
+- Fix answers: `.venv/bin/copier recopy --trust -d k=v accounts/<slug>`; advanced answers need `-d advanced=true` too.
+- Cosmetic: copier prints "No git tags found" + DirtyLocalWarning at start (local untagged template). Harmless.
+- Tests: `python3 vend.py --selftest` (stubbed); real E2E `tests/e2e.py` ONLY in eis-pnt (24 cases, ~12 min,
   report accounts/e2e/report.md) — login + command in memory `eis_pnt_org_vending_testbed`.
 - First real EIS-org vend: Markuss or Aurimas (mgmt 455655288646 admin), `--dry-run` first.
+- Selling it: manager wants "clone, one command, answer questions, done" — no copier/python knowledge in user doc.
 
 Sections 0-7 below = legacy two-script flow (still works with old env files).
 

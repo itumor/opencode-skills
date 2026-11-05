@@ -20,10 +20,13 @@ python3 ~/.claude/scripts/mr-feedback.py watch --repo <repo-or-worktree> --iid <
   --sources atlantis,pr-agent,pr-agent-improve --timeout-min 20 --dump <scratchpad>/fb-<IID>
 ```
 - Run with `run_in_background`; do other work, then read the result.
+- **Stops by itself:** no bot note within `--idle-min` (default 5) of the head SHA -> `RESULT: IDLE` (bot down / not onboarded). PR-Agent normally answers in ~1 min. Once any source answers, `--timeout-min` caps the wait (slow Atlantis plans).
+- **Waiting on the hook's log:** match `^RESULT:` (ANSWERED|IDLE|TIMED_OUT|CLOSED|BLOCKED), nothing else. 2026-11-03 !586: a loop grepping `ALL_PASS|DONE` never matched the success output and hung 7 min after the bot had answered in 1.
 - It binds feedback to the **current head SHA** (versions API), so notes from before the push don't count. It trusts only the bot authors `project_<pid>_bot_*` and `pnt_terraform_build`.
 - Drop `atlantis` from `--sources` when there is no `atlantis.yaml` (the script does this itself).
 - **Repo without PR-Agent:** if no recent MR in the project has a `project_<pid>_bot_*` note, the watch would only time out. Pass `--sources atlantis` (or skip) and say "PR-Agent not onboarded" in the hand-back. Onboarding is skill `pr-agent-repo-onboarding`, a separate ask.
 - `TIMED_OUT` = no feedback. Say so; never report "bot happy" without notes.
+- The hook-started watcher does not check onboarding. In a repo without PR-Agent it waits the full timeout, then ends `TIMED_OUT ... missing=pr-agent,pr-agent-improve` (pto-tooling 1642, 2026-11-03). That is expected. Report "PR-Agent not onboarded, 0 items", give the Atlantis result, and ack the record.
 
 ## 2. Read in full
 Read every dumped file (`<src>-<note>.md`). For the Reviewer Guide, also read "Requires further human verification" and the ticket-compliance list, not just the headline.

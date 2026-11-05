@@ -32,6 +32,7 @@ Reference run: COEXT-110738, `aws0caatestbld01` in CAA `lower/test/services`, MR
 
 ## 5. Gate and disruption
 - Approval must be on the current head SHA. Approval on an older SHA does not count.
+- Decommission = cost reduction: Jira Cost Change Approval (negative Monthly) must be Approved before apply; handoff `Cost: APPROVED <KEY> ...` (skill cloud-cost-change-approval).
 - Tag disruption: `Disruption: OUTAGE — <host> only — plan N destroy — window: <yes/no>`. Confirm the consumers moved (for CI, ask the team that owns the pipeline).
 - Close or discard any other open MR that holds the same stack's lock, so the apply cannot conflict. See [[atlantis-single-lock-cross-mr]].
 - Apply by an Atlantis comment (`atlantis apply -p <project>`), posted by the human. Merge after apply is green.

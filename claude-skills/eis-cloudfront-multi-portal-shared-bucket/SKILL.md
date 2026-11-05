@@ -164,8 +164,19 @@ Reference: COEXT-110386, CAA upper/stage MR !184 (`pre.ca-caci-seguros.pt` / `pr
 
 **Cutover check:** the cutover is ISSUED cert + tfvars swap (`external_alias`, `certificate_arn`), and it is done only when the MR is applied. Verify with `aws cloudfront get-distribution` `Aliases` and `ViewerCertificate`, then `curl --resolve` to the d* name. Plan shape should be `0 add / 4 change / 8 destroy` for a 2-portal + 2-DXP edge (4 distributions): 8 destroys are the placeholder A/AAAA records, and the d* targets don't change. Playbook and status: [[caa_customer_cutover_mr213_214]].
 
+## Temporarily disable a distribution (keep it, don't destroy)
+
+Reference: COEXT-112340, CAA MR !283 (2026-11-03): prod portals + DXP edges disabled until go-live.
+- eis-cloudfront **v1.5.0+** has `enabled` (default `true`). Add `enabled = optional(bool, true)` to the consumer map object (`var.portals`, `var.dxp_api.distributions`) and pass `enabled = each.value.enabled`. Set `false` per entry in tfvars.
+- Expected plan: only in-place `enabled true -> false`, one per distribution; 0 add / 0 destroy. The bucket, OAC, cert, WAF, logging and Route53 don't change, and the `d*.cloudfront.net` name and aliases stay, so the customer's CNAMEs keep working.
+- **Never "disable" by deleting the map entry.** That destroys the distribution, and a recreate gets a new random `d*` name, which breaks every customer CNAME.
+- Bump every module block that should get the input (portals AND dxp), and check the MR description still matches after each push.
+- Disabled != unreachable for DNS: aliases still resolve to CloudFront, and viewers get errors. Internal callers only avoid it if a private-zone record sends their hostname elsewhere (CAA stage: `*.stage.aws11.caa-eis.cloud` only; customer `.pt` names are not covered).
+- Disruption = OUTAGE for the aliases, so agree a window. Re-enable = flip back, plan, apply; 5-15 min propagation each way.
+
 ## Related
 
+- [[coext112340_caa_prod_portals_disabled]] — the live disable state and the IDs
 - [[caa_pt_portals_csr_cloudfront]] — the live .pt instance of the customer-hosted-alias pattern
 - [[eis_cloudfront_portals_design_decisions]] — full decision record, the corrected topology
 - [[caa_portal_hostname_convention]] — the p<role>-<tenant> hostname convention and its origin

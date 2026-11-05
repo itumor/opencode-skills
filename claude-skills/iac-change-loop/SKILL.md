@@ -15,7 +15,7 @@ Hard rules stay: the agent never applies, pushes (guard) or posts to Jira/Slack.
 
 ## The loop (per step)
 1. **Do** all non-gated work (code, local CI, MR open, plan read). Cite evidence.
-2. **Hand off one gate sheet** (not prose): ordered steps for the user with exact commands, expected result, `Disruption:` line (hook `handoff-gate.sh` blocks an apply handoff without it). For several gates write `~/.claude/change-runs/<ticket>.gates.sh` sourcing `~/.claude/scripts/gates-lib.sh` (`gate`, `gate_mr_merge`, `gate_atlantis`; y/N per gate, user runs it in their own terminal; the agent never runs it).
+2. **Hand off one gate sheet** (not prose): ordered steps for the user with exact commands, expected result, `Disruption:` line + `Cost:` line (`APPROVED <KEY>` re-checked in Jira / `NONE — evidence` / `INCIDENT <KEY>`, skill cloud-cost-change-approval; hook `handoff-gate.sh` blocks an apply handoff without them). For several gates write `~/.claude/change-runs/<ticket>.gates.sh` sourcing `~/.claude/scripts/gates-lib.sh` (`gate`, `gate_mr_merge`, `gate_atlantis`; y/N per gate, user runs it in their own terminal; the agent never runs it).
 3. **Arm the watcher in the same turn**, `run_in_background`:
    `~/.claude/scripts/gate-watch.sh mr-note <repo> <iid> 'Ran Apply' <since-utc>` | `mr-merged <repo> <iid>...` | `domain <d> <profile> <region> <OpenSearch_X.Y>`.
    Waiting for plan/review on a fresh push (not apply)? Use `~/.claude/scripts/mr-feedback.py watch --repo <repo> --iid N --key KEY` instead: SHA-bound, trusted-author, dedupes edited PR-Agent notes, ends HUMAN_GATE/TRIAGING/TIMED_OUT in task state.
