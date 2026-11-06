@@ -1,0 +1,499 @@
+<title>iac Tree Atlas</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: sticky left contents rail + one reading column; tables scroll in their own wells. */
+:root{
+  --bg:#f5f6f4; --surface:#ffffff; --fg:#1b2420; --muted:#5b6a63; --line:#d9dfdb;
+  --accent:#1f6f5c; --accent-soft:#e2efe9; --code-bg:#eef1ee;
+  --ok:#2c7a3f; --warn:#a2650a; --crit:#b3261e; --warn-soft:#fbf0dc; --crit-soft:#fbe5e3;
+  --f-display:"Archivo","Helvetica Neue",Arial,sans-serif;
+  --f-body:"IBM Plex Sans",-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121715; --surface:#1a211e; --fg:#e3e9e5; --muted:#9aa9a2; --line:#2c3632;
+  --accent:#5cc4a6; --accent-soft:#1d332c; --code-bg:#202925;
+  --ok:#6fcf87; --warn:#e3a645; --crit:#f07a70; --warn-soft:#33291a; --crit-soft:#3a201e; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121715; --surface:#1a211e; --fg:#e3e9e5; --muted:#9aa9a2; --line:#2c3632;
+  --accent:#5cc4a6; --accent-soft:#1d332c; --code-bg:#202925;
+  --ok:#6fcf87; --warn:#e3a645; --crit:#f07a70; --warn-soft:#33291a; --crit-soft:#3a201e; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.6 var(--f-body);}
+.wrap{display:grid;grid-template-columns:220px minmax(0,1fr);gap:40px;max-width:1240px;margin:0 auto;
+  padding-block:32px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+nav.toc{position:sticky;top:calc(env(safe-area-inset-top,0px) + 20px);align-self:start;font-size:13px;max-height:calc(100vh - 40px);overflow:auto}
+nav.toc .lbl{font:600 11px var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+nav.toc ol{list-style:none;margin:0;padding:0;display:grid;gap:2px;counter-reset:s}
+nav.toc a{color:var(--fg);text-decoration:none;display:block;padding:3px 8px;border-radius:4px}
+nav.toc a:hover,nav.toc a:focus-visible{background:var(--accent-soft);color:var(--accent);outline:none}
+main{min-width:0}
+header.top h1{font:800 clamp(30px,4.5vw,44px)/1.08 var(--f-display);letter-spacing:-.02em;margin:0 0 10px;text-wrap:balance}
+header.top p.lede{font-size:17px;color:var(--muted);max-width:68ch;margin:0 0 6px}
+.meta{font:12px var(--f-mono);color:var(--muted);margin-top:10px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:26px 0 8px}
+.stat{background:var(--surface);padding:14px 16px}
+.stat b{display:block;font:700 26px/1.1 var(--f-display);font-variant-numeric:tabular-nums}
+.stat span{font-size:12.5px;color:var(--muted)}
+section{padding-top:34px;scroll-margin-top:16px}
+h2{font:700 23px/1.2 var(--f-display);margin:0 0 4px;text-wrap:balance;display:flex;gap:10px;align-items:baseline}
+h2 .n{font:500 13px var(--f-mono);color:var(--accent)}
+h3{font:600 16px/1.3 var(--f-body);margin:22px 0 6px}
+p,li{max-width:72ch}
+p.sub{color:var(--muted);margin:2px 0 14px}
+code,.mono{font:13px var(--f-mono);background:var(--code-bg);padding:1px 5px;border-radius:3px;overflow-wrap:anywhere}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--surface);margin:10px 0 6px}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;vertical-align:top;padding:7px 10px;border-bottom:1px solid var(--line)}
+th{font:600 11.5px var(--f-body);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);background:var(--code-bg);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+td code{background:none;padding:0}
+.pill{display:inline-block;font:500 11px var(--f-mono);padding:1px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.pill.ok{color:var(--ok);border-color:currentColor}
+.pill.warn{color:var(--warn);border-color:currentColor;background:var(--warn-soft)}
+.pill.crit{color:var(--crit);border-color:currentColor;background:var(--crit-soft)}
+.note{border-left:3px solid var(--warn);background:var(--warn-soft);padding:10px 14px;border-radius:0 6px 6px 0;margin:12px 0;max-width:80ch}
+.note.crit{border-color:var(--crit);background:var(--crit-soft)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:10px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px 16px;min-width:0}
+.card h4{margin:0 0 4px;font:600 14px var(--f-body)}
+.card p{margin:0;font-size:13.5px;color:var(--muted)}
+.diagram{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px;margin-top:10px}
+.diagram svg{display:block;min-width:820px;width:100%;height:auto}
+svg .box{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
+svg .boxa{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.2}
+svg .t{fill:var(--fg);font:600 12.5px var(--f-body)}
+svg .s{fill:var(--muted);font:11px var(--f-mono)}
+svg .h{fill:var(--accent);font:600 11px var(--f-body);letter-spacing:.08em}
+svg .ln{stroke:var(--muted);stroke-width:1.2;fill:none}
+ol.steps{padding-left:20px}
+ol.steps li{margin:4px 0}
+dl.gl{display:grid;grid-template-columns:minmax(120px,190px) minmax(0,1fr);gap:6px 16px;margin:10px 0}
+dl.gl dt{font:500 13px var(--f-mono);color:var(--accent)}
+dl.gl dd{margin:0;font-size:14px}
+footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
+a{color:var(--accent)}
+@media (max-width:860px){.wrap{grid-template-columns:minmax(0,1fr);gap:8px}nav.toc{position:static;max-height:none}nav.toc ol{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}dl.gl{grid-template-columns:minmax(0,1fr)}dl.gl dd{margin-bottom:6px}}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style>
+
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <div class="lbl">Contents</div>
+  <ol>
+    <li><a href="#what">What this is</a></li>
+    <li><a href="#map">How it fits</a></li>
+    <li><a href="#inventory">Inventory</a></li>
+    <li><a href="#modules">Terraform modules</a></li>
+    <li><a href="#templates">Templates</a></li>
+    <li><a href="#projects">Client projects</a></li>
+    <li><a href="#hub">Network hub</a></li>
+    <li><a href="#argocd">ArgoCD</a></li>
+    <li><a href="#ansible">Ansible</a></li>
+    <li><a href="#solutions">Solutions</a></li>
+    <li><a href="#workflow">Change workflow</a></li>
+    <li><a href="#harness">Harness</a></li>
+    <li><a href="#docs">Docs &amp; tickets</a></li>
+    <li><a href="#nonrepo">Non-repo content</a></li>
+    <li><a href="#gitstate">Git state</a></li>
+    <li><a href="#hygiene">Hygiene</a></li>
+    <li><a href="#drift">Doc drift</a></li>
+    <li><a href="#glossary">Glossary</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="top">
+  <h1>iac Tree Atlas</h1>
+  <p class="lede">Everything in <code>~/gitwork/iac</code>: the GitLab group <code>iac</code> (id 1711) cloned as ~71 nested repos, plus the docs, worktrees, memory stores and side projects that have piled up around them.</p>
+  <p class="lede">Built from a read-only disk survey. Tags and branches reflect local clones, with no fetch, so "latest" means the latest the local clone knows.</p>
+  <div class="meta">Surveyed 2026-11-05 · 4 parallel read-only agents + on-disk spot checks · Successor to the 2026-10-03 field guide</div>
+  <div class="stats">
+    <div class="stat"><b>~71</b><span>nested git clones</span></div>
+    <div class="stat"><b>37</b><span><code>eis-*</code> Terraform modules</span></div>
+    <div class="stat"><b>14</b><span>client / env projects</span></div>
+    <div class="stat"><b>10</b><span>EKS clusters under ArgoCD</span></div>
+    <div class="stat"><b>81</b><span><code>.worktrees</code> entries (5.3 GB)</span></div>
+    <div class="stat"><b>~11.2 GB</b><span>total on disk</span></div>
+  </div>
+</header>
+
+<section id="what">
+<h2><span class="n">01</span>What this directory is</h2>
+<p>The root is <strong>not</strong> a git repo. It is a workspace holding every project of the GitLab group <code>iac</code> on the VPN-only server <code>sfo-cvdevopsgit01.eqxdev.exigengroup.com</code>, cloned by <code>clone_all.sh</code> into a matching folder layout. Each folder with a <code>.git</code> is its own project, with its own MRs and CI.</p>
+<p>It is the infrastructure-as-code estate for <strong>EIS OneSuite</strong> client environments on AWS. The pieces fit together like this:</p>
+<ul>
+  <li><strong>Terraform modules</strong> (<code>eis-*</code>) wrap AWS resources.</li>
+  <li><strong>Copier templates</strong> generate per-client Terraform, Ansible and ArgoCD trees.</li>
+  <li><strong>Atlantis</strong> plans and applies Terraform from MRs.</li>
+  <li><strong>An ArgoCD hub</strong> pushes Helm components to 10 EKS clusters.</li>
+  <li><strong>Ansible</strong> configures the toolchain VMs.</li>
+  <li><strong>A shared network hub</strong> carries TGW, egress and VPN.</li>
+</ul>
+<p>Around the repos sits a working layer of ticket notes (<code>docs/</code>), parallel git worktrees (<code>.worktrees/</code>), memory stores (<code>.remember</code>, <code>.memsearch</code>) and a Claude Code harness (<code>.claude</code>, a symlink to <code>~/.claude/harness/iac</code>) that enforces the MR and apply gates.</p>
+<div class="grid2">
+  <div class="card"><h4>Repo trees</h4><p><code>terraform/</code> 1.6 GB · <code>projects/</code> 3.4 GB · <code>argocd/</code> 772 MB · <code>ansible/</code> 3.8 MB · <code>solutions/</code> 42 MB</p></div>
+  <div class="card"><h4>Working layer</h4><p><code>.worktrees/</code> 5.3 GB · <code>docs/</code> 8.4 MB · <code>.remember</code> 10 MB · <code>.scratch</code>, <code>.out</code>, <code>.evidence</code></p></div>
+  <div class="card"><h4>Side projects</h4><p><code>castai/</code> CAST AI + Karpenter lab · <code>dsh-plugin-recursive-optimizer/</code> DeepSeek tooling · CAST AI handbooks and decks</p></div>
+</div>
+</section>
+
+<section id="map">
+<h2><span class="n">02</span>How the pieces fit</h2>
+<p class="sub">From a new client to running workloads. Arrows mean "produces" or "feeds".</p>
+<div class="diagram" role="img" aria-label="Flow: account vending and Copier templates produce client repos; Atlantis applies Terraform using eis modules into AWS accounts attached to the network hub; ArgoCD hub syncs components to EKS clusters; Ansible configures EC2 toolchain hosts.">
+<svg viewBox="0 0 960 360" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>
+  <text class="h" x="20" y="24">PROVISION</text><text class="h" x="250" y="24">GENERATE</text><text class="h" x="490" y="24">DELIVER</text><text class="h" x="740" y="24">RUNS IN AWS</text>
+  <rect class="boxa" x="20" y="40" width="190" height="62" rx="6"/><text class="t" x="32" y="64">Account vending</text><text class="s" x="32" y="84">solutions/account-vending</text>
+  <rect class="boxa" x="20" y="130" width="190" height="62" rx="6"/><text class="t" x="32" y="154">Copier templates</text><text class="s" x="32" y="174">client · poc · hub · clusters</text>
+  <rect class="box" x="20" y="220" width="190" height="62" rx="6"/><text class="t" x="32" y="244">eis-* modules (37)</text><text class="s" x="32" y="264">terraform/modules/aws</text>
+  <rect class="box" x="250" y="90" width="200" height="62" rx="6"/><text class="t" x="262" y="114">projects/aws/&lt;client&gt;</text><text class="s" x="262" y="134">terraform · ansible</text>
+  <rect class="box" x="250" y="200" width="200" height="62" rx="6"/><text class="t" x="262" y="224">argocd/argocd</text><text class="s" x="262" y="244">clusters/ · components/</text>
+  <rect class="boxa" x="490" y="60" width="200" height="56" rx="6"/><text class="t" x="502" y="84">Atlantis (on MR)</text><text class="s" x="502" y="102">plan auto · apply by user</text>
+  <rect class="box" x="490" y="132" width="200" height="56" rx="6"/><text class="t" x="502" y="156">Ansible run</text><text class="s" x="502" y="174">--limit --check --diff</text>
+  <rect class="boxa" x="490" y="204" width="200" height="56" rx="6"/><text class="t" x="502" y="228">ArgoCD hub</text><text class="s" x="502" y="246">aws0iacdeveks01 · 3 appsets</text>
+  <rect class="box" x="740" y="40" width="200" height="78" rx="6"/><text class="t" x="752" y="64">Client AWS accounts</text><text class="s" x="752" y="84">VPC · EKS · RDS · MSK</text><text class="s" x="752" y="102">lower / upper</text>
+  <rect class="box" x="740" y="132" width="200" height="56" rx="6"/><text class="t" x="752" y="156">Toolchain EC2</text><text class="s" x="752" y="174">Jenkins · Nexus · Sonar …</text>
+  <rect class="box" x="740" y="204" width="200" height="56" rx="6"/><text class="t" x="752" y="228">10 EKS clusters</text><text class="s" x="752" y="246">161 + 26 Applications</text>
+  <rect class="boxa" x="490" y="290" width="450" height="50" rx="6"/><text class="t" x="502" y="312">Network hub · acct 729852324759</text><text class="s" x="502" y="330">TGW (RAM-shared) · ANFW egress · S2S VPN · resolver · 3 regions</text>
+  <path class="ln" d="M210 71 H230 V300 H490" marker-end="url(#ar)"/>
+  <path class="ln" d="M210 161 H250" marker-end="url(#ar)"/>
+  <path class="ln" d="M210 175 H232 V231 H250" marker-end="url(#ar)"/>
+  <path class="ln" d="M210 251 H240 V140 H250" marker-end="url(#ar)"/>
+  <path class="ln" d="M450 110 H470 V88 H490" marker-end="url(#ar)"/>
+  <path class="ln" d="M450 134 H470 V160 H490" marker-end="url(#ar)"/>
+  <path class="ln" d="M450 231 H490" marker-end="url(#ar)"/>
+  <path class="ln" d="M690 88 H740" marker-end="url(#ar)"/>
+  <path class="ln" d="M690 160 H740" marker-end="url(#ar)"/>
+  <path class="ln" d="M690 232 H740" marker-end="url(#ar)"/>
+  <path class="ln" d="M840 118 V126" />
+  <path class="ln" d="M720 290 V100 H740" stroke-dasharray="3 3"/>
+</svg>
+</div>
+</section>
+
+<section id="inventory">
+<h2><span class="n">03</span>Repo inventory</h2>
+<p class="sub">Distinct git clones by area. A <code>find</code> returns 74 <code>.git</code> entries outside <code>.worktrees</code>. Three of them are sibling worktrees, and <code>.remember</code> is a separate private repo.</p>
+<div class="tw"><table>
+<thead><tr><th>Area</th><th>Repos</th><th>What lives there</th></tr></thead>
+<tbody>
+<tr><td><code>terraform/modules/aws</code></td><td class="num">36 (+1 non-git)</td><td><code>eis-*</code> wrapper modules consumed by git tag</td></tr>
+<tr><td><code>terraform/template</code></td><td class="num">4</td><td>Copier templates: client, module, network-hub-region, poc</td></tr>
+<tr><td><code>projects/aws/*</code></td><td class="num">~19</td><td>14 project dirs, each with a terraform repo and sometimes an ansible repo</td></tr>
+<tr><td><code>argocd/</code></td><td class="num">2 (+2 worktrees)</td><td><code>argocd/argocd</code> GitOps hub repo, <code>template/clusters</code> Copier</td></tr>
+<tr><td><code>ansible/</code></td><td class="num">6</td><td>1 Copier template + 5 role repos</td></tr>
+<tr><td><code>solutions/</code></td><td class="num">3</td><td>account-vending, onesuite-provisioning, renovate</td></tr>
+<tr><td>Root side projects</td><td class="num">2</td><td><code>castai</code>, <code>dsh-plugin-recursive-optimizer</code> (not part of group iac)</td></tr>
+<tr><td><code>.remember</code></td><td class="num">1</td><td>Memory store, private repo <code>eramadan/iac-remember</code></td></tr>
+</tbody></table></div>
+</section>
+
+<section id="modules">
+<h2><span class="n">04</span>Terraform modules <span class="pill">37 dirs</span></h2>
+<p class="sub">Wrap <code>terraform-aws-modules/*</code> (~21) or raw resources. Consumers pin by tag. The <code>eis-module-first</code> rule blocks raw <code>aws_*</code> resources in consumer repos.</p>
+<div class="tw"><table>
+<thead><tr><th>Module</th><th>Purpose</th><th>Local tag</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td><code>eis-acm</code></td><td>ACM cert, DNS validation</td><td class="num">v2.0.0</td><td></td></tr>
+<tr><td><code>eis-agentcore</code></td><td>Bedrock AgentCore gateway + targets (raw)</td><td class="num">—</td><td><span class="pill warn">not a git repo</span></td></tr>
+<tr><td><code>eis-alb</code></td><td>ALBs for EKS</td><td class="num">v2.1.0</td><td><span class="pill">feature branch</span></td></tr>
+<tr><td><code>eis-anfw</code></td><td>Network Firewall egress inspection tier</td><td class="num">v1.2.0</td><td></td></tr>
+<tr><td><code>eis-apigw</code></td><td>HTTP API Gateway v2 + VPC Link</td><td class="num">v1.1.2</td><td></td></tr>
+<tr><td><code>eis-argocd</code></td><td>ArgoCD clusters, repos, CodeConnections IAM</td><td class="num">V1.0.0</td><td>capital-V tag</td></tr>
+<tr><td><code>eis-asg</code></td><td>Autoscaling groups (Selenoid)</td><td class="num">v1.0.3</td><td></td></tr>
+<tr><td><code>eis-backup</code></td><td>AWS Backup plans, vaults, vault lock</td><td class="num">v1.0.3</td><td><span class="pill">feature branch</span></td></tr>
+<tr><td><code>eis-bedrock</code></td><td>Bedrock inference profiles</td><td class="num">v1.0.0</td><td>new since repo-map</td></tr>
+<tr><td><code>eis-cloudfront</code></td><td>CloudFront (S3 OAC / custom origin)</td><td class="num">v1.2.1</td><td></td></tr>
+<tr><td><code>eis-codecommit</code></td><td>CodeCommit repos + approval rules</td><td class="num">v1.0.1</td><td></td></tr>
+<tr><td><code>eis-cognito</code></td><td>Cognito config</td><td class="num">v1.0.4</td><td></td></tr>
+<tr><td><code>eis-dns</code></td><td>Route53 zones, resolver rules, delegations</td><td class="num">v3.2.0</td><td></td></tr>
+<tr><td><code>eis-dx</code></td><td>Direct Connect for clients</td><td class="num">v1.1.0</td><td></td></tr>
+<tr><td><code>eis-ec2</code></td><td>Single EC2 instance</td><td class="num">v2.4.0</td><td></td></tr>
+<tr><td><code>eis-ec2-rhel-ami</code></td><td>Latest EIS RHEL AMI lookup</td><td class="num">v1.0.0</td><td>last commit 2025-08</td></tr>
+<tr><td><code>eis-ecr</code></td><td>ECR repos, registry scanning</td><td class="num">v1.0.0</td><td></td></tr>
+<tr><td><code>eis-eks</code></td><td>EKS cluster</td><td class="num">v2.6.2</td><td>clone 16 behind</td></tr>
+<tr><td><code>eis-env-common-utility</code></td><td>Naming, default tags, SM helpers</td><td class="num">v2.1.1</td><td></td></tr>
+<tr><td><code>eis-eventbridge</code></td><td>Scheduled EventBridge rules</td><td class="num">v1.0.0</td><td>new</td></tr>
+<tr><td><code>eis-fivetran-hybrid</code></td><td>Fivetran hybrid agent (EFS, Glue)</td><td class="num">v1.0.29</td><td>clone 19 behind</td></tr>
+<tr><td><code>eis-iam</code></td><td>IAM user wrapper</td><td class="num">v1.0.0</td><td>new</td></tr>
+<tr><td><code>eis-inventory-readonly</code></td><td>Cross-account read-only inventory role</td><td class="num">v1.1.0</td><td>new</td></tr>
+<tr><td><code>eis-lambda</code></td><td>Container-image Lambda</td><td class="num">v1.0.0</td><td>new</td></tr>
+<tr><td><code>eis-msk</code></td><td>MSK Kafka</td><td class="num">v2.1.0</td><td></td></tr>
+<tr><td><code>eis-nlb</code></td><td>NLB → ALB (static IPs)</td><td class="num">v2.3.0</td><td></td></tr>
+<tr><td><code>eis-opensearch</code></td><td>OpenSearch domain, SAML, custom DNS</td><td class="num">v1.0.1</td><td><span class="pill warn">default branch master</span></td></tr>
+<tr><td><code>eis-rds</code></td><td>RDS instance</td><td class="num">v2.2.0</td><td></td></tr>
+<tr><td><code>eis-s3</code></td><td>S3 bucket</td><td class="num">v2.1.1</td><td></td></tr>
+<tr><td><code>eis-sftp</code></td><td>Transfer Family SFTP</td><td class="num">v1.1.14</td><td></td></tr>
+<tr><td><code>eis-step-functions</code></td><td>Standard state machine</td><td class="num">v1.0.0</td><td>new</td></tr>
+<tr><td><code>eis-tgw</code></td><td>Spoke-side TGW attachment + RTs</td><td class="num">v4.0.0</td><td></td></tr>
+<tr><td><code>eis-vpc</code></td><td>One VPC per account</td><td class="num">v2.1.0</td><td></td></tr>
+<tr><td><code>eis-vpc-endpoints</code></td><td>Gateway + interface endpoints</td><td class="num">v2.1.1</td><td></td></tr>
+<tr><td><code>eis-vpn</code></td><td>S2S VPN</td><td class="num">v2.2.0</td><td></td></tr>
+<tr><td><code>eis-waf</code></td><td>WAFv2 Web ACL</td><td class="num">v1.0.5</td><td><span class="pill warn">origin/HEAD = feat/initial-module</span></td></tr>
+<tr><td><code>eis-workspaces</code></td><td>WorkSpaces Personal + AD Connector</td><td class="num">none</td><td><span class="pill">untagged, feature branch</span></td></tr>
+</tbody></table></div>
+</section>
+
+<section id="templates">
+<h2><span class="n">05</span>Copier templates</h2>
+<p class="sub">Six templates generate most repos. The Terraform and Ansible templates use <code>[[ ]]</code> / <code>[% %]</code> Jinja markers so HCL and Ansible <code>{{ }}</code> pass through. Answers are recorded in <code>.copier-answers.yml</code>, and project-specific code lives only in <code>*_custom.tf</code>.</p>
+<div class="tw"><table>
+<thead><tr><th>Template</th><th>Tag</th><th>Generates</th></tr></thead>
+<tbody>
+<tr><td><code>terraform/template/client</code></td><td class="num">v2.7.0</td><td>Full client env. <code>lower/</code> (infra + dev/test stages) and optional <code>upper/</code> (share/stage/prod). Each stage has bootstrap → core → services states. The Atlantis project list is generated by <code>ci/generate-atlantis-projects.sh</code>.</td></tr>
+<tr><td><code>terraform/template/module</code></td><td class="num">v1.0.8</td><td>Skeleton for a new <code>eis-&lt;name&gt;</code> module repo with semantic-release</td></tr>
+<tr><td><code>terraform/template/network-hub-region</code></td><td class="num">v1.5.0</td><td>One hub region: VPC, ANFW, TGW + RAM share, peering, resolver, VPN</td></tr>
+<tr><td><code>terraform/template/poc</code></td><td class="num">never tagged</td><td>Minimal POC: one stage, EC2/S3, no EKS</td></tr>
+<tr><td><code>argocd/template/clusters</code></td><td class="num">V2.1.2</td><td>One <code>clusters/&lt;name&gt;/</code> values tree: 15 always-on components and 14 <code>enable_*</code> flags. <code>tools/answers.py</code> reads answers from live AWS.</td></tr>
+<tr><td><code>ansible/template</code></td><td class="num">v2.0.0</td><td>Per-customer Ansible project with global/lower/upper inventory levels and 12 <code>global_enable_*</code> service flags</td></tr>
+</tbody></table></div>
+<p>CI pattern for templates: a <code>pre-commit</code> job (or <code>mock-render</code> for the cluster and Ansible templates) plus a manual <code>publish_release</code> semantic-release job. Each template carries <code>ci/mock-answers.yml</code> and <code>ci/mock-test.sh</code> to render and validate.</p>
+</section>
+
+<section id="projects">
+<h2><span class="n">06</span>Client and environment projects <span class="pill">projects/aws · 14</span></h2>
+<div class="tw"><table>
+<thead><tr><th>Project</th><th>Repos</th><th>Atlantis</th><th>Region</th><th>Account</th><th>Template pin</th></tr></thead>
+<tbody>
+<tr><td><code>anlab</code></td><td>terraform, ansible</td><td>yes</td><td>us-west-2</td><td class="num">981104134140</td><td>poc @ 8ec09b3</td></tr>
+<tr><td><code>axa-japan</code></td><td>terraform, ansible</td><td>yes</td><td>us-west-2</td><td class="num">586117079971</td><td>client v1.3.0</td></tr>
+<tr><td><code>credit-agricole</code> (CAA)</td><td>terraform, ansible</td><td>yes · 15 projects</td><td>usw2 lower / euw3 upper</td><td class="num">691064586749 / 144905517910</td><td>client v2.0.0</td></tr>
+<tr><td><code>eis-genai-dev</code></td><td>empty dir</td><td>—</td><td>—</td><td>—</td><td><span class="pill warn">no .git</span></td></tr>
+<tr><td><code>eis-iac</code></td><td>terraform</td><td><span class="pill warn">no (local apply)</span></td><td>us-west-2</td><td class="num">182399717428</td><td>hosts ArgoCD hub + Atlantis</td></tr>
+<tr><td><code>feature-validation</code></td><td>terraform</td><td>no</td><td>us-west-2</td><td class="num">207414098330</td><td>demo, fv01, fv04, fv05</td></tr>
+<tr><td><code>network-hub</code></td><td>terraform</td><td>yes · 4 projects</td><td>usw2, euw3, apne1</td><td class="num">729852324759</td><td>2 regions from hub v1.5.0</td></tr>
+<tr><td><code>nnl-japan</code></td><td>terraform, ansible</td><td>yes</td><td>ap-northeast-1</td><td class="num">217508029688</td><td>client v2.5.0</td></tr>
+<tr><td><code>oc-sandbox</code></td><td>terraform</td><td>yes</td><td>us-west-2</td><td class="num">610566836245</td><td>marked decommissioned</td></tr>
+<tr><td><code>pnt-performance</code></td><td>terraform</td><td>—</td><td>—</td><td>—</td><td><span class="pill warn">empty git init</span></td></tr>
+<tr><td><code>pto-cicd</code></td><td>terraform</td><td>yes</td><td>us-west-2</td><td class="num">679318011944</td><td>—</td></tr>
+<tr><td><code>pto-reference</code></td><td>terraform, ansible</td><td>yes</td><td>us-west-2</td><td class="num">468381823127</td><td>hosts pref-dev cluster</td></tr>
+<tr><td><code>pto-tooling</code></td><td>terraform</td><td>yes</td><td>us-west-2</td><td class="num">811494801456</td><td>new; not in repo-map</td></tr>
+<tr><td><code>v20-sandbox</code></td><td>terraform</td><td>yes</td><td>us-west-2</td><td class="num">851725487952</td><td>—</td></tr>
+</tbody></table></div>
+<p>Atlantis config: <code>atlantis.yaml</code> v3, with <code>automerge: false</code> and serial plan and apply. There is one project per <code>&lt;env&gt;/&lt;stage&gt;/&lt;state&gt;</code>, ordered by <code>execution_order_group</code> (infra 1x, dev 2x …). Account IDs for eis-iac and feature-validation come from docs, not tfvars.</p>
+</section>
+
+<section id="hub">
+<h2><span class="n">07</span>Network hub</h2>
+<p class="sub">Account 729852324759, prefix <code>aws0nhub</code>, migrated from legacy <code>pnt-hub</code> (GENESIS-427530). Rule: the hub region owns egress and S2S VPN; satellites never do.</p>
+<div class="grid2">
+  <div class="card"><h4>us-west-2 core · 10.34.0.0/21</h4><p>Raw TGW <code>aws0nhub-tgw</code> (ASN 65001), RAM-shared org-wide. 2 S2S VPNs, ANFW egress (alert-only), per-AZ NAT. Outbound resolver forwards exigengroup.com / eisgroup.com. Hand-written legacy, not template-rendered.</p></div>
+  <div class="card"><h4>eu-west-3 · 10.34.8.0/23</h4><p>Own TGW (ASN 65072), VPC, firewall, resolver, VPN. Rendered from hub v1.5.0. TGW peering is <code>enabled = false</code> in tfvars, and whether that is applied is unverified.</p></div>
+  <div class="card"><h4>ap-northeast-1 · 10.34.10.0/23</h4><p>TGW ASN 65062. No NAT/IGW: egress goes via peering to us-west-2 (satellite-like). Rendered from v1.5.0.</p></div>
+</div>
+</section>
+
+<section id="argocd">
+<h2><span class="n">08</span>ArgoCD GitOps hub</h2>
+<p class="sub">The hub is the EKS-managed ArgoCD capability on <code>aws0iacdeveks01</code> (182399717428, us-west-2). GitLab main is mirrored through CodeConnections to app-of-apps and then the ApplicationSets. Nothing is applied by hand, and MRs to this repo have no Atlantis, so the user merges them.</p>
+<div class="note">The shared checkout <code>argocd/argocd</code> is on <code>fix/nojira-001-remove-karma-endpoint</code>, 224 commits behind main, with 6 dirty files. The numbers below come from <code>origin/main</code> at the last fetch, with working-tree counts in brackets.</div>
+<h3>ApplicationSets (3)</h3>
+<div class="tw"><table>
+<thead><tr><th>Appset</th><th>Reads</th><th>Produces</th></tr></thead>
+<tbody>
+<tr><td><code>all-components</code></td><td><code>clusters/*/cluster-component-config.yaml</code> (excludes pref-dev) × <code>clusters/&lt;c&gt;/*</code> dirs</td><td>161 Applications on 9 clusters, from <code>components/</code></td></tr>
+<tr><td><code>playground-components</code></td><td>only <code>clusters/aws0prefdeveks01/…</code></td><td>26 Applications from <code>components-playground/</code></td></tr>
+<tr><td><code>cluster-bootstrap</code></td><td><code>bootstrap/clusters/*/cluster.yaml</code></td><td>cluster secrets, AppProjects, argocd-cm per cluster</td></tr>
+</tbody></table></div>
+<p>Sync waves order resources <em>inside</em> each Application only. Applications start all at once, because the managed capability has no RollingSync, and a 16-try retry envelope (~795 s) absorbs ordering. Waves run from 0 (load balancer controller) through 1 (ESO), 2 (Istio), 3–5 (observability, velero) and up to 9–11 (POC apps).</p>
+<h3>Clusters (10)</h3>
+<div class="tw"><table>
+<thead><tr><th>Cluster</th><th>Account / region</th><th>Components</th><th>Template</th></tr></thead>
+<tbody>
+<tr><td><code>aws0iacdeveks01</code> <span class="pill ok">hub</span></td><td class="num">182399717428 · usw2</td><td class="num">25</td><td>V1.0.5</td></tr>
+<tr><td><code>aws0prefdeveks01</code> <span class="pill">playground</span></td><td class="num">468381823127 · usw2</td><td class="num">26</td><td>V1.0.5</td></tr>
+<tr><td><code>aws02afadeveks01</code></td><td class="num">060116865631 · use1</td><td class="num">17</td><td>V2.1.2</td></tr>
+<tr><td><code>aws06nnljdeveks01</code></td><td class="num">217508029688 · apne1</td><td class="num">18</td><td>V2.1.2</td></tr>
+<tr><td><code>aws0axajpdeveks01</code></td><td class="num">586117079971 · usw2</td><td class="num">17</td><td>V1.0.7-dev (untagged)</td></tr>
+<tr><td><code>aws0caadeveks01</code></td><td class="num">691064586749 · usw2</td><td class="num">17</td><td>V1.0.6</td></tr>
+<tr><td><code>aws0caatesteks01</code></td><td>usw2</td><td class="num">17</td><td>V1.0.5</td></tr>
+<tr><td><code>aws0fvdemoeks01</code></td><td>usw2</td><td class="num">17</td><td>V1.0.5</td></tr>
+<tr><td><code>aws0v20deveks01</code></td><td>usw2</td><td class="num">17</td><td>V1.0.5</td></tr>
+<tr><td><code>aws0v20perfdeveks01</code></td><td>usw2</td><td class="num">16</td><td>V1.0.5</td></tr>
+</tbody></table></div>
+<h3>Components</h3>
+<p><code>components/</code> has 42 dirs [39] and <code>components-playground/</code> has 42 [35]. 36 distinct components are deployed somewhere [26]. On every cluster: AWS LB controller, cluster-autoscaler, ESO, gen-dashboard, headlamp, the Istio set (base, istiod, gateway, ingress), metrics-server, observascope (eis/logging/oss) and oidc. Hub only: atlantis, gitlab-runner ×3, aws-inventory and pr-agent (also on pref). Playground only: argo-cd, argo-cd-poc-a, cyberark-sim, nexus, sonarqube, velero-ops. 12 dirs in <code>components/</code> are unused (e.g. coredns, etcd, metallb, the <code>*-chart</code> variants).</p>
+<p><strong>Playground first:</strong> MR1 changes <code>components-playground/&lt;c&gt;/</code>, which syncs to pref-dev for an E2E proof. MR2 promotes it with <code>scripts/ci/promote-playground-components.sh</code>. The pre-push hook enforces this order.</p>
+<p><strong>Secrets:</strong> ESO creates a <code>ClusterSecretStore</code> per namespace (a post-install hook at weight 999). The backend is <code>SecretsManager</code> via IRSA, or Vault. <strong>CI:</strong> render → kubeconform → kube-linter → pluto → kyverno → helm-unittest → checkov, plus playground twins of those jobs.</p>
+</section>
+
+<section id="ansible">
+<h2><span class="n">09</span>Ansible</h2>
+<p>The template (v2.0.0, 2026-10-02) scaffolds a per-customer project for the toolchain VMs: Jenkins, build nodes, GitLab, SonarQube, Nexus, Atlantis, Selenoid, Sisense, Keycloak, OpenGrok, ETCS, S-Hub. Inventories are split into <code>global/lower/upper</code> levels, and "lower/upper" are environment tiers, not git branches. Most roles come from <code>cv-devops</code> via <code>requirements.yml</code>. The reference implementation is <code>credit-agricole/ansible</code>. Runs always use <code>--limit</code> and <code>--check --diff</code>, with secrets pulled from Vault at run time and inventory from dynamic <code>aws_ec2</code> over SSM.</p>
+<div class="tw"><table>
+<thead><tr><th>Role repo</th><th>Tag</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>acme_cert_update</code></td><td class="num">v1.2.1</td><td>acme.sh issue/renew, store certs in Vault</td></tr>
+<tr><td><code>docker_compose_atlantis</code></td><td class="num">v1.2.0</td><td>Atlantis container on client EC2</td></tr>
+<tr><td><code>docker_install</code></td><td class="num">v1.3.1</td><td>Docker + compose, RHEL versionlock (branch master)</td></tr>
+<tr><td><code>sisense_install</code></td><td class="num">v1.1.0</td><td>Sisense install/upgrade, SSL</td></tr>
+<tr><td><code>vault_agent_ssl</code></td><td class="num">v1.4.0</td><td>Vault agent delivers certs, reloads nginx (local clone diverged 2/2)</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="solutions">
+<h2><span class="n">10</span>Solutions</h2>
+<div class="grid2">
+  <div class="card"><h4>account-vending <span class="pill">v1.0.0 local</span></h4><p>Python CLI. <code>Vending.py</code> creates or finds the account, moves it to the OU and optionally assigns IdC. <code>StackSet_Management.py</code> recreates a SERVICE_MANAGED StackSet from <code>bootstrap-baseline.yaml</code>, which creates the TF state bucket, its bucket policy, a managed policy and the Atlantis plan/apply roles. Memory says tag v2.0.0 was pushed 11-04, but the local clone doesn't have it.</p></div>
+  <div class="card"><h4>onesuite-provisioning</h4><p>Knowledge kit for a new OneSuite client env, phases P0–P8: runbooks, 23 phase skills, ~60 memory notes, intake that renders Copier answers, and toolkit pins. Distilled from the AXA Japan run (EISSAASDEV-302). Validated once.</p></div>
+  <div class="card"><h4>renovate</h4><p>Central Renovate config (global → terraform/argocd presets). Runs in GitLab CI on the <code>renovate:43-full</code> image, or locally via docker-compose.</p></div>
+</div>
+</section>
+
+<section id="workflow">
+<h2><span class="n">11</span>Change workflow and gates</h2>
+<ol class="steps">
+  <li>Branch in the nested repo, or in a worktree under <code>.worktrees/</code> (never in the shared checkout). Commit as <code>type(scope): KEY-N - msg</code> with KEY one of COEXT, GENESIS, NOJIRA or EISSAASDEV, and no <code>!</code> in some eis-* repos.</li>
+  <li>Pre-push: commit-lint and pre-commit on changed files (hook), and the repo's real CI via <code>gitlab-ci-local</code> (manual rule). <code>verify-iac-changes</code> runs before claiming done.</li>
+  <li>Open the MR with reviewer <code>eramadan</code>. Atlantis autoplans and the PR-Agent bot posts a Reviewer Guide and Code Suggestions. Each item is fixed or answered.</li>
+  <li>Read the plan: tag each change MR-caused or environment-carried, and note any destroys or replacements.</li>
+  <li>Apply is proposed only when the MR is Approved on the current head SHA. The handoff must carry three lines: <code>Approval:</code>, <code>Cost:</code> (Jira cost approval for priced resources) and <code>Disruption: NONE|BLIP|OUTAGE</code>. The user runs <code>atlantis apply</code>.</li>
+  <li>Merge only via <code>mr-merge-gate.py</code>, which runs 8 checks: not draft, no conflicts, approved by a non-author, plan and apply on the current head, no later pending plan, pipeline green, mergeable. Non-Atlantis repos such as argocd are merged by the user.</li>
+</ol>
+</section>
+
+<section id="harness">
+<h2><span class="n">12</span>Claude Code harness</h2>
+<p class="sub"><code>.claude</code> → <code>~/.claude/harness/iac</code>: 17 hook scripts (13 wired), 3 path-scoped rules, 6 agents, 11 local skills. Permissions are 0 allow, 28 deny and 84 ask.</p>
+<div class="tw"><table>
+<thead><tr><th>Event</th><th>Hook</th><th>Does</th></tr></thead>
+<tbody>
+<tr><td>SessionStart</td><td><code>session-start.sh</code></td><td>Repo/branch, dirty nested repos, VPN check, pending verify, task resume</td></tr>
+<tr><td>PreToolUse Bash</td><td><code>guard-bash.sh</code></td><td>Denies local apply, merges, <code>atlantis apply</code> notes, push to main, token literals, <code>rm -r</code> in the tree, Jira/Slack writes, IAM admin, cockpit writes</td></tr>
+<tr><td>PreToolUse Bash</td><td><code>pre-push-check.sh</code></td><td>Playground-first, commit-lint regex, pre-commit on changed files</td></tr>
+<tr><td>PreToolUse Edit</td><td><code>eis-module-guard.sh</code>, <code>guard-edit.sh</code></td><td>Blocks raw <code>aws_*</code> in consumers, and protects the harness's own files</td></tr>
+<tr><td>PreToolUse MCP</td><td><code>guard-mcp.sh</code></td><td>Denies outward sends and deletes; asks for writes</td></tr>
+<tr><td>Post / Failure</td><td><code>track-edits</code>, <code>push-feedback</code>, <code>classify-failure</code></td><td>Records touched repos, watches bot feedback, hints a skill on failure</td></tr>
+<tr><td>Stop</td><td><code>verify-gate.sh</code>, <code>handoff-gate.sh</code></td><td>Scanners on edited repos; Approval/Cost/Disruption lines on any apply handoff</td></tr>
+<tr><td>PreCompact / Prompt</td><td><code>precompact</code>, <code>budget-gate</code></td><td>Checkpoints the task, warns on token budget</td></tr>
+</tbody></table></div>
+<p>The harness also includes an eval suite, a fuzz guard, a routing lint, a context lint and a <code>superagent/</code> profile for headless workers (verify hook enabled 2026-11-05).</p>
+</section>
+
+<section id="docs">
+<h2><span class="n">13</span>Docs and ticket workspaces <span class="pill">docs/ · 76 entries · 8.4 MB</span></h2>
+<div class="tw"><table>
+<thead><tr><th>Ticket / group</th><th>Files</th><th>Topic</th></tr></thead>
+<tbody>
+<tr><td>COINT-21561</td><td class="num">8</td><td>ECR POC parent: Argo CD + ECR methods research, live inventory, retarget to pto-ref</td></tr>
+<tr><td>COINT-21578 / 79 / 81</td><td class="num">6</td><td>P6 pref-dev self-managed Argo CD parity; CodeCommit seed; P4 upper guardrails</td></tr>
+<tr><td>COINT-21590</td><td class="num">10</td><td>POC-A: CodeCommit auth methods + signing proxy</td></tr>
+<tr><td>COINT-21591</td><td class="num">5</td><td>POC-B: Argo CD + OIDC via Keycloak simulation</td></tr>
+<tr><td>COINT-21592</td><td class="num">6</td><td>POC-C verdict: EKS Argo CD + CyberArk, option B plan</td></tr>
+<tr><td>COINT-21594</td><td class="num">65</td><td>POC-D: Argo CD 3.5.5 pulling Helm from ECR; root causes, evidence, Lucid exports</td></tr>
+<tr><td>GENESIS-447522 / 425582</td><td class="num">8</td><td>SonarQube and Nexus EC2 → EKS POCs on pref-dev</td></tr>
+<tr><td><code>status-2026-10-29/</code></td><td class="num">76</td><td>On-hold handoff pack for 17 tickets: per-ticket md, unposted Jira text, diagrams</td></tr>
+<tr><td>Guides (no key)</td><td class="num">~14</td><td>ONBOARDING, repo-map, HDS audit PDFs (CAA), GenAI cost incident, PR-Agent handoff, harness demo</td></tr>
+</tbody></table></div>
+<p>Other evidence folders at the root: <code>.evidence/</code> (COEXT-112355 Grafana/OpenSearch screenshots), <code>.scratch/</code> (CAA portal monitoring, COINT-21561) and <code>.out/</code> (COEXT-111462, HDS audit).</p>
+</section>
+
+<section id="nonrepo">
+<h2><span class="n">14</span>Non-repo content</h2>
+<div class="grid2">
+  <div class="card"><h4>.worktrees/ · 5.3 GB</h4><p>79 dirs: 73 linked worktrees (argocd 38, pto-reference 12, pto-tooling 10, CAA 9 …) and 6 standalone clones, 4 of them local-only <code>poc-a-seed*</code>. 72 have small uncommitted changes. Last commits range from 09-17 to 11-05.</p></div>
+  <div class="card"><h4>.remember · 10 MB</h4><p>Memory plugin store (dailies, recent, archive, knowledge). It is its own repo, <code>eramadan/iac-remember</code>, with 63 commits and 11 pending changes. qmd indexes it.</p></div>
+  <div class="card"><h4>.memsearch · 3.3 MB</h4><p>~51 daily memory files plus an index state. No git.</p></div>
+  <div class="card"><h4>CAST AI material</h4><p>Two handbooks (.md + .pptx), two master prompts, <code>cast-ai-was-guide/</code>, the <code>build_cast_pptx.py</code> deck generator, and the <code>castai/</code> repo (Karpenter lab, MCP server, e2e). A side project, not group iac.</p></div>
+  <div class="card"><h4>DeepSeek tooling</h4><p><code>dsh-plugin-recursive-optimizer/</code> (40 MB, mostly node_modules) and a root <code>package.json</code> for <code>@deepseek-ai/dsh-desktop-runtime</code>. Unrelated to iac.</p></div>
+  <div class="card"><h4>Root scripts</h4><p><code>clone_all.sh</code> clones all of group 1711 (it prompts for a PAT). <code>purge-terraform-cache.sh</code> reclaims <code>.terraform</code> caches and skips dirs in use. Agent configs: <code>.agents</code>, <code>.codex</code>, <code>.cursor</code>, <code>.auto-claude</code>.</p></div>
+</div>
+</section>
+
+<section id="gitstate">
+<h2><span class="n">15</span>Git state of the checkouts</h2>
+<p class="sub">From local refs only (no fetch). "Behind" means behind the last fetched upstream.</p>
+<h3>17 repos not on main/master</h3>
+<div class="tw"><table>
+<thead><tr><th>Repo</th><th>Branch</th><th>Dirty</th><th>Last commit</th></tr></thead>
+<tbody>
+<tr><td><code>argocd/argocd</code></td><td>fix/nojira-001-remove-karma-endpoint</td><td class="num"><span class="pill warn">6</span></td><td class="num">09-21</td></tr>
+<tr><td><code>argocd/template/clusters</code></td><td>fix/nojira-001-remove-karma-endpoint</td><td class="num">3</td><td class="num">09-21</td></tr>
+<tr><td><code>argocd/argocd-wt-cli-proxy-api</code></td><td>feat/NOJIRA-000-cli-proxy-api-playground</td><td class="num">1</td><td class="num">11-05</td></tr>
+<tr><td><code>argocd/argocd-wt-filebeat</code></td><td>coext-105505-logstash-ssl</td><td class="num">0</td><td class="num">06-19</td></tr>
+<tr><td><code>argocd/.worktrees/genesis-443401…</code></td><td>GENESIS-443401_scaleops-argocd-ignore-differences</td><td class="num">0</td><td class="num">09-18</td></tr>
+<tr><td><code>credit-agricole/terraform</code></td><td>fix/GENESIS-443312-scaleops-cognito</td><td class="num">5</td><td class="num">09-21</td></tr>
+<tr><td><code>axa-japan/terraform</code></td><td>fix/GENESIS-443312-scaleops-cognito</td><td class="num">2</td><td class="num">09-21</td></tr>
+<tr><td><code>pto-reference/terraform</code></td><td>fix/GENESIS-443312-scaleops-cognito</td><td class="num">1</td><td class="num">09-21</td></tr>
+<tr><td><code>eis-iac/terraform</code></td><td>fix/nojira-001-alb-eks-prefix-list</td><td class="num">1</td><td class="num">09-21</td></tr>
+<tr><td><code>nnl-japan/terraform</code></td><td>fix/GENESIS-442705-COEXT-108341-rds-storage-pgcron</td><td class="num">3</td><td class="num">09-17</td></tr>
+<tr><td><code>v20-sandbox/terraform</code></td><td>GENESIS-439567_opensearch-shared-irsa</td><td class="num">0</td><td class="num">09-03</td></tr>
+<tr><td><code>eis-alb</code></td><td>feat/COEXT-108811-istio-tg-header-condition</td><td class="num">0</td><td class="num">09-10</td></tr>
+<tr><td><code>eis-backup</code></td><td>fix/COEXT-108349-skip-merge-commit-lint</td><td class="num">0</td><td class="num">08-13</td></tr>
+<tr><td><code>eis-opensearch</code></td><td>fix/NOJIRA-001-bump-opensearch-2.11.1</td><td class="num">0</td><td class="num">08-31</td></tr>
+<tr><td><code>eis-workspaces</code></td><td>feat/COEXT-111852-workspaces-aws6</td><td class="num">2</td><td class="num">10-30</td></tr>
+<tr><td><code>template/client</code></td><td>feat/GENESIS-442705-rds-tunable-increment</td><td class="num">1</td><td class="num">09-17</td></tr>
+<tr><td><code>template/module</code></td><td>fix/NOJIRA-001-breaking-change-major-release</td><td class="num">0</td><td class="num">09-04</td></tr>
+</tbody></table></div>
+<p>On main but stale: <code>eis-fivetran-hybrid</code> is 19 behind, <code>eis-eks</code> and <code>pto-tooling/terraform</code> 16, and <code>credit-agricole/ansible</code> 12. <code>axa-japan/ansible</code> has the most dirty files (13). 26 repos are current and clean.</p>
+</section>
+
+<section id="hygiene">
+<h2><span class="n">16</span>Hygiene findings</h2>
+<p class="sub">Observations only. Nothing was changed or deleted.</p>
+<div class="note crit"><strong>Secret-looking files outside any repo.</strong> These are <code>.env</code> (141 B, Jun 16), <code>secrets.txt</code> (1.5 KB, Sep 30, plain text at the root) and <code>.worktrees/newacount-account.env.bak</code> (1.5 KB, Nov 4). Their contents were not opened. Confirm what they hold, move anything real into Vault, and delete the files.</div>
+<div class="tw"><table>
+<thead><tr><th>Finding</th><th>Size / count</th><th>Suggested action</th></tr></thead>
+<tbody>
+<tr><td>Shared <code>argocd/argocd</code> checkout on an old MR branch, 224 behind, dirty</td><td class="num">6 files</td><td>Check the branch's MR state, then return to main</td></tr>
+<tr><td>Prunable worktree registrations (paths deleted)</td><td class="num">43</td><td><code>git worktree prune</code> in argocd, eis-iac, CAA</td></tr>
+<tr><td>Old worktrees with unknown merge state</td><td class="num">~30</td><td>Remove the merged ones (5.3 GB total)</td></tr>
+<tr><td>Stale MR/Jira JSON dumps at the root (Sep 10)</td><td class="num">27 files · 265 KB</td><td>Delete</td></tr>
+<tr><td>Codex PNGs, empty <code>afa-dev.overrides.yml</code>, temp txt, <code>checkov-junit.xml</code></td><td class="num">~4 MB</td><td>Delete</td></tr>
+<tr><td><code>pnt-performance/terraform</code> empty init; <code>eis-genai-dev/terraform</code> no git</td><td class="num">2</td><td>Remove, or clone properly</td></tr>
+<tr><td><code>eis-agentcore</code> module has no git repo</td><td class="num">1</td><td>Create the GitLab project or move it</td></tr>
+<tr><td>Root files and <code>docs/</code> are in no repo</td><td class="num">8.4 MB</td><td>Decide on a backup home</td></tr>
+<tr><td>Unrelated side projects at the root</td><td class="num">~62 MB</td><td>Move <code>castai</code> and dsh/deepseek out of the iac tree</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="drift">
+<h2><span class="n">17</span>Where the existing docs are wrong</h2>
+<div class="tw"><table>
+<thead><tr><th>Doc</th><th>Says</th><th>Disk says</th></tr></thead>
+<tbody>
+<tr><td><code>docs/repo-map.md</code> (09-06)</td><td>62 repos, 29 modules</td><td>~71 clones, 37 modules. Missing: agentcore, bedrock, eventbridge, iam, inventory-readonly, lambda, step-functions, workspaces, and the pto-tooling project</td></tr>
+<tr><td>repo-map</td><td>ansible template v1.5.1; vault_agent_ssl v1.1.1; docker_install v1.3.0</td><td>v2.0.0; v1.4.0; v1.3.1</td></tr>
+<tr><td>repo-map</td><td>argocd: 1 worktree</td><td>2 (adds <code>argocd-wt-cli-proxy-api</code>)</td></tr>
+<tr><td><code>docs/ONBOARDING.md</code> (09-21)</td><td>3 harness hooks; pre-push runs gitlab-ci-local</td><td>17 hook scripts; pre-push runs commit-lint + pre-commit</td></tr>
+<tr><td><code>apps/appsets/README.md</code></td><td>clusters found via <code>cluster.yaml</code></td><td><code>cluster-component-config.yaml</code> (only bootstrap uses <code>cluster.yaml</code>)</td></tr>
+<tr><td>argocd README / appset comment</td><td>2 managed clusters; 155 Applications</td><td>10 clusters; 161 Applications</td></tr>
+<tr><td>account-vending README</td><td><code>bootstrap-beeslines.yaml</code></td><td><code>bootstrap-baseline.yaml</code></td></tr>
+<tr><td>Root provisioning runbook (07-01)</td><td>its own phase map</td><td>Superseded by the <code>onesuite-provisioning</code> kit (P0–P8). CLAUDE.md still says P0–P7</td></tr>
+<tr><td>2026-10-03 field guide</td><td>35 modules, 39 components, 26 used</td><td>37 modules; 42 components on main, 36 deployed</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="glossary">
+<h2><span class="n">18</span>Glossary</h2>
+<dl class="gl">
+<dt>Atlantis</dt><dd>Runs Terraform from MRs. Plan is automatic; <code>atlantis apply</code> is always typed by the user.</dd>
+<dt>Copier</dt><dd>Template engine behind client, POC, hub, cluster and Ansible repos. It tracks answers in <code>.copier-answers.yml</code>.</dd>
+<dt>eis-* module</dt><dd>EIS Terraform wrapper module, pinned by git tag.</dd>
+<dt>lower / upper</dt><dd>Environment tiers: lower = infra/dev/test, upper = share/stage/prod, often a separate account and region.</dd>
+<dt>bootstrap / core / services</dt><dd>The three Terraform states per stage: state bucket and roles, then network, then workloads.</dd>
+<dt>Hub / satellite</dt><dd>The hub region owns egress, S2S VPN and the TGW. Satellites attach and never own egress.</dd>
+<dt>pref-dev</dt><dd><code>aws0prefdeveks01</code>, the ArgoCD playground cluster in the pto-reference account.</dd>
+<dt>Playground-first</dt><dd>Change <code>components-playground</code> and prove it on pref-dev before <code>components</code>.</dd>
+<dt>ESO</dt><dd>External Secrets Operator, which syncs AWS Secrets Manager or Vault into Kubernetes.</dd>
+<dt>Observascope</dt><dd>EIS observability stack components (eis, oss, logging, exporters).</dd>
+<dt>P0–P8</dt><dd>OneSuite onboarding phases: prereqs, vend, scaffold, infra, dev, Ansible, ArgoCD, handoff, E2E.</dd>
+<dt>Account vending</dt><dd>Create the account, place it in the OU and bootstrap it with a StackSet (state bucket + Atlantis roles).</dd>
+<dt>PR-Agent</dt><dd>Self-hosted LLM MR reviewer on the hub, active on every repo in group iac.</dd>
+<dt>superagent</dt><dd>Headless Claude workers driven by Jira tickets, with an iac profile in the harness.</dd>
+<dt>Cockpit</dt><dd>Local UI at 127.0.0.1:8765. Each Jira write needs a user click plus a macOS dialog.</dd>
+<dt>Handoff gate</dt><dd>Stop hook requiring Approval, Cost and Disruption lines before any apply handoff.</dd>
+<dt>CAA</dt><dd>Credit Agricole, the reference client project.</dd>
+</dl>
+</section>
+
+<footer>
+<p><strong>How this was built.</strong> On 2026-11-05, four read-only agents each surveyed one area (Terraform, ArgoCD + Ansible, solutions + harness, non-repo content + git state). Headline counts were re-checked on disk with <code>ls</code> and <code>find</code>. No fetch, AWS call or GitLab call was made, and no secret files were opened. Tags, branches and "behind" counts reflect local clones. Items the agents could not confirm are left out or flagged as unverified.</p>
+</footer>
+</main>
+</div>

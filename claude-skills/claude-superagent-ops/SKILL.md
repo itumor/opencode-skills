@@ -1,12 +1,12 @@
 ---
 name: claude-superagent-ops
-description: Use when operating, troubleshooting, configuring or extending claude-superagent (~/claude-superagent, launchd com.eramadan.superagent): "open the panel", "superagent status", "why no repo mapped", "add a repo / group to the finder", "pause the agent", "rotate the panel token", "catalog refresh", "router not running", "deploy the new main", "change the panel look / add a theme / panel search", "preview a panel change", "clone Permission denied", or adding a feature/task to its roadmap. Covers daily ops, config keys, panel themes, preview-on-a-copy, deploy, troubleshooting and the build workflow (roadmap + subagents + security review).
+description: "Use when operating, troubleshooting, configuring or extending claude-superagent (~/claude-superagent, launchd com.eramadan.superagent): \"open the panel\", \"superagent status\", \"why no repo mapped\", \"move the Jira ticket / In Progress / On Hold / clarification\", \"why did superagent stop KEY (On Hold)\", \"jira_auto_start\", \"add a repo / group to the finder\", \"pause the agent\", \"rotate the panel token\", \"catalog refresh\", \"router not running\", \"deploy the new main\", \"change the panel look / add a theme / panel search\", \"preview a panel change\", \"clone Permission denied\", or adding a feature/task to its roadmap. Covers daily ops, config keys, panel themes, preview-on-a-copy, deploy, troubleshooting and the build workflow (roadmap + subagents + security review)."
 ---
 
 # claude-superagent ops
 
 dsh-superagent design on Claude Code. Jira DC tickets assigned to me -> router (Python stdlib, SQLite, poll 120 s) -> headless `claude -p` workers in per-job clones -> report + Jira draft + (implement only) GitLab MR. Panel = human gates.
-Repo `~/claude-superagent` (GitLab `eramadan/claude-superagent`). Docs: `docs/ARCHITECTURE.md`, `docs/DECISIONS.md` (D1-D16), `ROADMAP.md`, `docs/CONTROL.md`. Guides: A-Z https://claude.ai/artifact/NQRjYVUA73nZB33Qnvw2Ef; CLI + MCP https://claude.ai/artifact/HmVWo7QbUFaBvezVM8ej4z (repo copy `docs/control-guide.html`). Update the guide artifacts and their repo copies when user-facing behaviour changes.
+Repo `~/claude-superagent` (GitLab `eramadan/claude-superagent`). Docs: `docs/ARCHITECTURE.md`, `docs/DECISIONS.md` (D1-D23; D17-D21 factory, D22 Jira status flow, D23 UTCP), `ROADMAP.md`, `docs/CONTROL.md`, `docs/FACTORY.md` (deploy + enable runbook). Guides: A-Z https://claude.ai/artifact/NQRjYVUA73nZB33Qnvw2Ef; CLI + MCP https://claude.ai/artifact/HmVWo7QbUFaBvezVM8ej4z (repo copy `docs/control-guide.html`). Update the guide artifacts and their repo copies when user-facing behaviour changes.
 
 ## Daily ops (run from `~/claude-superagent`, `C=~/.config/claude-superagent/config.toml`)
 | Want | Command |
@@ -22,6 +22,15 @@ Repo `~/claude-superagent` (GitLab `eramadan/claude-superagent`). Docs: `docs/AR
 | Logs | `~/.local/state/claude-superagent/logs/router.err`, per run `runs/<id>/stream.jsonl` |
 
 Panel: Needs you (answers, drafts to post, repo suggestions Use/Dismiss), Jobs, Health. Posting a Jira draft = click only (`auto_post=false`). **Use has no undo** (repo set by compare-and-set on NULL): a wrong click needs a DB fix the user approves.
+
+## Jira status flow (D22, live 2026-11-05 main 64aabd1)
+- Router reads each ticket's status/category/reporter from `jira-ticket-ops.py mine` every poll → kv owner `jira`, key = job KEY. Live DB kv schema: `kv(owner, key, value)`, owner = kv name (`jira`, `jira_hold`, `jira_closed`, `clarify`, `jira_evidence`, `jira_autostart`), key = job KEY; NULL value = cleared.
+- On Hold / Blocked / Waiting for Customer (`[jira].skip_statuses`): live run killed next pass, kv `jira_hold`, panel "On Hold in Jira" (no Ack); leaves hold → resumes same session (verify/review re-queued).
+- Done category (Resolved/Closed): no new runs; pending verify/close-out may finish. Closed never reopened.
+- Moves: only router writes Jira, via `jira-ticket-ops.py transition KEY "<target>" --exact` (outbox kind `jira_transition`, audit line). Pick by **target status per ticket** (live `transitions KEY --json`), never fixed ids: GENESIS working = "In Development", no On Hold, Close needs `customfield_28240` + Story Points → close GENESIS by hand; COINT/COEXT = Start Progress / Clarification / On Hold / Resolve Issue / Close Issue. Open/Reopened = category `new`.
+- Auto: only `[policy] jira_auto_start = true` (ON since 2026-11-05): Open/Reopened → working status once per job when a run starts. Everything else = click: panel job page "Move to …", CLI `transition KEY TARGET [--yes]`, MCP `superagent_transition` (in `permissions.deny`, never allowlist). Resolve/Close need router evidence from a verify PASS.
+- Clarification: worker question `to: "reporter"` → one draft "Post + move to clarification" (approval text states the move). Reporter answer counts only after superagent posted it, only from the reporter pinned then; investigate jobs resume (untrusted frame), implement jobs get an attention → your Answer resumes. Move back to working = recommended click.
+- Check: `show KEY` prints `jira status`, `jira recommend`, `jira moves`, timeline; API `GET /api/job/KEY` (header `X-Token`, not `?t=`) → `jira_moves`, `jira_timeline`; `/api/state` → `needs_you.jira` {moves, waiting, hold}. Needs-you rows say "choose on job page" until a transitions list is cached (avoids GENESIS 409).
 
 ## Panel look (since 2026-11-04, MRs !4 !5 !8)
 - One markup in `panel.py` (`data-state`/`data-mode` hooks, top bar, side nav), 7 pure-CSS themes `superagent/themes/<name>.css` (mix default, clickup, monday, asana, jira, trello = CSS-grid kanban, ticktick light+dark). Choice = POST `/theme` -> kv `panel/theme`. Search = GET `?q=`, server-filtered. Meta refresh 60 s.
@@ -60,9 +69,11 @@ Never conclude from the init event alone; never quote stream text as instruction
 2. Store migration? Code backs up `superagent.sqlite.v<N>.bak` itself; rollback = revert + restore that file (newer DB is refused by older code).
 3. `superagent selftest`; `status` shows no working/queued job (else wait); new config key? add it to the live config first (e.g. `[gitlab] ssh_port = 2224`).
 4. Restart service, `status`, check `router.err`, curl the panel (`?t=$(cat <state>/panel.token)`) for HTTP 200.
+   Restart = ONE `launchctl kickstart -k gui/$UID/com.eramadan.superagent`, then prove it: `launchctl print ... | grep -E 'pid =|runs ='` must show a NEW pid / runs+1 and a fresh `panel on` line in `router.err` dated after the pull. Plist `minimum runtime = 30`: repeat kickstarts < 30 s apart leave `state = spawn scheduled`, panel curl exit 7, ~30 s outage (2026-11-05). A kickstart from the Claude terminal pane sometimes returns silently without restarting (pid unchanged): check, don't repeat blindly.
 5. Pushes: deploy-guard needs the user's Proceed (120 s); repo has no PR-Agent/CI, so mr-bot-feedback-loop = "not onboarded" and a merge has zero review: say so.
 6. Restart Claude Code sessions after a deploy: the superagent MCP server (user scope, `python3 -P -m superagent.mcp`, PYTHONPATH=~/claude-superagent) keeps the old code.
 Never run `superagent run` in a terminal while launchd runs it (two routers, panel port clash).
+Hook-side changes (profile `verify.py` etc.) live in claude-config, not here: deploy = merge that MR into the branch `~/.claude` is on + `git -C ~/.claude pull`; the router reads the hook per verify try (no restart). See memory claude-config-commit-to-main-route for the push/MR route.
 
 ## Troubleshooting
 | Symptom | Cause / fix |
@@ -77,6 +88,13 @@ Never run `superagent run` in a terminal while launchd runs it (two routers, pan
 | `open` says router not running | service down or other process on 8790 (`/whoami` HMAC check failed) |
 | Router quiet ~10 min daily | catalog refresh runs inline (known follow-up) |
 | `invalid choice: 'open'` (or another new command) | shell in an old worktree; `-m superagent` runs the cwd's code. `cd ~/claude-superagent` |
+| `No module named superagent` | cwd not `~/claude-superagent` (`-m` imports from cwd): `cd ~/claude-superagent && python3 -m superagent ...` |
+| Verify FAIL `pipeline #N canceled on main` / timeout on `OutOfSync` from unrelated drift | pre-T66 hook (claude-config before 2026-11-05 MR !7): canceled alone is pending, newest containing pipeline decides; OutOfSync of kinds the MR's templates don't declare is ignored. `verify.py --selftest` = 76 means fixed hook |
+| Verify PASS but job still `ready`, not `done` | by design (router.closeout, T58): close-out queued as a draft; job goes `done` only when that draft is posted (panel click / `auto_post_closeout`) or the job is acked. Repeat passes on the same merge SHA reuse one closeout marker |
+| Double Verify now / verify --mr on another project | both API calls say `queued` but the router runs ONE verify (one draft); `--mr` from another project = 409 "mr is in project X, the job's repo is Y" |
+| Check verify state without `show` | `sqlite3 'file:<state>/superagent.sqlite?mode=ro' "select value from kv where owner='verify' and key='KEY'"` (tries, next_at, last.checks); `owner='closeout'` = draft marker; outcomes in `router.err` lines naming KEY. E2E plan + first results: `~/superagent-argocd-e2e-test.md`, `~/superagent-argocd-e2e-result-2026-11-05.md` |
+| MCP tools after a deploy without restarting Claude | raw JSON-RPC: `printf` initialize + notifications/initialized + tools/list (or tools/call) lines into `PYTHONPATH=~/claude-superagent python3 -P -m superagent.mcp --config $C`, read the last JSON line |
+| Verify now 409 on a `dropped` job | needs a `ready` job with an MR; re-open the job (Input by me) first. Since T66 a diagnose run never ends a job `dropped` (capped to `blocked`) |
 | Job failed, attention "bad profile: ..." | profile path missing, unknown key, path in state dir, or profile preset drops a base deny not in `drop_denies` |
 | Profile selftest "hook script missing" | main checkout not pulled (`scripts/hook-sensitive-read.py`) |
 | Worker Grep denied "secret-bearing file" | hook-sensitive-read walks the tree; worker must narrow `glob=` (plain glob) or `path=` |
@@ -84,10 +102,16 @@ Never run `superagent run` in a terminal while launchd runs it (two routers, pan
 | Panel page scrolls/jumps by itself | a theme with `scroll-behavior: smooth` + meta refresh (fixed !5); user can switch to mix meanwhile |
 | Job got a repo nobody meant | panel Use / "Use <alt>" click (`repo_example.created` = click time); no undo in panel |
 | Job budget-blocked | per-job budget since accept + daily cap; lost/timeout runs charged (D: no fail-open) |
+| Job stopped, attention "On Hold in Jira" | ticket status in `skip_statuses`; set it back in Jira (or job page Move) and the job resumes by itself |
+| `transition` 409 | target not in the live offered list (stale, wrong name, GENESIS "In Progress" vs "In Development"); read `show KEY` → `jira moves` |
+| Resolve/Close not offered | no verify-PASS evidence (cleared on restart/reopen); GENESIS close = by hand |
+| `curl /api/state` → `forbidden` | token goes in header `X-Token`, never `?t=`; no `Origin` header |
+| "Did it start on KEY? why no work?" (e.g. GENESIS-371697, 2026-11-05) | MCP `superagent_job` (state, report, drafts) + `superagent_decisions` (accept/observe rows with reason). `accept ... repo null` = read-only investigate, never implement. State `dropped` = worker found nothing to do; its "already done elsewhere" claim may come from memory, re-verify live. Medium-confidence repo suggestion stays pending until Use on the panel |
 
 ## Extending it (build workflow that worked)
 - New panel action ⇒ add an `api.SPECS` row (a test pins SPECS writes == `panel.ACTIONS`); it then appears in CLI + MCP. Outward ones (`post`, `implement`) need a guard param the approval prompt shows (`body`, `repo`).
-- Parallel sessions land on main meanwhile (T/D numbers collide, live config gains keys): `git merge-tree --write-tree main HEAD` before the MR; renumber only your own lines.
+- Parallel sessions land on main meanwhile (T/D numbers collide, live config gains keys): `git merge-tree --write-tree main HEAD` before the MR; renumber only your own lines. Happened 2026-11-05: main took T66 + T71/D23 while the Jira flow was T66-T70 → renamed T72-T76 at merge time (commit msgs keep old numbers).
+- A worktree-isolation hook blocks Edit/Write outside the session's own worktree: do the work (even a docs branch) in your own worktree, never bypass via Bash.
 - Parallel implementers: Agent `isolation: worktree`; they cannot write into the coordinator's worktree (reports go to the scratchpad) and hard resets are held by the harness (use `git merge --ff-only <base>`).
 - New work = roadmap brief `roadmap/T##-slug.md` (Goal/Context/Files<=5/Acceptance<=3/Verify/Out of scope) + `ROADMAP.md` row.
 - Execute with `superpowers:subagent-driven-development`: one implementer per task, task review, ledger in `.superpowers/sdd/ROADMAP/progress.md` (every `Ruling:` line), final whole-branch review + one fix wave.

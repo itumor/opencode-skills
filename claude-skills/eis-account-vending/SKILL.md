@@ -32,7 +32,9 @@ cd account-vending
 - Advanced (testing only): org eis|eis-pnt, Jira issue, account name, email slug, IdC region, OU, parent id,
   SSO on/off + pairs `GROUP:name=PermissionSet,...`, role_default.
 - EIS default pairs (Markuss 2026-10-27): oc-team=AdministratorAccess, oc-team=ReadOnlyAccess,
-  aws_pnt_devops-support=CICDAccess, cloud-platform_adm=AdministratorAccess. Unknown group/set -> warning, skipped.
+  cloud-platform_adm=AdministratorAccess. (devops-support CICDAccess dropped 2026-11-05, 823039a: the
+  permission set uses customer-managed policy AWSEKSClusterConsoleReadOnly, created only by client bootstrap TF,
+  so on a fresh account it 404s "Not supported policy arn".) Unknown group/set -> warning, skipped.
 - EIS org group names END IN `@exigengroup.com` (`GROUP:oc-team@exigengroup.com=...`); plain `oc-team` only
   exists in eis-pnt. Symptom: `Principal 'GROUP:oc-team' not found in Identity Center` -> account vended with NO
   SSO grants (first EIS vend 2026-11-04, fixed fa9903b). Check a name live before using it:
@@ -50,6 +52,8 @@ cd account-vending
 - Recovery of a broken bootstrap: `CleanupStackSet.py --yes`, `DirectCleanup.py --yes` with a profile INSIDE the
   account, then `vend.py`. Cleanup refuses blank ACCOUNT_ID (blank after `copier recopy`; run vend.py first).
 - Fix answers: `.venv/bin/copier recopy --trust -d k=v accounts/<slug>`; advanced answers need `-d advanced=true` too.
+- Prove a branch's copier default with `copier copy --trust --defaults --vcs-ref=HEAD -d customer=.. -d project_prefix=.. -d environment=.. <abs path> <out>`; without it copier uses the latest tag (old template, no account.env).
+- Releases: default branch is `master`; `v1.0.0` (2026-11-05) sits on pre-!2 master `ef7d35c` (stale); `v2.0.0` = master `6b7927d` (!2 merged, current). Tag a new version after each merge (ask user for the number), never move a pushed tag. Agent cannot push tags (deploy-guard denies it): create the tag locally with literal `git -C <path>`, hand the user the push line.
 - Cosmetic: copier prints "No git tags found" + DirtyLocalWarning at start (local untagged template). Harmless.
 - Tests: `python3 vend.py --selftest` (stubbed); real E2E `tests/e2e.py` ONLY in eis-pnt (24 cases, ~12 min,
   report accounts/e2e/report.md) — login + command in memory `eis_pnt_org_vending_testbed`.

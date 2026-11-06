@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "gen": 7,
+  "files": {
+    "/users/eramadan/.claude/plans/can-we-create-a-lively-crescent.md": {
+      "path": "/Users/eramadan/.claude/plans/can-we-create-a-lively-crescent.md",
+      "session": "b4134e07-51b5-451a-a858-43b71003bb00",
+      "agent": "main",
+      "modifiedAt": "2026-11-05T09:16:35.204Z",
+      "leaseExpiresAt": "2026-11-05T09:46:35.204Z",
+      "released": true
+    },
+    "superagent/utcp.py": {
+      "path": "superagent/utcp.py",
+      "session": "b4134e07-51b5-451a-a858-43b71003bb00",
+      "agent": "main",
+      "modifiedAt": "2026-11-05T09:27:35.802Z",
+      "leaseExpiresAt": "2026-11-05T09:57:35.802Z",
+      "released": true
+    },
+    "superagent/config.py": {
+      "path": "superagent/config.py",
+      "session": "b4134e07-51b5-451a-a858-43b71003bb00",
+      "agent": "main",
+      "modifiedAt": "2026-11-05T09:27:41.929Z",
+      "leaseExpiresAt": "2026-11-05T09:57:41.929Z",
+      "released": true
+    },
+    "superagent/api.py": {
+      "path": "superagent/api.py",
+      "session": "b4134e07-51b5-451a-a858-43b71003bb00",
+      "agent": "main",
+      "modifiedAt": "2026-11-05T09:27:47.001Z",
+      "leaseExpiresAt": "2026-11-05T09:57:47.001Z",
+      "released": true
+    },
+    "superagent/cli.py": {
+      "path": "superagent/cli.py",
+      "session": "b4134e07-51b5-451a-a858-43b71003bb00",
+      "agent": "main",
+      "modifiedAt": "2026-11-05T09:27:47.832Z",
+      "leaseExpiresAt": "2026-11-05T09:57:47.832Z",
+      "released": true
+    },
+    "tests/test_utcp.py": {
+      "path": "tests/test_utcp.py",
+      "session": "b4134e07-51b5-451a-a858-43b71003bb00",
+      "agent": "main",
+      "modifiedAt": "2026-11-05T09:28:00.939Z",
+      "leaseExpiresAt": "2026-11-05T09:58:00.939Z",
+      "released": true
+    },
+    "/users/eramadan/.claude/skills/superagent-utcp/skill.md": {
+      "path": "/Users/eramadan/.claude/skills/superagent-utcp/SKILL.md",
+      "session": "b4134e07-51b5-451a-a858-43b71003bb00",
+      "agent": "main",
+      "modifiedAt": "2026-11-05T09:37:17.513Z",
+      "leaseExpiresAt": "2026-11-05T10:07:17.513Z",
+      "released": true
+    },
+    "/users/eramadan/.claude/skills/superagent-mcp/skill.md": {
+      "path": "/Users/eramadan/.claude/skills/superagent-mcp/SKILL.md",
+      "session": "b4134e07-51b5-451a-a858-43b71003bb00",
+      "agent": "main",
+      "modifiedAt": "2026-11-05T09:37:18.563Z",
+      "leaseExpiresAt": "2026-11-05T10:07:18.563Z",
+      "released": true
+    },
+    "/users/eramadan/.claude/skills/superagent-cli/skill.md": {
+      "path": "/Users/eramadan/.claude/skills/superagent-cli/SKILL.md",
+      "session": "b4134e07-51b5-451a-a858-43b71003bb00",
+      "agent": "main",
+      "modifiedAt": "2026-11-05T09:37:19.576Z",
+      "leaseExpiresAt": "2026-11-05T10:07:19.576Z",
+      "released": true
+    },
+    "/users/eramadan/.claude/scripts/superagent-utcp-e2e.py": {
+      "path": "/Users/eramadan/.claude/scripts/superagent-utcp-e2e.py",
+      "session": "b4134e07-51b5-451a-a858-43b71003bb00",
+      "agent": "main",
+      "modifiedAt": "2026-11-05T21:50:29.525Z",
+      "leaseExpiresAt": "2026-11-05T21:53:49.434Z",
+      "released": true
+    },
+    "projects/-users-eramadan-claude-superagent/memory/superagent-utcp-e2e.md": {
+      "path": "projects/-Users-eramadan-claude-superagent/memory/superagent-utcp-e2e.md",
+      "session": "b4134e07-51b5-451a-a858-43b71003bb00",
+      "agent": "main",
+      "modifiedAt": "2026-11-05T21:50:59.790Z",
+      "leaseExpiresAt": "2026-11-05T21:53:49.434Z",
+      "released": true
+    }
+  },
+  "sessions": {
+    "b4134e07-51b5-451a-a858-43b71003bb00": {
+      "lastSeen": "2026-11-05T21:53:49.434Z",
+      "ended": true
+    }
+  }
+}
