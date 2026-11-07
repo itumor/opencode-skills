@@ -53,6 +53,14 @@ Built from the 2026-10-10 Kodus removal (cluster aws0iacdeveks01, namespace mr-r
 - Worktrees: remove only clean ones with no unpushed commits. Push or keep the rest.
 - Memory notes and Claude artifacts describing the app: mark them historical rather than delete, unless asked.
 
+## Variant: app managed by an ArgoCD appset (iac/argocd/argocd, 2026-11-06 cli-proxy-api, MR !611)
+Use this instead of steps 3 and 6 when the app is an Argo Application, not a hand-run `helm install`.
+- First read the chart templates and README for `helm.sh/resource-policy: keep` and `Prune=false`; those objects (PVC, secrets) survive the cascade. List them to the user before they merge.
+- Undeploy MR: delete `clusters/<cluster>/<component>/` and the entry in that cluster's `cluster-component-config.yaml`; to keep the values, `git mv` them under `components-playground/<component>/disabled/`. Chart dir untouched. Appset polls git every 120 s.
+- To skip the wait: `kubectl --context iac-hub -n argocd delete application <component>-<cluster>` (finalizer cascades; user runs it, the guard blocks agent writes). The laptop `argocd` CLI has no server configured.
+- Then `kubectl --context <cluster-ctx> delete namespace <ns>` for the surviving PVC and empty ns (user go first; PVC may hold a token), verify PV gone and EBS count 0 (step 5/7).
+- Secrets Manager secret (30-day recovery, blocks same-name redeploy), ECR repo, and external sessions (claude.ai login) are separate optional asks.
+
 ## Guardrails
 - Deploy and prod guards block agent cluster writes. Give the user one command per block, with the literal `--context` ARN, and check each result with read-only `get`.
 - Each destructive step needs an explicit go: webhook delete, token revoke, PVC or namespace delete, repo deletes.

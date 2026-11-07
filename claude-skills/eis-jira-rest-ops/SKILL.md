@@ -23,6 +23,7 @@ description: Use when transitioning, logging or editing worklog time, commenting
 | Get worklog ids | `GET /issue/{KEY}/worklog` → each `worklogs[].id` |
 | Delete a worklog | `DELETE /issue/{KEY}/worklog/{worklogId}` → 204 |
 | Find own worklogs by date | `GET /search?jql=worklogAuthor = currentUser() AND worklogDate >= 2026-06-06 AND worklogDate <= 2026-06-08` → issues; then GET each issue's worklog list and filter `author.name` |
+| All issues I commented on | `GET /search?jql=issueFunction in commented("by eramadan")` (ScriptRunner, verified 2026-11-06); then `/issue/KEY/comment`, filter `author.name` |
 | Attach file | `POST /issue/{KEY}/attachments` multipart, header `X-Atlassian-Token: no-check`, field `file` → 200 |
 | Attach file once (replay-safe) | `~/.claude/scripts/jira-attach-once.sh KEY file...` skips names already attached; attach BEFORE the comment that links `[^name]` |
 | **Total effort on an epic/story** | `GET /issue/{KEY}?fields=timespent,aggregatetimespent` — `timespent` = that issue only; **`aggregatetimespent` = issue + all sub-tasks** (the number you want when quoting a whole workstream) |
