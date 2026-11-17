@@ -38,6 +38,8 @@ Each of these fails **without a useful error**. Every one of them bit the AFA wo
 - Phase 0 (`eis-onesuite-phase0-prereqs`) settled: CIDR block allocated, root DNS zone in place,
   IdC SAML metadata URL received (or a placeholder you will fill in before infra/services apply).
 
+> **Update 2026-11-09:** latest client tag is **`v3.0.1`** (file `copier.yaml`, 65 questions: 17 asked, 6 without default). A 6-value non-interactive render works (`copier copy --defaults --vcs-ref v3.0.1 --data ...`). Steps 2+3 are scripted by `solutions/account-vending/provision.py` (MR !5; memory `coint21712_provision_py_mr5_2026_11_09`). Template gotchas (commit lint rejects COINT, wrong default git host, stale atlantis.yaml): memory `client_template_provision_gotchas`. The v2.5.0 text below is the older manual path.
+>
 > **Template version — use `v2.5.0`.** Live latest tag as of 2026-08-20 and the tag the **AFA
 > reference render** used end-to-end (render → pre-commit green → pushed). Older `v2.0.0` examples
 > below are kept because that is what the axajp run and the onesuite-provisioning kit validated

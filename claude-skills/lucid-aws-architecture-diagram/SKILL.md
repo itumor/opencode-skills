@@ -66,3 +66,12 @@ Image shapes need `image.url` (https) and a top-level `stroke`. Verify each URL 
 - A line label at 0.5 on a line that crosses a container border lands ON the border: leave that hop unlabeled (`setText` '' on the line) or move the label.
 - Rectangle text renders centered even with `text-align:left` in the HTML; accept it or use a `text` shape inside.
 - Preflight warns icon-vs-own-caption (<60 px) and container-padding <80 px on every icon: expected with this layout, judge by the PNG export.
+
+## Plain flowchart of a script or code path (verified 2026-11-12, doc 2176067a, clusters !22)
+- Example generator `gen_flowchart_example.py`: three columns (inputs left x=40, flow centre x=440, exits/results right x=900), one row per step, row pitch 180. Shapes: `terminator` start/end/stop, `process` step, `decision`, `database`/`document` inputs and results, `note` for a side remark.
+- Came out clean on the first create with `use_assisted_layout: false`: every box has explicit font sizes (title 15 bold, detail 13), all straight lines pin both endpoints (bottom->top, right->left), only the two "rejoin" arrows are `elbow`.
+- Colour by role and say so in the subtitle (blue step, yellow decision, grey input, green result, red stop): the reader gets the legend without a legend box.
+- Decision exits: label the side exit `side: top`, the downward exit `side: bottom`; keep side-exit labels to 1-2 words (120 px gap fits about 10 characters; longer ones raise `line-label-span`).
+- Text: no `<` `>` raw, use `&lt;` `&gt;`; keep box detail to two short lines.
+- The connector named `lucid` in the MCP list may show "needs authentication" while the claude.ai Lucid connector tools (`mcp__<uuid>__lucid_*`) work: try those first.
+- The spec (~17 KB) must be typed into the tool call: generate to a file, Read it, paste.

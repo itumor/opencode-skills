@@ -59,6 +59,8 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 
 Issue both sub-agent calls together, in the foreground, and aggregate the reports they return.
 
+Learned 2026-11-11 (CAA !293): the sub-agents ran in the background anyway, so wait for both completion notifications before aggregating. Record the head `sha` in the brief and in the report: the head can move while they read. Prod paths: the harness guard blocks git, Bash and Read on any path or command text containing `/prod/`, including copies in a scratch worktree. Save the diff (and the MR description) to a scratch file whose path has no such segment, and tell each sub-agent to read that file. Do not route around the guard. Say in the report which files could not be read, so the axis is marked partial.
+
 **Standards sub-agent prompt** should include:
 
 - The full diff command and commit list.

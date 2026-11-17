@@ -20,7 +20,7 @@ No KEY -> ask for it. No intent -> infer from last comments (reply to last perso
 4. Write in voice from skill `eramadan-voice` (read it). Its rules win over generic caveman draft rules.
 5. Pick shape by intent:
    - **Reply / ask** -> `hey [~user] ,` + ask on line 1 + needed inputs as numbered list.
-   - **Status** -> `hey [~user]  I wanted to provide a quick update on ...:` + ` * ` bullets + next step.
+   - **Status** -> `hey [~user]  I wanted to provide a quick update on ...:` + 3 to 5 ` * ` bullets: done, outcome, blocker (if any), next step with owner. Technical detail goes behind one link, not in the comment (skill `conclusion-first-updates`).
    - **Done / close** -> `Done.` or result sentence + bullets (versions `a -> b`, IDs, backups, downtime) + `The task can now be closed.` + `CC:` if useful.
    - **Access request (EISHELP)** -> `[~agent]  Can you ...?` + group names in `{{ }}` + members + why, short.
    - **Chase** -> bare `[~user]` + one-line nudge, polite.
@@ -29,7 +29,7 @@ No KEY -> ask for it. No intent -> infer from last comments (reply to last perso
    - Mentions `[~username]` exist in ticket (take from comment authors / assignee), not guessed.
    - No "per Ebrahim", no em-dash chains, no `h3.` / big tables to a person, no filler.
    - IDs, hosts, versions, ticket keys exact. Secrets/keys never in body ("send via DM/Vault").
-   - Under ~10 lines unless evidence table was asked for.
+   - Under ~10 lines unless evidence table was asked for. Status update: 5 bullets max.
 
 ## Output
 One line: who it's to + intent. Then the draft as ONE fenced code block, Jira wiki markup, nothing else in the block.

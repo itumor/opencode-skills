@@ -60,6 +60,18 @@ cd account-vending
 - First real EIS-org vend: Markuss or Aurimas (mgmt 455655288646 admin), `--dry-run` first.
 - Selling it: manager wants "clone, one command, answer questions, done" — no copier/python knowledge in user doc.
 
+### Read-only E2E of the flow or its docs (no account created) — proven 2026-11-06/09 (COINT-21710)
+1. Fresh clone into scratch (never the shared checkout); `git describe --tags` = the documented tag.
+2. `python3 vend.py --selftest` (system python3 works; it uses .venv).
+3. Answers from a file (avoids flaky TTY prompts, see memory `expect_driving_copier_prompt_toolkit`):
+   `copier copy --trust --defaults --quiet --data-file a.yml "$PWD" accounts/<folder>`; check `account.env` (name, email, OU, `@exigengroup.com` pairs, SSO_REGION).
+4. Preview + confirm path: `echo n | ./vend accounts/<folder>` -> "Nothing changed". Never send `y`.
+   - EIS org without mgmt creds: `aws_profile: Audit` -> `DELEGATED_ADMIN` preview (create would fail).
+   - eis-pnt as mgmt (`SELF`): `advanced: true` + `org: eis-pnt` + `aws_profile: pnt-mgmt` with scratch `AWS_CONFIG_FILE` (`[sso-session eis-pnt]` https://eis-pnt.awsapps.com/start us-west-2 + profile 317401331042/AdministratorAccess); user approves `aws sso login --sso-session eis-pnt`.
+   - Re-run proof: data file for existing test account `vendtest-coint21667` (prefix vtst) -> `Account exists`, `already in the target OU`, `Already assigned`, StackSet `exists -> update`.
+5. The create step (Step 5) needs a real account: EIS = mgmt admin only (Markuss/Aurimas); eis-pnt = ask the user (account must later be closed by hand).
+Wiki drafts + publish workflow: memory `coint21710_account_vending_wiki_drafts_2026_11`, `feedback_wiki_docs_personal_draft_first`.
+
 Sections 0-7 below = legacy two-script flow (still works with old env files).
 
 ## 0. The one gotcha that blocks everyone — read first
@@ -201,3 +213,6 @@ Atlantis role), switching to `aws0<code>atlantis01` only after the toolchain Atl
 - System boto3 too old → always venv.
 - Non-`us-west-2` region + region absent from the two region-code maps → StackSet
   `Unable to get mapping for RegionCodes::<region>::code` + misnamed state bucket (see §4a).
+
+## Wiki docs for Step 1 (checked 2026-11-09)
+Live pages: draft 928030111 (COINT-21710, personal space), old "Step 1: Account Vending" 853151167 (legacy two-script flow, wrong now), Workflow 851742375, Step 2 853151174. Publish = replace 853151167 in place. Before publishing check: (1) Step 2 `role_default` must equal vending `ROLE_DEFAULT` (default `aws0iacdeveks01-atlantis`, a later change is blocked by the guard); (2) Lower and Upper accounts need different project codes (global bucket name `aws{region}{code}tfstate`, dry-run to prove); (3) Workflow page: only the management account can run Step 1, `eu-west-1` = `aws01`; (4) latest tag/date from `git ls-remote --tags origin`; (5) `find_existing_account` matches by name only. Read collapsed wiki sections via `plugins/viewstorage/viewpagestorage.action?pageId=<id>`. Details: memory `vending-wiki-step1-doc-review-2026-11-09`.

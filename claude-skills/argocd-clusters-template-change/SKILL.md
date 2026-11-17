@@ -215,6 +215,26 @@ one workstation, and it carries five answers that no longer exist
 
 ---
 
+## Self-hosted clusters (V2.3.0, 2026-11-12, COINT-21579)
+
+`V2.3.0` exists (cut from !21). It added, with defaults that keep every hub cluster unchanged:
+
+| Answer | Hub (default) | Self-hosted (upper) |
+|---|---|---|
+| `argocd_mode` | `hub`: `server` = cluster ARN, `syncProject: apps-allowed` | `self-hosted`: in-cluster `server`, `syncProject: platform` |
+| `image_registry` | default `<nexus_host>:5000` | default account ECR |
+| `nexus_host` | asked | `when:` hub only, not stored |
+| `aws_region` | | `eu-west-3` (code `aws11`), also in `tools/answers.py` |
+
+Plus `observascope-logging.storage.aws` (the chart does not render without it) and ALB defaults that follow `aws_region`.
+
+- `image_registry` is now a real answer: `aws0axajpdeveks01` already stored it, so its render changed to the live value. Five hub clusters run the shared registry live but render `<nexus_host>:5000` (fvdemo, iac, pref, v20, v20perf): pin `image_registry` in their answers before any `copier update`.
+- `storage.aws` bucket naming differs live on `aws0v20deveks01` / `aws0v20perfdeveks01` (same gap as the existing `bucketNames`).
+- Layer 3 shortcut used here: render every live cluster's answers at `origin/main` and at the branch (`--vcs-ref <sha>` / `--vcs-ref HEAD`), diff the two renders. Only the intended lines may appear.
+- `ci/mock-test.sh` has a self-hosted `eu-west-3` scenario; a self-hosted render must contain no `nexus` and no `us-west-2`.
+- `self-hosted/` (open in !22 as of 2026-11-12): `seed-cluster-repo.sh` + `repo-template/` for the per-cluster CodeCommit repo; outside `_subdirectory`, never rendered into a values tree. Its checks: `bash self-hosted/ci-test.sh`.
+- `gitlab-ci-local` must run from a plain clone, not from a worktree.
+
 ## Conventions
 
 - Branch `<TICKET>_<slug>`, off `origin/main`.

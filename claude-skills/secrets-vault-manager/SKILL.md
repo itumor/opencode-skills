@@ -369,6 +369,23 @@ Eliminate long-lived secrets in CI by using OIDC federation:
 
 ---
 
+## EIS Vault: access and moving a KV secret
+
+Vault `https://eqx-cvops-vault01.eqxdev.exigengroup.com`, KV v2 mount `secret2`.
+
+- **"X cannot see the path"**: path access is granted by the Vault team, not by the secret's creator. Open a COEXT ticket: read access, exact path, usernames, FAO Olha Isachenko (`oisachenko`). Example path 2026-11-12: `secret2/rnd/cicd/3.0/pto-tooling/workspaces/`.
+- **"Move a secret to another path"**: no move command for one KV secret (`vault secrets move` moves a whole mount). Copy, then delete:
+  ```bash
+  vault kv get -format=json -mount=secret2 <old-path> | jq '.data.data' | vault kv put -mount=secret2 <new-path> -
+  vault kv metadata delete -mount=secret2 <old-path>
+  ```
+  UI: open secret, JSON view, copy, create secret on the new path, paste JSON, save, delete the old one.
+  - Version history is not copied; new path starts at v1.
+  - Needs read + delete on old path, write on new path.
+  - Repoint readers (Terraform, ExternalSecret `remoteRef.key`) before the delete.
+  - Whole JSON on stdin (`-`) is safe; `key=-` keeps a trailing newline.
+- Standard KV v2 behaviour, not yet run against the EIS Vault (2026-11-12). Check the result with `vault kv get` before deleting the old path.
+
 ## Anti-Patterns
 
 | Anti-Pattern | Risk | Correct Approach |

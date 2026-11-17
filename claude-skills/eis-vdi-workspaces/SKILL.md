@@ -34,3 +34,10 @@ Reference build: COEXT-111852, PTO Tooling 811494801456, repo `iac/projects/aws/
   - **AD Connector (preferred, COEXT-111852 !12):** works over AWS->EIS 53/88/389, already open. OPS supplies a non-expiring service account delegated on an OU (read users/groups, create computer objects, join), the OU DN, and the password (Vault -> SM).
   - **Module wiring for the connector:** `eis-workspaces` with an `ad_connector` input and `create_default_role = false` (role already made by the first module instance). SSH 22 goes on `data.aws_workspaces_directory.<x>.workspace_security_group_id`; each directory has its own WorkSpaces SG.
   - DC list, firewall results and probe recipe: memory `eis_ad_exigengroup_dc_facts`. Probe from the WorkSpace subnet, never the laptop.
+
+## Stopped WorkSpace / billing mode (AUTO_STOP)
+1. Read-only first: `aws sts get-caller-identity --profile PTO-Tooling` (expired = `aws sso login --sso-session eis-idc --use-device-code > <scratchpad>/sso-login.out 2>&1` in background, give the user the code from that file), then `aws workspaces describe-workspaces --region us-west-2 --profile PTO-Tooling`.
+2. `State=STOPPED` + `RunningMode=AUTO_STOP` = AutoStop idle billing, not a fault. Connection status returns `UNKNOWN` for stopped AutoStop WorkSpaces (no history).
+3. Start: `aws workspaces start-workspaces --workspace-ids <id>` (state change, needs user yes) or the user connects with the WorkSpaces client.
+4. Stop billing for idle time: switch running mode in console/API, not rebuild. The module has `lifecycle.ignore_changes` on running_mode, so tfvars edits do NOT apply to an existing WorkSpace; a permanent change needs a module MR. Memory `workspaces-running-mode-switch-no-rebuild`. Cost approval first.
+5. Ticket IPs/users go stale after rebuilds. Check live before quoting.
