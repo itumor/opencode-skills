@@ -75,3 +75,11 @@ Image shapes need `image.url` (https) and a top-level `stroke`. Verify each URL 
 - Text: no `<` `>` raw, use `&lt;` `&gt;`; keep box detail to two short lines.
 - The connector named `lucid` in the MCP list may show "needs authentication" while the claude.ai Lucid connector tools (`mcp__<uuid>__lucid_*`) work: try those first.
 - The spec (~17 KB) must be typed into the tool call: generate to a file, Read it, paste.
+
+## Multi-page options deck: problem, one diagram per option, comparison table (verified 2026-11-16, doc f3668e5a)
+- Example generator `gen_options_deck_example.py`: 7 pages from one `Page` class (`icon`, `arrow`, `up`, `box`, `pros_cons`, `zone`). Per option page: LOWER and UPPER `rectangleContainer` zones, a row of icons with captions, arrows across the border, then three boxes below (Advantages, Disadvantages, First POC). Comparison page = `table` + a 3-phase flow of boxes.
+- Shapes used (all rendered): AWS `ArchAmazonSimpleStorageServiceAWS2024`, `ArchAmazonElasticContainerRegistryAWS2024`, `ArchAWSCodeCommitAWS2024`, `ArchAWSCodeBuildAWS2024`, `ArchAmazonEventBridgeAWS2024`, `ArchAmazonElasticKubernetesServiceAWS2024`; images (200 image/png) GitLab, Jenkins, Argo, Helm, Atlantis, Terraform, user (URLs in the generator).
+- **A spec over ~40 KB cannot be pasted from the main session** (the 52 KB spec took a subagent): spawn a general-purpose agent, tell it to load `lucid_create_diagram_from_specification` + `get_mcp_resource` with ToolSearch, read `lucid://skills/diagram-specification`, `Read` the spec file with `allow_large`, and pass its content verbatim; it returns documentId + preflight rule names. First call succeeded.
+- Compact the JSON first (`separators=(",", ":")`) and drop optional `stroke`/`assistedLayout: false` keys that equal the defaults.
+- Arrow labels land on a container border when the arrow crosses it: cosmetic, mention it in the hand-back.
+- Page-by-page `lucid_export_document_as_PNG` in one batch (4 calls) is enough to check; save the PNGs next to the ticket docs.

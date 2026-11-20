@@ -38,6 +38,8 @@ the user's own.
 
 UTCP clients: `GET /api/utcp` returns a UTCP manual of the same API (read tools by default, `[utcp] expose = "write"` adds plain writes, never post/implement/approve_plan/verify): skill `superagent-utcp`.
 
+**Open a worker session in Claude Desktop** (D24, since 2026-11-11): `desktop KEY`. The job's ended session opens in the Desktop app with its history (same session). 409 = no session yet, a run is going, job stopped, or already open there; 502 = the CLI's refusal text. It opens in `dontAsk` with the user's own settings: say "switch it to Ask before typing". While it is open the router holds the job (`queued`, attention "open in Claude Desktop"); archive the session in Desktop to give it back. `[desktop] auto_open = true` (live: on) does this by itself when a run ends.
+
 ## Scripts (REST API)
 Use `superagent.client.Client.from_config(config.load(client.DEFAULT_CONFIG), via="api")` → `.get("state")`,
 `.get("job/KEY")`, `.action("answer", key=..., text=...)`. Raw HTTP: token from `<state>/panel.token` in `X-Token`

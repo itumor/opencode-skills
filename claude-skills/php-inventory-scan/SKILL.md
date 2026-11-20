@@ -5,6 +5,8 @@ description: Use when asked to find PHP (or any package/runtime) in all VMs and 
 
 # PHP / package inventory (VMs + containers)
 
+Not PHP? For any other package or CVE (Apache httpd, Java, ...) with version ranges, host checks and a report, use skill `cve-pkg-scan` (`~/.claude/scripts/cve-pkg-scan.py`); it drives this script as its engine.
+
 Tools (all read-only except SSM collector): `~/.claude/scripts/caa-php-run.sh` (`check|control|discover|eks|ecr|ec2|hosts|report|all`), `php-inventory.sh` (modes `fleet discover eks eks-fleet ecr-fleet eks-audit images retry ec2 ec2-fleet`), `php-inventory-report.py`, `registry-cred-probe.py`. All have `--selftest`. Reference run: CAA, COEXT-112121, 2026-11-06 (0 PHP, 459/459 images).
 
 ## Quick start (any accounts / clusters)

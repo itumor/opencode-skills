@@ -213,3 +213,13 @@ original prose is preserved in `SOURCE-SPEC.md` for reference. The
 implementation choices made here (parallel isolated Agent calls,
 mechanical generator/critic split, frame-based branching) follow from
 that spec.
+
+## Learnings from real runs
+
+### 2026-11-19, COEXT-113294 (CAA CVE scoping, 5 frames)
+
+- **Works for scoping, not only for ideas.** The diverge pass surfaced the useful options (edge-level HTTP/2 off, per-host evidence receipts, rebuild base images). It also produced one dangerous shortcut, `-XX:UseAVX=2` as a Java4Shell mitigation. Its own rationale was "a legal skip", but nobody had checked it against the vendor advisory. Mark any mitigation from an ideation branch as unverified until a source confirms it.
+- **Deepen phase was skipped.** I scored and converged in the main thread instead of spawning one deepen agent per top-3 idea. Acceptable when the next step is fact-gathering, not more ideas. State that choice when you skip it.
+- **Diverge agents ran about 1 to 2 minutes each in parallel.** The main thread was free during that time. Each branch needed only the problem and the frame, nothing from the other branches.
+- **Follow-on fan-out:** the converged options turned into nine read-only inventory agents (one per environment slice). Reconcile their disagreements before publishing (see memory `feedback-cve-slice-conflicts-verify`).
+- **Fact-checking ideas:** in the speedrunner and attacker branches, a few ideas were conditional on facts nobody had yet ("if the pod runs on Intel", "if the ECR scan is on"). Turn each conditional into a check in the inventory brief.

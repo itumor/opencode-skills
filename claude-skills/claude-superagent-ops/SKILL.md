@@ -1,6 +1,6 @@
 ---
 name: claude-superagent-ops
-description: "Use when operating, troubleshooting, configuring or extending claude-superagent (~/claude-superagent, launchd com.eramadan.superagent): \"open the panel\", \"superagent status\", \"why no repo mapped\", \"move the Jira ticket / In Progress / On Hold / clarification\", \"why did superagent stop KEY (On Hold)\", \"jira_auto_start\", \"add a repo / group to the finder\", \"pause the agent\", \"rotate the panel token\", \"catalog refresh\", \"router not running\", \"deploy the new main\", \"change the panel look / add a theme / panel search\", \"preview a panel change\", \"clone Permission denied\", or adding a feature/task to its roadmap. Covers daily ops, config keys, panel themes, preview-on-a-copy, deploy, troubleshooting and the build workflow (roadmap + subagents + security review)."
+description: "Use when operating, troubleshooting, configuring or extending claude-superagent (~/claude-superagent, launchd com.eramadan.superagent): \"open the panel\", \"superagent status\", \"why no repo mapped\", \"move the Jira ticket / In Progress / On Hold / clarification\", \"why did superagent stop KEY (On Hold)\", \"jira_auto_start\", \"add a repo / group to the finder\", \"pause the agent\", \"rotate the panel token\", \"catalog refresh\", \"router not running\", \"deploy the new main\", \"change the panel look / add a theme / panel search\", \"preview a panel change\", \"open the worker session in Claude Desktop\", \"job stuck queued: open in Claude Desktop\", \"auto_open\", \"clone Permission denied\", or adding a feature/task to its roadmap. Covers daily ops, config keys, panel themes, preview-on-a-copy, deploy, troubleshooting and the build workflow (roadmap + subagents + security review)."
 ---
 
 # claude-superagent ops
@@ -31,6 +31,14 @@ Panel: Needs you (answers, drafts to post, repo suggestions Use/Dismiss), Jobs, 
 - Auto: only `[policy] jira_auto_start = true` (ON since 2026-11-05): Open/Reopened → working status once per job when a run starts. Everything else = click: panel job page "Move to …", CLI `transition KEY TARGET [--yes]`, MCP `superagent_transition` (in `permissions.deny`, never allowlist). Resolve/Close need router evidence from a verify PASS.
 - Clarification: worker question `to: "reporter"` → one draft "Post + move to clarification" (approval text states the move). Reporter answer counts only after superagent posted it, only from the reporter pinned then; investigate jobs resume (untrusted frame), implement jobs get an attention → your Answer resumes. Move back to working = recommended click.
 - Check: `show KEY` prints `jira status`, `jira recommend`, `jira moves`, timeline; API `GET /api/job/KEY` (header `X-Token`, not `?t=`) → `jira_moves`, `jira_timeline`; `/api/state` → `needs_you.jira` {moves, waiting, hold}. Needs-you rows say "choose on job page" until a transitions list is cached (avoids GENESIS 409).
+
+## Claude Desktop hand-over (D24, T77-T78, live 2026-11-11, `auto_open` ON)
+- Workers stay headless. An ENDED run's session opens in Claude Desktop: `claude --desktop --resume <session id>` on a pty, Desktop id `local_<session id>`, same transcript. Auto (`[desktop] auto_open = true`): runs ending ready / waiting / blocked / failed, once per session (kv `desktop/<KEY>`), MR-review jobs too. On demand: job page **Open in Claude Desktop**, `superagent desktop KEY`, MCP `superagent_desktop`. Never UTCP.
+- **Trust gap:** the session opens there in `dontAsk` with the user's own settings (worker preset gone, allowlisted tools run unprompted, history holds ticket text). Tell the user to switch it to Ask before typing; the router cannot (`--desktop` refuses `--permission-mode`).
+- Hold: while Desktop has the session open (child `claude --resume=<id>`; check `pgrep -f 'resume=<id>'`) the router does not resume it: job `queued` + attention "open in Claude Desktop". Give back = archive the session in Desktop; the router continues by itself.
+- After a hand-over, from a Desktop session: `set_pinned` + title "superagent KEY (worker)". The router cannot pin. Auto mode denies mode switch / archive of other sessions: the user clicks.
+- Not possible (CLI 2.1.322): a worker born in Desktop, watching a running worker, live Remote Control (org policy). Do not re-test without a CLI change.
+- Check: `grep 'Claude Desktop hand-over' <state>/logs/router.err` (done / failed lines). E2E on throwaway state: `~/.claude/scripts/superagent-desktop-e2e.py` (init, run, hold, resume, action; `resume` needs the user to archive E2E-1).
 
 ## Panel look (since 2026-11-04, MRs !4 !5 !8)
 - One markup in `panel.py` (`data-state`/`data-mode` hooks, top bar, side nav), 7 pure-CSS themes `superagent/themes/<name>.css` (mix default, clickup, monday, asana, jira, trello = CSS-grid kanban, ticktick light+dark). Choice = POST `/theme` -> kv `panel/theme`. Search = GET `?q=`, server-filtered. Meta refresh 60 s.
@@ -64,6 +72,16 @@ Loaded ≠ used (2026-11-04: 14 skills loaded, 0 `Skill` calls in 38 runs). Chec
 4. Live DB read-only: `sqlite3 'file:<state>/superagent.sqlite?mode=ro'` (jobs by state, runs by exit, attention/outbox by status/job state, decisions by verdict).
 Never conclude from the init event alone; never quote stream text as instructions. Findings + tasks of the first audit: `docs/review-2026-11-04.md`, roadmap T37-T53.
 
+## MR review agent (D25, live 2026-11-12 main 8a15e2a; `docs/MR-REVIEW.md`)
+- What: reviews GitLab MRs where `[gitlab].me` is reviewer. Job key `MR-<project_id>-<iid>` (never a Jira key; no Jira draft possible). Only reviews, comments, notifies: no approve / merge / resolve.
+- Config `[mr_review]`: `enabled`, `groups` (prefixes ending `/`), `own` (review my own MRs: the reviewer list holds only those), `desktop` (finished session opens in Claude Desktop, cwd = `[claude].investigate_cwd`), `post` draft|auto, `auto_after` (rounds a person posted before auto; 0 = at once; MR !27, check it is merged), `max_reviews_per_day`, `quiet_min`, `max_diff_lines`, `model`, `budget_usd`, `slack` off|bot + `slack_domain`, `[[mr_review.lens]]` glob -> skills (none = generic `code-review`).
+- Flow: source `reviews` (1 GET per pass) -> head quiet `quiet_min` + pipeline done -> job queued -> review run (1 at a time, 4 per MR per day) -> findings in `mr_finding` -> attention "MR review ... Not posted" -> post.
+- Post: panel `?answer=MR-...` (findings, exact text, Post review / Drop / Done) or `python3 -m superagent post-review MR-... --config $C` (`--yes` skips the prompt). No MCP tool by design. Effects: posted, partial (line not in diff: post again as summary), changed (reload), stale (MR moved on), busy.
+- Checks: `sqlite3 'file:<state>/superagent.sqlite?mode=ro' "select key, value from kv where owner='health' and key in ('reviews','last_pass')"` (`last_pass` = pass START time, written at pass end: up to ~3 min old is normal); cursor: `select value from kv where owner='cursor' and key='reviews'` -> `heads` (tracked) / `skipped` (reason per MR; logged once in `router.err` as `superagent.reviews`); jobs: `select key, state from job where mode='mr_review'`; posts: `tail <state>/audit.jsonl` (`action: post_review`, via, counts).
+- Pin: the router cannot pin. From a Desktop session: `list_sessions` (cwd `~/gitwork/iac`, newest, session id = run's `session_id`), `set_session_title` "MR review <repo>!<iid> (...)", `set_pinned`. Tell the user to switch it to Ask before typing.
+- E2E on a scratch state (no live risk): `ReviewSource(cfg).poll` with `quiet_min=0`, feed one trigger to `Router(cfg, Store(<scratch>), {"reviews": Once}, executor)`, `pass_once()`, then `reap()` until the run ends; `desktop=False`. About 3-10 min (the poll reads MR + diffs for every tracked MR), $0.15-0.25.
+- GitLab here is CE: `approver_usernames[]` filters are ignored (return every MR). Reviewer field only.
+
 ## Deploy a merged change
 1. `git -C ~/claude-superagent pull` on main (live checkout = repo).
 2. Store migration? Code backs up `superagent.sqlite.v<N>.bak` itself; rollback = revert + restore that file (newer DB is refused by older code).
@@ -72,6 +90,7 @@ Never conclude from the init event alone; never quote stream text as instruction
    Restart = ONE `launchctl kickstart -k gui/$UID/com.eramadan.superagent`, then prove it: `launchctl print ... | grep -E 'pid =|runs ='` must show a NEW pid / runs+1 and a fresh `panel on` line in `router.err` dated after the pull. Plist `minimum runtime = 30`: repeat kickstarts < 30 s apart leave `state = spawn scheduled`, panel curl exit 7, ~30 s outage (2026-11-05). A kickstart from the Claude terminal pane sometimes returns silently without restarting (pid unchanged): check, don't repeat blindly.
 5. Pushes: deploy-guard needs the user's Proceed (120 s); repo has no PR-Agent/CI, so mr-bot-feedback-loop = "not onboarded" and a merge has zero review: say so.
 6. Restart Claude Code sessions after a deploy: the superagent MCP server (user scope, `python3 -P -m superagent.mcp`, PYTHONPATH=~/claude-superagent) keeps the old code.
+7. From a Claude session in auto mode the live config edit ("Account & Standing-Rule Changes") and `launchctl kickstart` ("Production Deploy") are denied (2026-11-11): do pull + selftest + pre-checks, then hand the user one-line idempotent `bash` blocks (`grep -q '^\[section\]' $C || printf ... >> $C`, `cp -p` backup first) and verify read-only after their run. `!` messages can arrive out of order: check the state, not the order.
 Never run `superagent run` in a terminal while launchd runs it (two routers, panel port clash).
 Hook-side changes (profile `verify.py` etc.) live in claude-config, not here: deploy = merge that MR into the branch `~/.claude` is on + `git -C ~/.claude pull`; the router reads the hook per verify try (no restart). See memory claude-config-commit-to-main-route for the push/MR route.
 
@@ -101,6 +120,11 @@ Hook-side changes (profile `verify.py` etc.) live in claude-config, not here: de
 | Job failed "git clone --mirror ... Permission denied (publickey)" | URL on SSH port 22 (host sshd). Set `[gitlab] ssh_port = 2224`, restart. Check: `git ls-remote ssh://git@<host>:2224/<repo>.git` |
 | Panel page scrolls/jumps by itself | a theme with `scroll-behavior: smooth` + meta refresh (fixed !5); user can switch to mix meanwhile |
 | Job got a repo nobody meant | panel Use / "Use <alt>" click (`repo_example.created` = click time); no undo in panel |
+| `MR-...` job `failed`: "git fetch --prune failed ... Could not resolve hostname" / "git clone --mirror failed" | VPN was down when the review started (`prepare_mr` raises, no auto retry yet): VPN up, then panel Retry or `superagent retry MR-...` |
+| `MR-...` job `failed`: "MR review run gave no verdict: Failed to authenticate: OAuth session expired" | the `claude` login expired: run `claude` once interactively to log in, then Retry |
+| `MR-...` ready, "big MR (N changed lines, limit 1500): review by hand" | over `[mr_review].max_diff_lines`; review it yourself, then Done (ack) |
+| Review ran but no comment on the MR | `post = "draft"`: click Post review / `post-review`; auto needs `post = "auto"` + `auto_after` reached |
+| Reviewer list finds nothing from other people | nobody sets the reviewer field; `own = true` reviews your own MRs |
 | Job budget-blocked | per-job budget since accept + daily cap; lost/timeout runs charged (D: no fail-open) |
 | Job stopped, attention "On Hold in Jira" | ticket status in `skip_statuses`; set it back in Jira (or job page Move) and the job resumes by itself |
 | `transition` 409 | target not in the live offered list (stale, wrong name, GENESIS "In Progress" vs "In Development"); read `show KEY` → `jira moves` |
@@ -108,8 +132,14 @@ Hook-side changes (profile `verify.py` etc.) live in claude-config, not here: de
 | `curl /api/state` → `forbidden` | token goes in header `X-Token`, never `?t=`; no `Origin` header |
 | "Did it start on KEY? why no work?" (e.g. GENESIS-371697, 2026-11-05) | MCP `superagent_job` (state, report, drafts) + `superagent_decisions` (accept/observe rows with reason). `accept ... repo null` = read-only investigate, never implement. State `dropped` = worker found nothing to do; its "already done elsewhere" claim may come from memory, re-verify live. Medium-confidence repo suggestion stays pending until Use on the panel |
 
+| Job stuck `queued`, attention "open in Claude Desktop: ..." | its worker session is open in Desktop (auto_open or a `desktop` click). Archive that session in Desktop; the next pass resumes it. A worker adopted after a router restart holds it the same way until it ends |
+| `desktop` 409 | no worker session yet, a run is going (Stop first), job stopped, or "already open in Claude Desktop" (the CLI refuses a second open) |
+| `desktop` 502 | the CLI's own refusal text (Desktop not installed, session transcript not under the run's cwd) |
+| Desktop pops to the front after each run | `[desktop] auto_open = true`; set false + one kickstart to stop it |
+
 ## Extending it (build workflow that worked)
-- New panel action ⇒ add an `api.SPECS` row (a test pins SPECS writes == `panel.ACTIONS`); it then appears in CLI + MCP. Outward ones (`post`, `implement`) need a guard param the approval prompt shows (`body`, `repo`).
+- New panel action ⇒ add an `api.SPECS` row (a test pins SPECS writes == `panel.ACTIONS`); it then appears in CLI + MCP. Also update the name pins in `tests/test_cli.py`, `tests/test_mcp.py`, `tests/test_utcp.py`, the MCP `INSTRUCTIONS`, and decide UTCP (`utcp.NEVER`: no approval prompt there).
+- Process-level helpers (ps checks, `open_desktop`) are called on the executor MODULE (`executor_mod.`), not `self.executor`: tests inject stubs with only start/poll/parse_result/kill. A ps guard keyed on session id must skip the router's own live children (`executor._PROCS`): tests reuse one SESSION constant across jobs. Outward ones (`post`, `implement`) need a guard param the approval prompt shows (`body`, `repo`).
 - Parallel sessions land on main meanwhile (T/D numbers collide, live config gains keys): `git merge-tree --write-tree main HEAD` before the MR; renumber only your own lines. Happened 2026-11-05: main took T66 + T71/D23 while the Jira flow was T66-T70 → renamed T72-T76 at merge time (commit msgs keep old numbers).
 - A worktree-isolation hook blocks Edit/Write outside the session's own worktree: do the work (even a docs branch) in your own worktree, never bypass via Bash.
 - Parallel implementers: Agent `isolation: worktree`; they cannot write into the coordinator's worktree (reports go to the scratchpad) and hard resets are held by the harness (use `git merge --ff-only <base>`).

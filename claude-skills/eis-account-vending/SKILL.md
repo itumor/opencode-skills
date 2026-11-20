@@ -16,6 +16,14 @@ Reference run: **EISSAASDEV-302** (AXA Japan POC, `axajp`, 2026-06-17). See memo
 ## NEW FLOW (COINT-21667, MR !2 `feat/COINT-21667-single-idempotent-vend`; master after merge) — use this first
 
 Repo root `iac/solutions/account-vending`. User doc = `USER_GUIDE.md`; engineer doc = `RUNBOOK.md`.
+
+**One shot since COINT-21712 (MR !8, merged to master 2026-11-17).** `./vend` no longer stops after the account. For a Lower account one run does: step 0 prerequisites (`python3`, `aws` hard; `git glab pre-commit terraform tflint checkov jq` + VPN named if missing) -> questions + account -> `provision.py` (GitLab project, client template, Atlantis webhook, merge request; asks `Create it now?`) -> `rollout.py accounts/<folder>/account.env --apply` (plan + apply per layer, asks before each).
+- Gates stay: apply needs the merge request approved by a non-author; not approved = `Paused, not failed`, rerun `./vend accounts/<folder>` to carry on. `./vend --yes` covers the account only and prints the two follow-up commands. The tools never merge.
+- `rollout.py` exit codes: 0 done, 3 waiting for approval, 4 merge request already merged, 1 problem.
+- Jira issue question is under advanced settings (default `NOJIRA-0`).
+- Claude never answers `y` to an `Apply <layer>?` prompt and never runs `rollout.py --apply` (it posts apply comments): that run is the user's, in their Terminal tab. Cost approval in Jira is not checked by the tool.
+- Docs: `PROVISION_GUIDE.md`, `ROLLOUT_GUIDE.md`. Wiki: public Step 1-3 pages unchanged; additive drafts under personal page 932185059 (manual text verbatim + "Automated way" section).
+- Not proven live: the chain into the layer apply (stand-in tools only). eis-pnt can only plan/apply `lower-infra-bootstrap` (no hub TGW / DNS zone).
 ```bash
 git clone ssh://git@sfo-cvdevopsgit01.eqxdev.exigengroup.com:2224/iac/solutions/account-vending.git
 cd account-vending
@@ -216,3 +224,10 @@ Atlantis role), switching to `aws0<code>atlantis01` only after the toolchain Atl
 
 ## Wiki docs for Step 1 (checked 2026-11-09)
 Live pages: draft 928030111 (COINT-21710, personal space), old "Step 1: Account Vending" 853151167 (legacy two-script flow, wrong now), Workflow 851742375, Step 2 853151174. Publish = replace 853151167 in place. Before publishing check: (1) Step 2 `role_default` must equal vending `ROLE_DEFAULT` (default `aws0iacdeveks01-atlantis`, a later change is blocked by the guard); (2) Lower and Upper accounts need different project codes (global bucket name `aws{region}{code}tfstate`, dry-run to prove); (3) Workflow page: only the management account can run Step 1, `eu-west-1` = `aws01`; (4) latest tag/date from `git ls-remote --tags origin`; (5) `find_existing_account` matches by name only. Read collapsed wiki sections via `plugins/viewstorage/viewpagestorage.action?pageId=<id>`. Details: memory `vending-wiki-step1-doc-review-2026-11-09`.
+
+## Steps 2+3 after `./vend` and the questions now (COINT-21712, account-vending !8 reworked 2026-11-16, not merged)
+- Questionnaire for a **Lower** account: customer, prefix, environment, mgmt AWS profile, region, **Jira issue (default `NOJIRA-0`)**, **/21 CIDR** (aligned or blank), **IdC SAML URL** (blank = placeholder), advanced? Upper: same minus CIDR and URL. New account.env keys: `LOWER_CIDR`, `COGNITO_URL`.
+- `./vend` then runs `provision.py <account.env> --confirm --watch` (shows the plan, asks once, creates GitLab project + webhook + first MR, watches checks). `--yes` only prints the command. By hand: `python3 provision.py accounts/<f>/account.env --confirm --watch`; preview: `--dry-run`.
+- Defaults/derived: group `iac/projects/aws`; repo name from customer; AWS profile for the webhook value = the profile for account 182399717428 found in `~/.aws/config` (several match -> asked; the user's laptop has 3). Blank CIDR is asked; no terminal -> stops and names it.
+- Gaps: provision.py does not run `aws sso login` for that profile (log in first, else it fails at S5 after the pre-commit gates; rerun resumes); Upper refused; after step 3 only `lower-infra-bootstrap` plans on a fresh account, then `rollout.py` layer by layer.
+- `./vend` runs copier on the repo's newest TAG: new questions appear only after a new tag on master. Test uncommitted copier.yml changes via an untagged scratch git copy (memory `copier_recopy_answers_gotchas`).

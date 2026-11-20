@@ -34,6 +34,8 @@ Not Claude Code? A UTCP client can use the same API: `GET /api/utcp` (see skill 
 | **Post Jira comment** | `superagent_post_draft` (`id`, `body` = exact draft body) | outward, no undo |
 | **Move Jira status** (D22) | `superagent_transition` (`key`, `target` = one of `job.jira_moves.offered` from `superagent_job`) | outward; 409 for any other target; Close/Resolve only after a verify PASS (router evidence); GENESIS Close by hand |
 
+**Open a worker session in Claude Desktop** (D24, since 2026-11-11): `superagent_desktop` (`key`). Only when the user asks. Same session, whole history; 409 = no session, run going, stopped, or already open there. After the call: tell the user it opened in `dontAsk` with their own settings (switch to Ask before typing) and that the router holds the job until they archive that session. From a Desktop session also pin + title it (`set_pinned`, "superagent KEY (worker)"). A session started before the 2026-11-11 deploy lacks the tool: restart it.
+
 ## Rules
 - Check `job.actions` from `superagent_job` before acting (drafts are listed in `job.drafts`, not in `actions`); act
   only on what the user asked in chat.
