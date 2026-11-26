@@ -25,3 +25,11 @@ Folder: `<scratchpad>/council/` (absolute path in `artifacts`).
 Harness hook R2 denies approving an MR (CE self-approval satisfies Atlantis). Hand back MR links + head SHAs; user approves. Verify afterwards read-only: `glab api projects/<id>/merge_requests/<iid>/approvals` -> `approved:true`.
 
 Reference run: template/client !58/!59/!60 (GENESIS-432129), 2026-11-17. Memory: feedback_council_reviewers_need_evidence_pack_files.
+
+## Pack size (2026-11-17, docs task COINT-21712)
+- 20 files or fewer, each under ~250 lines, no images. Packs of 27 and 39 files gave "INVALID: no JSON object in reviewer answer" from all or some reviewers; 14-22 files gave valid answers (22 still lost one reviewer twice).
+- Merge small code excerpts into one file with `# --- file lines a-b ---` headers instead of adding files.
+- Include every code file the text cites: a missing `config.py` turned a correct statement into a "high" finding.
+- Reviewer hand-backs arrive as messages before the plugin's verdict: start fixing from them, publish once per batch.
+- Never clear the pack folder with `rm <glob>` (Blast Radius holds it): build each pack in a new folder.
+- Docs/user-guide tasks: skill `confluence-user-guide-from-code`.

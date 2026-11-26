@@ -52,4 +52,5 @@ Read every dumped file (`<src>-<note>.md`). For the Reviewer Guide, also read "R
 
 ## Gotchas seen (2026-10-19/20)
 - PR-Agent ticket compliance overclaims: on argocd !527 it said "Fully compliant" incl. "components/ MR second" + "cutover plan" that were NOT done. Never forward its verdict as sign-off; post a correction note naming what is not done and where the doc says so.
+- PR-Agent bash false positive (pto-reference/ansible !13, 2026-11-24, importance 8): it claimed unquoted `${3:+-d "$3"}` word-splits a JSON body. Wrong: quotes inside `${var:+word}` are honored. Reject with a 1-line test (`f(){ printf 'argc=%s\n' "$#"; }; g(){ f -X "$1" ${3:+-d "$3"} url; }; g POST /p '{"a":"x y"}'` -> argc=5), run on `/bin/bash` 3.2 and brew bash. The script then ran fine live.
 - No pipeline is not a failure in repos whose `workflow:` rules use `changes:` (argocd/argocd skips docs-only MRs): check `merge_requests/<iid>/pipelines` = [] + `detailed_merge_status: mergeable`, say so on the MR, and do not wait for one (a poll loop will just time out).

@@ -53,3 +53,20 @@ Also report `RedactedFields`: empty = `authorization`/`cookie` headers stored in
 Give a table: ACL, rules and modes, geo, logging. Cite the command output. Mention doc drift: `docs/terraform/custom/portals-cloudfront-waf-shield.md` says 28 geo entries.
 
 Related memory: `caa_edge_waf_live_inventory_20261008`, `caa_waf_sufficiency_escalation_20261008`.
+
+## 7. Rate limit and public scope (added 2026-11-20, COEXT-113348)
+
+Public internet = CloudFront distributions with aliases. ALBs and lower envs are not internet-facing in this tree. Check the live ACLs for rate rules (expected: none, as of 2026-11-20 code):
+```bash
+aws wafv2 get-web-acl --scope CLOUDFRONT --region us-east-1 --name <acl-name> --id <acl-id> \
+  --query 'WebACL.Rules[?Statement.RateBasedStatement].{Name:Name,Limit:Statement.RateBasedStatement.Limit,Key:Statement.RateBasedStatement.AggregateKeyType}' --output json
+```
+Empty `[]` = no rate rule on that ACL. Run it on all four ACLs, prod included. Expected as of 2026-11-23: stage DXP ACL gets `rate-per-ip` (count, 1000/5 min per IP) only after MR !297 is applied; before that, none. Count-mode rules show in the rule list but do not block. Check the mode in the output.
+
+Code side, in the terraform tree (prod-guard may block Bash on prod paths; if so, hand the user this command to run and paste the output):
+```bash
+grep -rn -E 'web_acl_arn|RateBased|rate_rules|eis-waf\.git' <terraform-root>/upper
+```
+Branch locations to check, since the DXP WAF is not on main: `COEXT-108811_stage-dxp-api-ingress` (stage DXP ACL, not applied as of 11-20), and the `coext-111052` worktree (prod attachment lines).
+
+eis-waf v1.0.5 rate rules are per-IP only (`aggregate_key_type = "IP"` hardcoded). A per-identity rule needs a module change first. See memory `coext_113348_dxp_rate_limit_public_waf_2026_11_20`.

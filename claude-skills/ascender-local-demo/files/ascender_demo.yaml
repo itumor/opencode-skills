@@ -1,0 +1,42 @@
+---
+# Ascender POC demo: prove SSM reach from the controller, report host state, optional tiny change.
+# Read-only by default. The only change is one MOTD file, off unless apply_motd=true. No restart, no reboot.
+# Always run with a limit (one host).
+- name: Ascender demo - host report over SSM
+  hosts: all
+  gather_facts: true
+  vars:
+    apply_motd: false
+    change_ticket: "NOJIRA-0"
+  tasks:
+    - name: Refuse to run on more than one host
+      ansible.builtin.assert:
+        that: ansible_play_hosts_all | length == 1
+        fail_msg: "Demo playbook runs on exactly one host: set a limit."
+      run_once: true
+
+    - name: Count pending package updates (read-only)
+      ansible.builtin.command: dnf -q check-update --cacheonly
+      register: pending
+      changed_when: false
+      failed_when: pending.rc not in [0, 100]
+      check_mode: false
+
+    - name: Report
+      ansible.builtin.debug:
+        msg:
+          - "host: {{ inventory_hostname }} ({{ ansible_host }})"
+          - "os: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "kernel: {{ ansible_kernel }}"
+          - "uptime days: {{ (ansible_uptime_seconds / 86400) | round(1) }}"
+          - "pending updates (cached): {{ pending.stdout_lines | select('match', '^\\S+\\s+\\S+\\s+\\S+$') | list | length }}"
+
+    - name: Write demo MOTD line (the only change)
+      ansible.builtin.copy:
+        dest: /etc/motd.d/ascender-demo
+        content: "Managed run via Ascender POC, ticket {{ change_ticket }}\n"
+        owner: root
+        group: root
+        mode: "0644"
+      become: true
+      when: apply_motd | bool

@@ -78,7 +78,7 @@ cd account-vending
    - eis-pnt as mgmt (`SELF`): `advanced: true` + `org: eis-pnt` + `aws_profile: pnt-mgmt` with scratch `AWS_CONFIG_FILE` (`[sso-session eis-pnt]` https://eis-pnt.awsapps.com/start us-west-2 + profile 317401331042/AdministratorAccess); user approves `aws sso login --sso-session eis-pnt`.
    - Re-run proof: data file for existing test account `vendtest-coint21667` (prefix vtst) -> `Account exists`, `already in the target OU`, `Already assigned`, StackSet `exists -> update`.
 5. The create step (Step 5) needs a real account: EIS = mgmt admin only (Markuss/Aurimas); eis-pnt = ask the user (account must later be closed by hand).
-Wiki drafts + publish workflow: memory `coint21710_account_vending_wiki_drafts_2026_11`, `feedback_wiki_docs_personal_draft_first`.
+Wiki drafts + publish workflow: memory `coint21710_account_vending_wiki_drafts_2026_11`, `feedback_wiki_docs_personal_draft_first`. Re-sync the "Automated way" part of a draft to current `origin/master` code (manual part untouched): `~/.claude/scripts/wiki-draft-swap-auto.sh <pageId> <expectedVersion> <auto.html> [--dry]`; recipe in memory `feedback_wiki_drafts_additive_keep_manual`. Drafts: overview 932185107, Step 1 932185109, Step 2 932185066, Step 3 932185067. Check claims against code, not the repo guides (cost approval is only a printed reminder; MR approval is checked before the first plan; the tool calls the layer rollout "step 4", the wiki calls it Step 3).
 
 Sections 0-7 below = legacy two-script flow (still works with old env files).
 

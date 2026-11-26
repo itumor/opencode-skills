@@ -76,6 +76,18 @@ Image shapes need `image.url` (https) and a top-level `stroke`. Verify each URL 
 - The connector named `lucid` in the MCP list may show "needs authentication" while the claude.ai Lucid connector tools (`mcp__<uuid>__lucid_*`) work: try those first.
 - The spec (~17 KB) must be typed into the tool call: generate to a file, Read it, paste.
 
+## Tool evaluation deck: as-is, landscape, capability matrix, score bars, target, fit table (verified 2026-11-24, doc af66871b)
+- Example generator `gen_tool_eval_deck_example.py` (`--selftest`): 6 pages. Landscape = 4 columns of coloured verdict boxes with a 44 px logo in the box corner; matrix = one `table` whose cell fill comes from the WORDING (`cell_fill()`: free = green, add-on/plugin/workaround = amber, paid/none = red); score page = one rectangle per tool with `w = score * 10`; fit table + recommendation / do-now / POC boxes + open-question boxes.
+- Clean on the first create at 67 KB via a general-purpose subagent (2 min). If the session restarts mid-create, `search` by title before relaunching: the first agent may or may not have created the doc.
+- Keyword colouring trap: "Yes (credential plugin)" turned amber because of the word "plugin". Check the legend words against every cell before generating.
+- **Table cells cannot be edited by script** (`inspect` shows only Text/ColumnWidths/RowHeights/FillColor for the whole table): a wrong cell colour means regenerate or fix by hand.
+- Line labels sit on container borders when the line crosses one: clear them with `setText({itemId:'<line id>', text:''})` and let the icon caption carry the meaning.
+- A text label inside a container top-left gets crossed by any arrow entering from above: keep it under about 250 px wide (`resizeBlock`) or enter from the side.
+- Logos (200 image/png): dashboard-icons `awx`, `ansible`, `semaphore`, `rundeck`, `kestra`, `apache-airflow`, `jenkins`, `gitlab`, `argo-cd`, `keycloak`, `hashicorp-vault`, `oracle`, `docker`; org avatar `https://github.com/<org>.png?size=200` (used for CIQ). 404/403: `windmill`, `foreman`, `stackstorm`, `cyberark`, `argo-workflows`.
+- AWS classes used: `ArchAWSSystemsManagerAWS2024`, `ArchAWSSecretsManagerAWS2024`, `ArchAWSIAMIdentityCenterAWS2024`, `ArchAmazonRDSAWS2024`, `ResElasticLoadBalancingApplicationLoadBalancerAWS2024`.
+- Put the data source and "not re-verified" in each page subtitle when the facts come from someone's research document.
+- Share link: `lucid_create_document_share_link(role='view')`, default `restrict_to_account: true`; only when the user asks.
+
 ## Multi-page options deck: problem, one diagram per option, comparison table (verified 2026-11-16, doc f3668e5a)
 - Example generator `gen_options_deck_example.py`: 7 pages from one `Page` class (`icon`, `arrow`, `up`, `box`, `pros_cons`, `zone`). Per option page: LOWER and UPPER `rectangleContainer` zones, a row of icons with captions, arrows across the border, then three boxes below (Advantages, Disadvantages, First POC). Comparison page = `table` + a 3-phase flow of boxes.
 - Shapes used (all rendered): AWS `ArchAmazonSimpleStorageServiceAWS2024`, `ArchAmazonElasticContainerRegistryAWS2024`, `ArchAWSCodeCommitAWS2024`, `ArchAWSCodeBuildAWS2024`, `ArchAmazonEventBridgeAWS2024`, `ArchAmazonElasticKubernetesServiceAWS2024`; images (200 image/png) GitLab, Jenkins, Argo, Helm, Atlantis, Terraform, user (URLs in the generator).
@@ -83,3 +95,23 @@ Image shapes need `image.url` (https) and a top-level `stroke`. Verify each URL 
 - Compact the JSON first (`separators=(",", ":")`) and drop optional `stroke`/`assistedLayout: false` keys that equal the defaults.
 - Arrow labels land on a container border when the arrow crosses it: cosmetic, mention it in the hand-back.
 - Page-by-page `lucid_export_document_as_PNG` in one batch (4 calls) is enough to check; save the PNGs next to the ticket docs.
+
+## Extending an existing Lucid document (script API, learned 2026-11-24)
+
+Use when the ask is "add a page / option to this Lucid doc" or "update the comparison table". Tools: `lucid_load_script_documentation` (`basecanvasediting`, then `pages`, `tables`, `text`, `images` as needed) + `lucid_run_script`. The `lucid` server may be listed as "needs authentication" while the UUID-named Lucid connector tools work - try `lucid_get_document_metadata` before reporting it unavailable.
+
+1. Read first: `getPages()` in its own script, then `read({})` per page; note the document `version` from metadata (rollback point for the user).
+2. New page in the same style: `skills.pages.addPage({title})`, `setPageOrder([...])`, then from the closest sibling page `copyPasteItems({itemIds, destinationPageId})` and use the returned `idMap`. Never start with plain `createBlock` boxes when sibling pages have icons and containers. Renumber later page titles with `setTitle`; page ids do not change.
+3. Rewrite text with `setText`. Trap: `setText` drops rich text (bold first line, per-line font sizes) and the text renders large. Re-apply: `skills.text.setItemTextStyle` (small size, bold false) then `setPartialTextStyle` on the first line (bold + bigger). Read the sibling's real sizes with `skills.text.getItemTextStyle(id)` first (this doc: captions 6/5, boxes 7/6, title 12/7). Line labels: `setText` on the line id works and keeps its size.
+4. Table needs a column: `createBlock` with `DefaultTableBlock` always gives 3x3. Use `skills.tables.create({rows, columns, columnWidths, cells, style:'headerRow'})` at the old table's x/y/size, then delete the old table (or `addColumn` + `setCells` on the existing one). Read old cell text from `inspect()` `properties.TextAreas` (`Cell_r,c`).
+5. Swap an image icon: `skills.images.setSource(id, url, 'fit')` validates the URL through Lucid's proxy and throws on failure. A throw rolls back the WHOLE script, so try URLs in a separate script with try/catch per URL. Known good: `https://raw.githubusercontent.com/opencontainers/artwork/main/oci/icon/color/oci-icon-color.png` (OCI). Known bad: the cncf/artwork ORAS icon PNG path.
+6. Lines: let Lucid route. A new line from a side note to an icon can cut through a neighbour icon (`lineThroughBlock`); for a note box prefer no line and say the relation in the text.
+7. Verify: `validateCanvas` in the same script as the edits, then `lucid_export_document_as_PNG` for each edited page and LOOK at it. `blockOverlap` between an icon and its caption text block is normal on copied pages.
+8. Script traps: `inspect()` results have no `labels` field for blocks (mapping it throws); process big reads inside the script and return compact data.
+
+## Wiki diagrams, 4 pages, one document (verified 2026-11-17, doc 98ea9ca3, COINT-21712)
+- `text: ""` on an AWS `namedShape` in the import spec does NOT remove the default label ("AWS Identity and Access Management (IAM)" drew over the caption). Fix after import: `basecanvasediting.setText({itemId, text: ''})` per icon (`getPages()` first, `navigateToPage(id)`; import ids are kept).
+- `lucid_export_document_as_PNG` saves the PNG on disk (path in the tool result under the session `tool-results/`): copy it and attach to Confluence, no screenshot needed.
+- A 30 KB spec: created through a general-purpose subagent that reads `spec.json` with `allow_large` and passes it verbatim; first call succeeded. Preflight `shape-clearance` / `container-padding` warnings for icon + caption layouts are expected: judge by the PNG.
+- Flow page that came out clean: snake of 8 boxes in 2 rows (row 2 right to left), inputs above, outputs below, straight lines with both endpoints pinned.
+- No AWS class needed for Organizations / Identity Center in `aws-2024/common`: plain rectangle or the IAM icon with a caption was enough.

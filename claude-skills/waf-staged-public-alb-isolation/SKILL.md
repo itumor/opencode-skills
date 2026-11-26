@@ -92,6 +92,13 @@ What is different from the plain public-ALB flow:
 - **Don't add the public TG ARN to `irsa_alb_target_group_arns`.** Terraform owns registrations via the `aws_autoscaling_attachment`; granting the alb-controller Register/DeregisterTargets on that TG is the only thing that makes an accidental argocd `alb.targetGroupARNs` (TargetGroupBinding) conflict actually reachable — reconciler vs attachment fight over targets.
 - **`eis-nlb` v2.0.0 facts** (verified in source): SG = TCP 80+443 from the tenant prefix lists only, no other ingress possible; it injects the ONLY ingress rules on the ALB SG (80/443 from NLB SG); `nlb_internal = false` is undocumented-but-working (AXA is the first external consumer); its known multi-prefix-list duplicate-SG-rule bug isn't triggered with a single list.
 
+## Reviewing a rule-add MR (rate rule, count first)
+
+- Read the module at its pinned tag with `git -C <module-repo> show <tag>:locals.tf` and `variables.tf`. Check the input schema against the tfvars (`name`, `priority`, `limit`, `action`). Make sure the new priority does not collide with managed groups.
+- Plan: `0 add / 1 change / 0 destroy` is the expected shape. Existing rules that show as `-`/`+` with the same name and priority are reordering noise; see [[waf-plan-reorder-noise]].
+- A priced rule add needs `cloud-cost-change-approval` before apply. Do not treat the MR's "about $X, to be confirmed" line as the approval.
+- Count mode protects nothing. Record the provisional limit and the block-mode follow-up in the review. Example: [[mr297-stage-dxp-waf-rate-rule-review-2026-11-20]].
+
 ## Common mistakes
 
 - Opening L3 (`["all"]`) before verifying the WAF live — defeats the gate.

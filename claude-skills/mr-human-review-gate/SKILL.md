@@ -40,6 +40,25 @@ A hurry, "looks good", or green scanners are not that reply.
 6. **After `reviewed`:** open or undraft the MR (description: skill `terse-mr-descriptions`),
    add `Self-review: author read full diff. Tested: <cmds>.` Write that line only after his reply.
 
+## Before the diff: is the branch base right?
+
+- `git -C <repo> fetch --prune origin`, then check any MR you believe exists: `glab api projects/<id>/merge_requests/<iid>`
+  (state, merged_at). A memory note or `ahead 1` of a tracking ref is not proof (2026-11-24: "open MR !52" had been
+  squash-merged a week earlier; the ref was stale because the fetch did not prune).
+- The sheet uses the three-dot diff (`origin/<default>...HEAD`), which is what GitLab shows. If it is larger than the
+  change (a 2-line edit showed 669 lines), the branch still carries a squash-merged MR: `git switch -c <new> origin/<default>`,
+  cherry-pick the commit, push with an explicit refspec, and review that branch instead.
+
+## If the repo has NO Atlantis and no CI (e.g. `feature-validation/terraform`)
+
+- Run the plan yourself, read-only, as evidence for the sheet: `terraform plan ... -lock=false -input=false`, output to a
+  scratch file, never `-out`. Put `N add / N change / N destroy` under `Tests`.
+- Tag every planned change MR-caused or environment-carried. Carried changes (addon version bumps on a shared cluster)
+  go under `Read first` with the choice: full apply, or `-target` on the MR's own resources.
+- **Do not write the apply command in the sheet message.** Single-line `bash` blocks get a Run button and it was clicked
+  before the MR existed. The command (absolute paths, `terraform -chdir=...`) comes only after `approved:true` on the
+  current head, with the `Approval:` / `Cost:` / `Disruption:` lines.
+
 ## If the repo has `atlantis.yaml`
 
 **Check first that this Atlantis plans drafts.** On `vending-test/terraform` !8 (bot `pnt_terraform_build`,
@@ -55,6 +74,11 @@ The gate then sits before undraft and reviewer assignment.
 
 Give the sheet anyway and say: `2 minutes to read. MR stays draft / unopened until "reviewed".`
 Then stop. The MR waiting an hour costs less than a reviewer finding what he did not read.
+
+"Give me the MR" after the sheet, without `reviewed` (2026-11-24, pto-reference/ansible !13): open it as
+**Draft, no reviewer**, also in a repo without Atlantis, and say the gate now sits at undraft. He may merge
+the draft himself; that is his act. Verify `state: merged` by API, then carry on. No self-review line was
+written on that MR, and none is added after the fact.
 
 ## Not a review
 
